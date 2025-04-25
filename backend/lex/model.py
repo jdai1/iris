@@ -1,4 +1,7 @@
 from dataclasses import dataclass, field
+from typing import Optional
+
+from pydantic import BaseModel
 
 
 @dataclass
@@ -17,7 +20,8 @@ class LLMArgs:
 
 @dataclass
 class Summary():
-    output: str | dict
+    output: Optional[str] = None
+    structured_output: Optional[BaseModel] = None  # structured output (if applicable)
     log: dict = field(default_factory=dict)
     raw: str = ""
     input_tokens: int = 0

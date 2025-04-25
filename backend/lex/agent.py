@@ -70,7 +70,7 @@ class Agent(ABC):
 
         if self.structure:
             summary = Summary(
-                output=self.llm.structured(response),
+                structured_output=self.llm.structured(response),
                 input_tokens=input_tokens,
                 output_tokens=output_tokens,
             )
@@ -111,7 +111,7 @@ class Agent(ABC):
         if self.structure:
             output = self.llm.structured(response)
             summary = Summary(
-                output=output, input_tokens=input_tokens, output_tokens=output_tokens
+                structured_output=output, input_tokens=input_tokens, output_tokens=output_tokens
             )
         else:
             text = self.llm.text(response)

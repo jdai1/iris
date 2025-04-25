@@ -1,168 +1,258 @@
 import asyncio
-from pprint import pprint
-from urllib.parse import urlparse
+from typing import List, Tuple
 from crawl4ai import AsyncWebCrawler
 from crawl4ai.async_configs import BrowserConfig, CrawlerRunConfig
 
-from util import add_https_if_missing, timing_decorator, is_id_or_static_resource, get_domain
-from agents.parse_entry import ParseEntryAgent, ParsedEntry
-from agents.classify_link import ClassifyLinkAgent, LinkClass
-from lex.llm import OpenAILLM
-from db import add_entries, query_entries, add_link, query_links
-from model import Entry
+from util import get_date_a_week_ago, get_date_today, parse_date, timing_decorator, print_err
+from url_utils import (
+    add_https_if_missing,
+    get_domain_and_path,
+    is_id_or_static_resource,
+    get_domain,
+    sanitize_url,
+)
+from agents.parse_entry import ParseEntryAgent, ParseEntryAgentOutput
+from agents.classify_domain import ClassifyDomainAgent, ClassifyDomainAgentOutput
+from db import (
+    Entry,
+    EntryDriver,
+    Domain,
+    SkippedDomain,
+    DomainDriver,
+    SkippedDomainDriver,
+)
+
+PAGE_TIMEOUT_MS = 10000
+
+entry_driver = EntryDriver()
+domain_driver = DomainDriver()
+skipped_domain_driver = SkippedDomainDriver()
 
 
-""" Crawls a URL via BFS: Returns all found blog posts, external domains, and externl links """
-
-
+""" Crawls a URL via BFS: Returns all found blog posts, external domains, and external links """
 @timing_decorator
-async def crawl(
-    url: str, link: LinkClass, batch_size: int = 10
-) -> tuple[list[Entry], list[str], list[str]]:
-    rss = []
-    browser_config = BrowserConfig()
-    run_config = CrawlerRunConfig()
-
-    internal_links: list[str] = [url]
+async def crawl_domain(
+    url: str, crawler: AsyncWebCrawler, run_config: CrawlerRunConfig, batch_size: int = 25
+) -> Tuple[List[Entry], List[str], List[str], List[str], List[str]]:
+    url = sanitize_url(url)
+    print(url)
+    entries = []
     external_links: list[str] = []
     external_domains: list[str] = []
+
+    parsed_internal_links: list[str] = []
+    skipped_internal_links: list[str] = []
+
+    internal_links_queue: list[str] = [url]
     visited: dict[str, bool] = {}
-    entry_parser = ParseEntryAgent(llm=OpenAILLM(model_name="gpt-4o-mini"))
 
-    async with AsyncWebCrawler(config=browser_config) as crawler:
-        # BFS through all internal (same-domain) links
-        while internal_links:
-            batch_urls = [
-                link
-                for link in internal_links[:batch_size]
-                if urlparse(link).path not in visited
-            ]
-            internal_links = internal_links[batch_size:]
+    # BFS through all internal (same-domain) links in batches
+    while internal_links_queue:
+        batch_urls = internal_links_queue[:batch_size]
+        internal_links_queue = internal_links_queue[batch_size:]
 
-            # run LLM to parse blog entry information form HTML
-            tasks = [
-                parse_blog_entry(url, entry_parser, run_config, crawler)
-                for url in batch_urls
-            ]
+        # run LLM to parse blog entry information form HTML
+        tasks = [
+            parse_entry(entry_url=entry_url, crawler=crawler, run_config=run_config)
+            for entry_url in batch_urls
+        ]
 
-            results = await asyncio.gather(*tasks)
-            for res in results:
-                current_url, entry, new_internal_links, new_external_links = res
+        # run tasks async
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        new_internal_links_batch = []
+        new_external_links_batch = []
+        new_external_domains_batch = []
+        new_entry_urls = []
+        new_skipped_urls = []
+        for current_url, res in zip(batch_urls, results):
+            if isinstance(res, BaseException):
+                print_err(f"Exception occurred: {res}")
+                continue
+            is_blog, entry, new_internal_links, new_external_links = res
 
-                # only append to rss if entry is a blog
-                if entry.blog:
-                    rss.append(entry)
+            if is_blog:
+                entries.append(entry)
+                new_entry_urls.append(entry.entry_url)
+            else:
+                new_skipped_urls.append(entry.entry_url)
 
-                internal_links += new_internal_links
-                external_links += new_external_links
+            assert current_url == sanitize_url(current_url)
+            assert current_url not in visited
 
-                new_external_links = [add_https_if_missing(link) for link in new_external_links]
-                external_domains = list(set(new_external_links + external_domains))
-                visited[urlparse(current_url).path] = True
+            # add current url to visited
+            visited[current_url] = True
 
-    print("total input tokens:", entry_parser.input_tokens)
-    print("total output_tokens:", entry_parser.output_tokens)
+            # NOTE: links are sanitized in parse_entry(...)
+            new_external_domains_batch += [get_domain(link) for link in new_external_links]
+            new_external_links_batch += [link for link in new_external_links]
+            new_internal_links_batch += [link for link in new_internal_links]
 
-    return rss, external_domains, external_links
+        new_internal_links_batch = [l for l in new_internal_links_batch if l not in visited]
+        internal_links_queue = list(set(new_internal_links_batch + internal_links_queue))
+        parsed_internal_links = list(set(new_entry_urls + parsed_internal_links))
+        skipped_internal_links = list(set(new_skipped_urls + skipped_internal_links))
+        external_links = list(set(new_external_links_batch + external_links))
+        external_domains = list(set(new_external_domains_batch + external_domains))
+
+        print(f"added {len(new_entry_urls)} blog posts: {new_entry_urls}")
+        print(f"skipped {len(new_skipped_urls)} blog posts: {new_skipped_urls}")
+        print("# internal links", len(internal_links_queue))
+        print("# external domains", len(external_domains))
+        print("# visited", len(visited))
+
+    return entries, external_domains, external_links, parsed_internal_links, skipped_internal_links
 
 
-""" Parses a single URL into a Blog Entry """
-async def parse_blog_entry(
-    url: str,
-    entry_parser: ParseEntryAgent,
-    run_config: CrawlerRunConfig,
-    crawler: AsyncWebCrawler,
-):
-    result = await crawler.arun(url=url, config=run_config)
-
+async def parse_entry(entry_url: str, crawler: AsyncWebCrawler, run_config: CrawlerRunConfig):
+    # crawl
+    print(add_https_if_missing(entry_url))
+    result = await crawler.arun(url=add_https_if_missing(entry_url), config=run_config, verbose=False)
     if not result.success:
-        raise Exception("Something went wrong when scraping this URL:", url)
+        raise Exception("Something went wrong when scraping this URL:", entry_url)
 
+    # grab internal / external links
     internal_links = [
-        link["href"]
+        sanitize_url(link["href"])
         for link in result.links.get("internal", [])
         if not is_id_or_static_resource(link["href"])
     ]
-    external_links = [link["href"] for link in result.links.get("external", [])]
+    print("ADDING THESE INTERNAL LINKS:")
+    print(internal_links)
+    external_links = [sanitize_url(link["href"]) for link in result.links.get("external", [])]
 
-    entry_parser_res = await entry_parser.async_call(url=url, html=result.cleaned_html)
-    parsed_entry: ParsedEntry = entry_parser_res.output  # type: ignore
+    # parse entry
+    entry_parser = ParseEntryAgent()
+    entry_parser_res = await entry_parser.async_call(url=entry_url, html=result.cleaned_html)
+    assert isinstance(entry_parser_res.structured_output, ParseEntryAgentOutput)
+    parsed_entry = entry_parser_res.structured_output  # type: ignore
 
     entry = Entry(
-        **parsed_entry.__dict__,
-        url=url,
+        title=parsed_entry.title,
+        summary=parsed_entry.summary,
+        topics=parsed_entry.topics,
+        author=parsed_entry.author,
+        date_published=parse_date(parsed_entry.date_published),
+        links=set(internal_links + external_links),
+        entry_url=get_domain_and_path(entry_url),
+        domain_url=get_domain(entry_url)
     )
 
-    return url, entry, internal_links, external_links
+    return parsed_entry.is_blog, entry, internal_links, external_links
 
 
-""" Classify links to 1) determine if we should crawl them and 2) create corresponding nodes on our map """
+async def classify_domain(url: str, crawler: AsyncWebCrawler, run_config: CrawlerRunConfig) -> ClassifyDomainAgentOutput:
+    url = add_https_if_missing(url)
+    crawler_res = await crawler.arun(url=url, config=run_config, verbose=False)
+
+    if not crawler_res.success:
+        raise Exception("Something went wrong when scraping this URL:", url)
+
+    domain_classifier_agent = ClassifyDomainAgent()
+    domain_classifier_res = (
+        await domain_classifier_agent.async_call(url=url, html=crawler_res.cleaned_html)
+    )
+
+    assert isinstance(domain_classifier_res.structured_output, ClassifyDomainAgentOutput)
+    return domain_classifier_res.structured_output
 
 
-async def parse_links(external_domains: list[str], batch_size: int = 50):
-    browser_config = BrowserConfig()
-    run_config = CrawlerRunConfig(page_timeout=5000)
-    link_classifier = ClassifyLinkAgent(llm=OpenAILLM(model_name="gpt-4o-mini"))
+async def classify_domains(
+    external_domains: list[str], crawler: AsyncWebCrawler, run_config: CrawlerRunConfig, batch_size: int = 50
+) -> list[ClassifyDomainAgentOutput]:
+    res = []
+    while external_domains:
+        batch_urls = external_domains[:batch_size]
+        external_domains = external_domains[batch_size:]
+        tasks = [classify_domain(url=url, crawler=crawler, run_config=run_config) for url in batch_urls]
+        res += await asyncio.gather(*tasks, return_exceptions=True)
+    return res
 
-    async def classify_single_link(
-        url: str,
-        link_classifier: ClassifyLinkAgent,
-        run_config: CrawlerRunConfig,
-        crawler: AsyncWebCrawler,
-    ) -> LinkClass:
-        url = add_https_if_missing(url)
-        result = await crawler.arun(url=url, config=run_config)
 
-        if not result.success:
-            raise Exception("Something went wrong when scraping this URL:", url)
+async def ingest(url: str):
+    # init crawler
+    crawler = AsyncWebCrawler(config=BrowserConfig())
+    run_config = CrawlerRunConfig(page_timeout=PAGE_TIMEOUT_MS, verbose=False)
+    await crawler.start()
 
-        link_classifier_res = await link_classifier.async_call(
-            url=url, html=result.cleaned_html
+    # pre-process url
+    url = sanitize_url(url)
+    domain_url = get_domain(url)
+
+    
+    if skipped_domain_driver.contains_skipped_domain(domain_url):
+        # NOTE: implicit assumption that skipped domains will not become domains of interest in the future
+        raise Exception(f"Skipping {domain_url} b/c it is already present in the SkippedDomain table")
+    
+    if domain_driver.contains_domain(domain_url):
+        domain = domain_driver.get_domain(domain_url)
+        if domain.date_last_scraped is not None and domain.date_last_scraped > get_date_a_week_ago():
+            raise Exception(f"Skipping {domain_url} b/c it was scraped less than a week ago")
+        
+    try:
+        domain_classifier_res = await classify_domain(url=url, crawler=crawler, run_config=run_config)
+    except BaseException as e:
+        raise Exception(f"Skipping {domain_url} b/c scraping failed with error: {e}")
+    
+    if not domain_classifier_res.blog or domain_classifier_res.entity != "person":
+        # if the url isn't a blog run by a person, add to skipped domains
+        skipped_domain_driver.add_skipped_domain(
+            domain=SkippedDomain(
+                domain_url=get_domain(url),
+                entity=domain_classifier_res.entity
+            )
         )
-        link_class: LinkClass = link_classifier_res.output  # type: ignore
-        pprint(link_class.__dict__)
-        return link_class
+        raise Exception(f"Skipping {domain_url} b/c this domain wasn't a blog run by an individual")
 
-    async with AsyncWebCrawler(config=browser_config) as crawler:
-        while external_domains:
-            batch_urls = external_domains[:batch_size]
-            external_domains = external_domains[batch_size:]
-            tasks = [
-                classify_single_link(url, link_classifier, run_config, crawler)
-                for url in batch_urls
-            ]
-            results = await asyncio.gather(*tasks, return_exceptions=True)
-            for res in results:
-                if isinstance(res, BaseException):
-                    continue
-                add_link(
-                    url=get_domain(res.url), entity=res.entity, name=res.name, blog=res.blog
-                )
+    response = input(f"\033[1;32mScraping: {domain_url} — Press Y to scrape and anything else to skip:\033[0m ").strip().upper()
+    if response != "Y":
+        return
+
+    # add domain to db
+    domain_driver.add_domain(Domain(
+        domain_url=domain_url,
+        entity=domain_classifier_res.entity,
+        name=domain_classifier_res.name,
+        external_domains=[],              # init to empty
+        external_links=[],                # init to empty
+        parsed_internal_links=[],         # init to empty
+        skipped_internal_links=[],        # init to empty
+        date_last_scraped=None,           # init to None
+    ))
+    
+    # crawl
+    entries, external_domains, external_links, parsed_internal_links, skipped_internal_links = await crawl_domain(url=url, crawler=crawler, run_config=run_config)
+
+    # add entries, external domains, & external links to db
+    print(f"Adding {len(entries)} entries")
+    entry_driver.add_entries(entries=entries)
+    domain_driver.update_external_links_and_domains(
+        domain_url=get_domain(url),
+        external_domains=external_domains,
+        external_links=external_links,
+        parsed_internal_links=parsed_internal_links,
+        skipped_internal_links=skipped_internal_links,
+        date_last_scraped=get_date_today()
+    )
+
+    await crawler.close()
+
+async def spider(url: str):
+    domain_url = get_domain(url)
+    if not domain_driver.contains_domain(domain_url):
+        print(f"Domain '{domain_url}' has not been processed yet -- Scraping now")
+        try:
+            await ingest(domain_url)
+        except Exception as e:
+            print(f"TERMINATING; Failed to scrape starting node ({domain_url}) b/c of error: {e}")
+            return
+    print("here")
+    domain = domain_driver.get_domain(domain_url)
+    for one_hop_domain_url in domain.external_domains:
+        try:
+            await ingest(url=one_hop_domain_url)
+        except Exception as e:
+            print(f"CONTINUING TO NEXT NODE; Failed to scrape a one-hop domain ({one_hop_domain_url}) b/c of error: {e}")
 
 
 if __name__ == "__main__":
-    asyncio.run(parse_links(external_domains=["benkuhn.net", "sriramk.com"]))
-
-    links = query_links()
-
-    for l in links:
-        print(l)
-    
-    # res, domains, links = asyncio.run(crawl(url))
-
-    # add_entries(entries=res)
-    # query_entries()
-
-    # pprint([r.__dict__ for r in res])
-
-    # add_link(url=url, external_domains=domains, external_links=links)
-    # query_links()
-
-    # pprint(domains)
-    # pprint(links)
-
-    # external_domains_from_ben_kuhn = links[0].external_domains.split(",")
-
-    # asyncio.run(classify(external_domains=["paulgraham.com/"]))
-
-# input one link. probably want to have human in the loop way of choosing the next ones.
+    asyncio.run(spider("https://bigdanzblog.wordpress.com/"))

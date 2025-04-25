@@ -1,95 +1,223 @@
-from typing import Optional
-from sqlalchemy import create_engine, Column, Integer, String, Boolean, ForeignKey
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker, relationship
-
-from model import Entry
+from typing import List, Optional
+from datetime import date
+from sqlalchemy import create_engine, ForeignKey, String, func
+from sqlalchemy.sql.expression import cast
+from sqlalchemy.orm import (
+    sessionmaker,
+    relationship,
+    declarative_base,
+    Mapped,
+    mapped_column,
+)
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.dialects.postgresql import ARRAY
+from sqlalchemy.dialects.postgresql.ext import to_tsvector, phraseto_tsquery
 
 Base = declarative_base()
+engine = create_engine(
+    "postgresql+psycopg2://postgres:1234@localhost:5432/postgres", echo=False
+)
+SessionMaker = sessionmaker(bind=engine)
 
 
-class DBEntry(Base):
-    __tablename__ = "Entries"
-    id = Column(Integer, primary_key=True)
-    name = Column(String, nullable=False)
-    summary = Column(String, nullable=False)
-    topics = Column(String, nullable=False)
-    author = Column(String, nullable=False)
-    date = Column(String, nullable=False)
-    url = Column(String, nullable=False)
-    link_id = Column(Integer, ForeignKey("Links.url"), nullable=True)
-    link = relationship("Link", back_populates="entries")
+class SkippedDomain(Base):
+    __tablename__ = "SkippedDomains"
+    domain_url: Mapped[str] = mapped_column(primary_key=True)
+    entity: Mapped[str] = mapped_column(nullable=False)
 
     def __repr__(self):
-        return f"<Entry(blog='{self.blog}', name={self.name}, date='{self.date}', topics='{self.topics}' author='{self.author}' url='{self.url}' summary='{self.summary}' >"
+        return f"<SkippedDomain(url='{self.domain_url}', entity='{self.entity}'>"
 
 
-class Link(Base):
-    __tablename__ = "Links"
-    url = Column(String, primary_key=True)
-    entity = Column(String, nullable=False)
-    name = Column(String, nullable=False)
-    blog = Column(Boolean, nullable=False)
-    parsed_blogs = Column(Boolean, nullable=False)
-    parsed_links = Column(Boolean, nullable=False)
-    external_domains = Column(String, nullable=True)
-    external_links = Column(String, nullable=True)
-
-    entries = relationship("DBEntry", back_populates="link")
-
-    def __repr__(self):
-        return f"<Entry(url='{self.url}', external_domains='{self.external_domains}', external_links='{self.external_links}'>"
-
-
-engine = create_engine("sqlite:///store.db", echo=True)
-Base.metadata.create_all(engine)
-Session = sessionmaker(bind=engine)
-
-
-def add_entries(
-    entries: list[Entry],
-):
-    db_entries = [DBEntry(**entry.__dict__) for entry in entries]
-    session = Session()
-    session.add_all(db_entries)
-    session.commit()
-    session.close()
-
-
-def query_entries():
-    session = Session()
-    for entry in session.query(DBEntry).all():
-        print(entry)
-    session.close()
-
-
-def add_link(
-    url: str,
-    entity: str,
-    name: str,
-    blog: bool,
-    external_domains: Optional[list[str]] = None,
-    external_links: Optional[list[str]] = None,
-):
-    link = Link(
-        url=url,
-        entity=entity,
-        name=name,
-        blog=blog,
-        parsed_blogs=False,
-        parsed_links=False,
-        external_domains=",".join(external_domains) if external_domains else None,
-        external_links=",".join(external_links) if external_links else None,
+class Domain(Base):
+    __tablename__ = "Domains"
+    domain_url: Mapped[str] = mapped_column(primary_key=True)
+    entity: Mapped[str] = mapped_column(nullable=False)
+    name: Mapped[str] = mapped_column(nullable=False)
+    external_domains: Mapped[List[str]] = mapped_column(
+        type_=ARRAY(String), nullable=False
     )
+    parsed_internal_links: Mapped[List[str]] = mapped_column(
+        type_=ARRAY(String), nullable=False
+    )
+    skipped_internal_links: Mapped[List[str]] = mapped_column(
+        type_=ARRAY(String), nullable=False
+    )
+    external_links: Mapped[List[str]] = mapped_column(
+        type_=ARRAY(String), nullable=False
+    )
+    date_last_scraped: Mapped[date] = mapped_column(nullable=True)
 
-    session = Session()
-    session.add(link)
-    session.commit()
-    session.close()
+    entries: Mapped[List["Entry"]] = relationship("Entry", back_populates="domain")
+
+    def __repr__(self):
+        return f"<Domain(url='{self.domain_url}', entity='{self.entity}', name='{self.name}' ...>"
 
 
-def query_links():
-    session = Session()
-    links = session.query(Link).all()
-    session.close()
-    return links
+class Entry(Base):
+    __tablename__ = "Entries"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    title: Mapped[str] = mapped_column(nullable=False)
+    summary: Mapped[str] = mapped_column(nullable=False)
+    topics: Mapped[List[str]] = mapped_column(type_=ARRAY(String), nullable=False)
+    author: Mapped[str] = mapped_column(nullable=False)
+    date_published: Mapped[date] = mapped_column(nullable=True)
+    links: Mapped[List[str]] = mapped_column(type_=ARRAY(String), nullable=False)
+    entry_url: Mapped[str] = mapped_column(nullable=False)
+    domain_url: Mapped[str] = mapped_column(ForeignKey("Domains.domain_url"))
+    domain: Mapped[Domain] = relationship("Domain", back_populates="entries")
+
+    def __repr__(self):
+        return f"<Entry(title={self.title}, date='{self.date_published}', topics='{self.topics}', author='{self.author}', url='{self.entry_url}', summary='{self.summary}', domain_url='{self.domain_url}'>"
+
+
+# This line needs to go after the definition of the above classes — the definition of the classes adds their data to the metadata.
+Base.metadata.create_all(engine)
+
+
+class EntryDriver:
+    def add_entries(self, entries: list[Entry]):
+        session = SessionMaker()
+        session.add_all(entries)
+        session.commit()
+        session.close()
+
+    def get_all_entries(self):
+        session = SessionMaker()
+        entries = session.query(Entry).all()
+        session.close()
+        return entries
+
+    def get_entries_for_domain(self, domain_url: str):
+        session = SessionMaker()
+        entries = session.query(Entry).filter(Entry.domain_url == domain_url).all()
+        session.close()
+        return entries
+
+    def search(self, query: str) -> list[Entry]:
+        session = SessionMaker()
+        tsvec = to_tsvector(
+            "english",
+            Entry.title
+            + " "
+            + Entry.summary
+            + " "
+            + cast(Entry.topics, String)
+            + " "
+            + Entry.author,
+        )
+        print(tsvec)
+        return (
+            session.query(Entry)
+            .filter(tsvec.op("@@")(phraseto_tsquery("english", query)))
+            .all()
+        )
+
+    def get_entries_that_link_to_url(self, url: str) -> Optional[list[Entry]]:
+        session = SessionMaker()
+        entries = session.query(Entry).filter(Entry.links.contains([url])).all()
+        session.close()
+        return entries
+
+    def clear(self):
+        session = SessionMaker()
+        session.query(Entry).delete()
+        session.commit()
+        session.close()
+
+
+class DomainDriver:
+    def contains_domain(self, domain_url: str) -> bool:
+        session = SessionMaker()
+        exists = session.query(Domain).get(domain_url) is not None
+        session.close()
+        return exists
+    
+    def add_domain(self, domain: Domain):
+        session = SessionMaker()
+        try:
+            session.add(domain)
+            session.commit()
+            session.close()
+        except IntegrityError:
+            raise Exception(f"DomainDriver: {domain.domain_url} already exists")
+
+    def get_all_domains(self) -> List[Domain]:
+        session = SessionMaker()
+        domains = session.query(Domain).all()
+        session.close()
+        return domains
+
+    def get_domain(self, domain_url: str) -> Domain:
+        session = SessionMaker()
+        domain = session.query(Domain).filter(Domain.domain_url == domain_url).all()[0]
+        session.close()
+        return domain
+
+    def update_external_links_and_domains(
+        self,
+        domain_url: str,
+        external_domains: List[str],
+        external_links: List[str],
+        parsed_internal_links: List[str],
+        skipped_internal_links: List[str],
+        date_last_scraped: date
+    ):
+        session = SessionMaker()
+        print(domain_url)
+        domain = session.query(Domain).filter(Domain.domain_url == domain_url).first()
+
+        if not domain:
+            raise Exception(f"DomainDriver: {domain_url} does not exist")
+        update_values = {}
+        update_values["external_domains"] = external_domains
+        update_values["external_links"] = external_links
+        update_values["parsed_internal_links"] = parsed_internal_links
+        update_values["skipped_internal_links"] = skipped_internal_links
+        update_values["date_last_scraped"] = date_last_scraped
+
+        # Update the link
+        session.query(Domain).filter(Domain.domain_url == domain_url).update(
+            update_values
+        )
+        session.commit()
+        session.close()
+
+    def clear(self):
+        session = SessionMaker()
+        session.query(Domain).delete()
+        session.commit()
+        session.close()
+
+
+class SkippedDomainDriver:
+    def contains_skipped_domain(self, domain_url: str) -> bool:
+        session = SessionMaker()
+        exists = session.query(SkippedDomain).get(domain_url) is not None
+        session.close()
+        return exists
+    
+    def add_skipped_domain(self, domain: SkippedDomain):
+        session = SessionMaker()
+        try:
+            session.add(domain)
+            session.commit()
+            session.close()
+        except IntegrityError:
+            raise Exception(f"DomainDriver: {domain.domain_url} already exists")
+
+    def get_all_skipped_domains(self) -> List[SkippedDomain]:
+        session = SessionMaker()
+        skipped_domains = session.query(SkippedDomain).all()
+        session.close()
+        return skipped_domains
+
+    def clear(self):
+        session = SessionMaker()
+        session.query(SkippedDomain).delete()
+        session.commit()
+        session.close()
+
+def drop_tables_and_recreate():
+    Base.metadata.drop_all(engine)
+    Base.metadata.create_all(engine)

@@ -82,7 +82,7 @@ class LLM(ABC):
         pass
 
     @abstractmethod
-    def structured(self, response: Any) -> dict:
+    def structured(self, response: Any) -> BaseModel:
         pass
 
 
@@ -250,5 +250,5 @@ class OpenAILLM(LLM):
     def text(self, response: openai.types.Completion) -> str:
         return response.choices[0].message.content  # type: ignore
 
-    def structured(self, response: openai.types.Completion) -> dict:
+    def structured(self, response: openai.types.Completion) -> BaseModel:
         return response.choices[0].message.parsed  # type: ignore

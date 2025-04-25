@@ -1,5 +1,11 @@
 import time
-from urllib.parse import urlparse
+from typing import Any
+import datetime
+
+def print_err(message: Any):
+    red = "\033[91m"
+    reset = "\033[0m"
+    print(f"{red}❌ {message}{reset}")
 
 def timing_decorator(func):
     async def wrapper(*args, **kwargs):
@@ -12,24 +18,15 @@ def timing_decorator(func):
     return wrapper
 
 
-""" Filter out all static resources and ID links while webscraping """
-def is_id_or_static_resource(url: str) -> bool:
-    return "#" in url or url.endswith(("png", "jpeg", "jpg", "pdf", "xml", "ipynb", "py"))
+def parse_date(date_str: str) -> datetime.date | None:
+    try:
+        return datetime.datetime.strptime(date_str, "%Y-%m-%d").date()
+    except:
+        return None
 
 
-def add_https_if_missing(url: str):
-    return "https://" + url if not url.startswith(("http://", "https://")) else url
+def get_date_today() -> datetime.date:
+    return datetime.date.today()
 
-
-def get_domain(url: str):
-    netloc = urlparse(add_https_if_missing(url)).netloc
-    if netloc.startswith("www."):
-        netloc = netloc[4:]
-
-    # print(get_domain("www.benkuhn.net")) => benkuhn.net
-    # print(get_domain("https://benkuhn.net")) => benkuhn.net
-    # print(get_domain("https://www.benkuhn.net")) => benkuhn.net
-    # print(get_domain("https://engineering.ramp.com/")) => engineering.ramp.com
-        
-    return netloc
-    
+def get_date_a_week_ago() -> datetime.date:
+    return datetime.date.today() - datetime.timedelta(days=7)

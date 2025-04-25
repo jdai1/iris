@@ -1,17 +1,18 @@
 from typing import Literal
 from pydantic import BaseModel
 from lex.agent import Agent
-from lex.llm import LLM
+from lex.llm import LLM, OpenAILLM
 
-class LinkClass(BaseModel):
+class ClassifyDomainAgentOutput(BaseModel):
     url: str
     entity: Literal["person", "company", "organization", "government", "school"]
     name: str
     blog: bool
 
-class ClassifyLinkAgent(Agent):
-    def __init__(self, llm: LLM, **kwargs):
-        super().__init__(llm=llm, structure=LinkClass, **kwargs)
+class ClassifyDomainAgent(Agent):
+    def __init__(self, llm: LLM = OpenAILLM(model_name="gpt-4.1-mini-2025-04-14"), **kwargs):
+        super().__init__(llm=llm, structure=ClassifyDomainAgentOutput, **kwargs)
+
 
     def get_user_prompt(self, url: str, html: str):
         return f"""
@@ -26,8 +27,8 @@ class ClassifyLinkAgent(Agent):
         You've been provided the URL and HTML for a web page with content. Determine the following:
         - url: The URL
         - entity: The type of the entity represented by the website; if not readily obvious, it is likely an individual
-        - name: The name of the entity
-        - blog: Whether or not the webpage has consumable content in the form of blog posts
+        - name: The name of the entity that is writing. If none is present, output "NONE"
+        - blog: Whether or not the website is a blog
         """
 
     def get_system_prompt(self, url: str, html: str):
