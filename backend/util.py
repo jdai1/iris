@@ -7,6 +7,11 @@ def print_err(message: Any):
     reset = "\033[0m"
     print(f"{red}❌ {message}{reset}")
 
+def print_warn(message: Any):
+    yellow = "\033[93m"
+    reset = "\033[0m"
+    print(f"{yellow}⚠️  {message}{reset}")
+
 def timing_decorator(func):
     async def wrapper(*args, **kwargs):
         start_time = time.time()
@@ -30,3 +35,6 @@ def get_date_today() -> datetime.date:
 
 def get_date_a_week_ago() -> datetime.date:
     return datetime.date.today() - datetime.timedelta(days=7)
+
+def is_timeout_message(msg: str) -> bool:
+    return "Timeout" in msg and "exceeded" in msg

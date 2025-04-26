@@ -24,9 +24,10 @@ class SkippedDomain(Base):
     __tablename__ = "SkippedDomains"
     domain_url: Mapped[str] = mapped_column(primary_key=True)
     entity: Mapped[str] = mapped_column(nullable=False)
+    reason: Mapped[str] = mapped_column(nullable=False)
 
     def __repr__(self):
-        return f"<SkippedDomain(url='{self.domain_url}', entity='{self.entity}'>"
+        return f"<SkippedDomain(url='{self.domain_url}', entity='{self.entity}' reason='{self.reason}'>"
 
 
 class Domain(Base):

@@ -13,6 +13,7 @@ def inspect_domain(domain_url: str):
     print(domain.external_links)
     print(domain.parsed_internal_links)
     print(domain.skipped_internal_links)
+    print(domain.date_last_scraped)
 
     for l in domain.external_links:
         assert get_domain(l) in domain.external_domains
@@ -38,10 +39,11 @@ def inspect_entries_that_link_to_this_url(url: str):
 
 
 if __name__ == "__main__":
-    inspect_domain("thume.ca")
+    # inspect_domain("bigdanzblog.wordpress.com")
     # inspect_entries_that_link_to_this_url("https://akka.io")
+    # inspect_entries_of_domain("bigdanzblog.wordpress.com")
     # entry_driver.clear()
-    # ents = entry_driver.get_all_entries()
+    ents = entry_driver.get_all_entries()
     # ents = entry_driver.search("eye tracking")
-    # for e in ents:
-        # print(e.title)
+    for e in ents:
+        print(e.entry_url)

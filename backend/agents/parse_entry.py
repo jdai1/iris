@@ -29,7 +29,10 @@ class ParseEntryAgent(Agent):
         A blog post should discuss a technical topic, provide advice, tell anecdotes, review a piece of media etc. In general, anything that presents an opinion on something (technical or not) should be classified as a blog post and processed.
         
         You've been provided the HTML for a web page with content. Determine the following:
-        - is_blog: Is the HTML representative of a standalone blog post? Only fill the remainder of the fields if your answer to this question is YES
+        - is_blog: 
+            - Is the HTML representative of a standalone blog post? Only fill the remainder of the fields if your answer to this question is YES
+            - If the HTML is only representative of a part of a blog (e.g. a teaser or a tag), then it is likely that the blog is located at a separate URL on the website. In this case, your answer should be NO.
+        
 
         If the HTML is not representative of a blog, fill in the remaining fields with empty strings. Otherwise, proceed:
         - name: What is the title?
@@ -37,6 +40,8 @@ class ParseEntryAgent(Agent):
         - topics: What are some key relevant topics? Output a list of strings.
         - author: Who wrote the article?
         - date_published: When was the article published? If unknown or invalid, leave empty. Make sure that if you output a date, that it is in the format "YYYY-MM-DD".
+
+        In any part of your response, rpelace null bytes with spaces. You are not allowed to include null bytes in your response.
         """
 
     def get_system_prompt(self, url: str, html: str):

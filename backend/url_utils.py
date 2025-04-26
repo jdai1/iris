@@ -38,3 +38,16 @@ def sanitize_url(url: str):
     url = add_https_if_missing(url)
     url = url.rstrip("/")
     return url
+
+# NOTE: Crawl4ai defines an interal link to be any link that shares the same domain or has a parent domain
+# encompassing the subdomain. e.g. if it crawled jdai1.github.io and found github.io, it would
+# consider that an internal link 
+# 
+# We want to define a more strict definition based on netloc
+
+def is_from_same_domain(url_a: str, url_b: str) -> bool:
+    return get_domain(url_a) == get_domain(url_b)
+
+
+def is_valid_internal_link(entry_url: str, href: str) -> bool:
+    return not is_id_or_static_resource(href) and is_from_same_domain(entry_url, href)
