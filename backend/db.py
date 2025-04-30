@@ -24,6 +24,9 @@ class ExcludedDomain(Base):
     __tablename__ = "ExcludedDomains"
     domain_url: Mapped[str] = mapped_column(primary_key=True)
     entity: Mapped[str] = mapped_column(nullable=False)
+    alias_domains: Mapped[List[str]] = mapped_column(
+        type_=ARRAY(String), nullable=False
+    )
     reason: Mapped[str] = mapped_column(nullable=False)
 
     def __repr__(self):
@@ -35,6 +38,9 @@ class Domain(Base):
     domain_url: Mapped[str] = mapped_column(primary_key=True)
     entity: Mapped[str] = mapped_column(nullable=False)
     name: Mapped[str] = mapped_column(nullable=False)
+    alias_domains: Mapped[List[str]] = mapped_column(
+        type_=ARRAY(String), nullable=False
+    )
     external_domains: Mapped[List[str]] = mapped_column(
         type_=ARRAY(String), nullable=False
     )
