@@ -20,14 +20,14 @@ engine = create_engine(
 SessionMaker = sessionmaker(bind=engine)
 
 
-class SkippedDomain(Base):
-    __tablename__ = "SkippedDomains"
+class ExcludedDomain(Base):
+    __tablename__ = "ExcludedDomains"
     domain_url: Mapped[str] = mapped_column(primary_key=True)
     entity: Mapped[str] = mapped_column(nullable=False)
     reason: Mapped[str] = mapped_column(nullable=False)
 
     def __repr__(self):
-        return f"<SkippedDomain(url='{self.domain_url}', entity='{self.entity}' reason='{self.reason}'>"
+        return f"<ExcludedDomain(url='{self.domain_url}', entity='{self.entity}' reason='{self.reason}'>"
 
 
 class Domain(Base):
@@ -38,10 +38,10 @@ class Domain(Base):
     external_domains: Mapped[List[str]] = mapped_column(
         type_=ARRAY(String), nullable=False
     )
-    parsed_internal_links: Mapped[List[str]] = mapped_column(
+    target_internal_links: Mapped[List[str]] = mapped_column(
         type_=ARRAY(String), nullable=False
     )
-    skipped_internal_links: Mapped[List[str]] = mapped_column(
+    nontarget_internal_links: Mapped[List[str]] = mapped_column(
         type_=ARRAY(String), nullable=False
     )
     external_links: Mapped[List[str]] = mapped_column(
@@ -94,6 +94,12 @@ class EntryDriver:
         entries = session.query(Entry).filter(Entry.domain_url == domain_url).all()
         session.close()
         return entries
+
+    def remove_entries_for_domain(self, domain_url: str):
+        session = SessionMaker()
+        session.query(Entry).filter(Entry.domain_url == domain_url).delete()
+        session.commit()
+        session.close()
 
     def search(self, query: str) -> list[Entry]:
         session = SessionMaker()
@@ -155,13 +161,19 @@ class DomainDriver:
         session.close()
         return domain
 
+    def remove_domain(self, domain_url: str):
+        session = SessionMaker()
+        session.query(Domain).filter(Domain.domain_url == domain_url).delete()
+        session.commit()
+        session.close()
+
     def update_external_links_and_domains(
         self,
         domain_url: str,
         external_domains: List[str],
         external_links: List[str],
-        parsed_internal_links: List[str],
-        skipped_internal_links: List[str],
+        target_internal_links: List[str],
+        nontarget_internal_links: List[str],
         date_last_scraped: date
     ):
         session = SessionMaker()
@@ -173,8 +185,8 @@ class DomainDriver:
         update_values = {}
         update_values["external_domains"] = external_domains
         update_values["external_links"] = external_links
-        update_values["parsed_internal_links"] = parsed_internal_links
-        update_values["skipped_internal_links"] = skipped_internal_links
+        update_values["target_internal_links"] = target_internal_links
+        update_values["nontarget_internal_links"] = nontarget_internal_links
         update_values["date_last_scraped"] = date_last_scraped
 
         # Update the link
@@ -191,14 +203,14 @@ class DomainDriver:
         session.close()
 
 
-class SkippedDomainDriver:
-    def contains_skipped_domain(self, domain_url: str) -> bool:
+class ExcludedDomainDriver:
+    def contains_excluded_domain(self, domain_url: str) -> bool:
         session = SessionMaker()
-        exists = session.query(SkippedDomain).get(domain_url) is not None
+        exists = session.query(ExcludedDomain).get(domain_url) is not None
         session.close()
         return exists
     
-    def add_skipped_domain(self, domain: SkippedDomain):
+    def add_excluded_domain(self, domain: ExcludedDomain):
         session = SessionMaker()
         try:
             session.add(domain)
@@ -207,18 +219,33 @@ class SkippedDomainDriver:
         except IntegrityError:
             raise Exception(f"DomainDriver: {domain.domain_url} already exists")
 
-    def get_all_skipped_domains(self) -> List[SkippedDomain]:
+    def get_all_excluded_domains(self) -> List[ExcludedDomain]:
         session = SessionMaker()
-        skipped_domains = session.query(SkippedDomain).all()
+        excluded_domains = session.query(ExcludedDomain).all()
         session.close()
-        return skipped_domains
+        return excluded_domains
+
+    def remove_domain(self, domain_url: str):
+        session = SessionMaker()
+        session.query(ExcludedDomain).filter(ExcludedDomain.domain_url == domain_url).delete()
+        session.commit()
+        session.close()
 
     def clear(self):
         session = SessionMaker()
-        session.query(SkippedDomain).delete()
+        session.query(ExcludedDomain).delete()
         session.commit()
         session.close()
+
+# Utilities that clean the DB state
 
 def drop_tables_and_recreate():
     Base.metadata.drop_all(engine)
     Base.metadata.create_all(engine)
+
+def remove_domain_from_all_tables(domain_url):
+    EntryDriver().remove_entries_for_domain(domain_url)
+    DomainDriver().remove_domain(domain_url)
+    ExcludedDomainDriver().remove_domain(domain_url)
+
+# remove_domain_from_all_tables("filippo.io")

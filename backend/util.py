@@ -1,6 +1,7 @@
 import time
 from typing import Any
 import datetime
+from crawl4ai.models import CrawlResult, CrawlResultContainer, RunManyReturn
 
 def print_err(message: Any):
     red = "\033[91m"
@@ -11,6 +12,11 @@ def print_warn(message: Any):
     yellow = "\033[93m"
     reset = "\033[0m"
     print(f"{yellow}⚠️  {message}{reset}")
+
+def print_ok(message: Any):
+    green = "\033[92m"
+    reset = "\033[0m"
+    print(f"{green}✅ {message}{reset}")
 
 def timing_decorator(func):
     async def wrapper(*args, **kwargs):
@@ -33,8 +39,14 @@ def parse_date(date_str: str) -> datetime.date | None:
 def get_date_today() -> datetime.date:
     return datetime.date.today()
 
-def get_date_a_week_ago() -> datetime.date:
-    return datetime.date.today() - datetime.timedelta(days=7)
+def get_date_a_month_ago() -> datetime.date:
+    return datetime.date.today() - datetime.timedelta(days=30)
 
 def is_timeout_message(msg: str) -> bool:
     return "Timeout" in msg and "exceeded" in msg
+
+
+def assert_and_get_single_crawl_result(crawl_res: RunManyReturn) -> CrawlResult:
+    assert isinstance(crawl_res, CrawlResultContainer)
+    assert len(crawl_res) == 1
+    return crawl_res._results[0]

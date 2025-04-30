@@ -9,7 +9,6 @@ def is_id_or_static_resource(url: str) -> bool:
 def add_https_if_missing(url: str):
     return "https://" + url if not url.startswith(("http://", "https://")) else url
 
-
 def get_domain(url: str):
     # netloc => everything between scheme e.g. http/https and path
     netloc = urlparse(add_https_if_missing(url)).netloc
@@ -17,6 +16,10 @@ def get_domain(url: str):
     # remove www.
     if netloc.startswith("www."):
         netloc = netloc[4:] 
+
+    # handle @ signs e.g. mailto:
+    if "@" in netloc:
+        netloc = netloc.split("@")[-1]
         
     return netloc
 
@@ -45,9 +48,11 @@ def sanitize_url(url: str):
 # 
 # We want to define a more strict definition based on netloc
 
-def is_from_same_domain(url_a: str, url_b: str) -> bool:
-    return get_domain(url_a) == get_domain(url_b)
+# Return True if url_a is from the same domain or a subdomain of url_b
+def is_from_same_domain_or_subdomain(url_a: str, url_b: str) -> bool:
+    return get_domain(url_b) in get_domain(url_a)
 
 
-def is_valid_internal_link(entry_url: str, href: str) -> bool:
-    return not is_id_or_static_resource(href) and is_from_same_domain(entry_url, href)
+def is_valid_internal_link(domain_url: str, href: str) -> bool:
+    # print(domain_url, href, is_from_same_domain_or_subdomain(href, domain_url), not is_id_or_static_resource(href))
+    return not is_id_or_static_resource(href) and is_from_same_domain_or_subdomain(href, domain_url)
