@@ -53,6 +53,8 @@ def is_from_same_domain_or_subdomain(url_a: str, url_b: str) -> bool:
     return get_domain(url_b) in get_domain(url_a)
 
 
-def is_valid_internal_link(domain_url: str, href: str) -> bool:
-    # print(domain_url, href, is_from_same_domain_or_subdomain(href, domain_url), not is_id_or_static_resource(href))
-    return not is_id_or_static_resource(href) and is_from_same_domain_or_subdomain(href, domain_url)
+# ** PASSING
+def test_is_from_same_domain_or_subdomain():
+    assert(is_from_same_domain_or_subdomain("https://bigdanzblog.wordpress.com/", "https://wordpress.com/"))
+    assert(not is_from_same_domain_or_subdomain("https://wordpress.com/", "https://bigdanzblog.wordpress.com/"))
+    assert(is_from_same_domain_or_subdomain("scraps.benkuhn.net", "https://www.benkuhn.net/"))

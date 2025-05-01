@@ -4,7 +4,7 @@ import sys
 
 entry_driver = EntryDriver()
 domain_driver = DomainDriver()
-skipped_domain_driver = ExcludedDomainDriver()
+excluded_domain_driver = ExcludedDomainDriver()
 
 def inspect_domain(domain_url: str):
     domain = domain_driver.get_domain(domain_url)
@@ -29,14 +29,17 @@ def inspect_entries_of_domain(domain_url: str):
         min(MAX_DISPLAY_LEN, max(len(row[i]) for row in data))
         for i in range(len(data[0]))
     ]
-    
+
+    count = 0
     for row in data:
+        if "https://michelf.ca/blog/20" in row[1]:
+            count += 1
         print("  ".join(
             (cell[:MAX_DISPLAY_LEN]).ljust(col_widths[i])
             for i, cell in enumerate(row)
         ))
-
-
+    print(count)
+    print(len(data))
 
 def inspect_entries_that_link_to_this_url(url: str):
     entries = entry_driver.get_entries_that_link_to_url(url)
@@ -53,5 +56,17 @@ def inspect_domain_and_entries():
     inspect_domain(domain_url)
     inspect_entries_of_domain(domain_url)
 
+def print_all_domains():
+    print("======== Domains ========")
+    for domain in domain_driver.get_all_domains():
+        print(domain.domain_url)
+
+    print("======== Excluded Domains ========")
+    for domain in excluded_domain_driver.get_all_excluded_domains():
+        print(domain.domain_url)
+    
+
 if __name__ == "__main__":
+    # print_all_domains()
+
     inspect_domain_and_entries()

@@ -1,7 +1,6 @@
 import time
 from typing import Any
 import datetime
-from crawl4ai.models import CrawlResult, CrawlResultContainer, RunManyReturn
 
 def print_err(message: Any):
     red = "\033[91m"
@@ -44,8 +43,3 @@ def get_date_a_month_ago() -> datetime.date:
 
 def is_timeout_message(msg: str) -> bool:
     return "Timeout" in msg and "exceeded" in msg
-
-def assert_and_get_single_crawl_result(crawl_res: RunManyReturn) -> CrawlResult:
-    assert isinstance(crawl_res, CrawlResultContainer)
-    assert len(crawl_res) == 1
-    return crawl_res._results[0]

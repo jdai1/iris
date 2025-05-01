@@ -13,6 +13,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.dialects.postgresql.ext import to_tsvector, phraseto_tsquery
 
+from util import print_warn
+
 Base = declarative_base()
 engine = create_engine(
     "postgresql+psycopg2://postgres:1234@localhost:5432/postgres", echo=False
@@ -71,6 +73,7 @@ class Entry(Base):
     date_published: Mapped[date] = mapped_column(nullable=True)
     links: Mapped[List[str]] = mapped_column(type_=ARRAY(String), nullable=False)
     entry_url: Mapped[str] = mapped_column(nullable=False)
+    alias_urls: Mapped[List[str]] = mapped_column(type_=ARRAY(String), nullable=False)
     domain_url: Mapped[str] = mapped_column(ForeignKey("Domains.domain_url"))
     domain: Mapped[Domain] = relationship("Domain", back_populates="entries")
 
@@ -86,6 +89,22 @@ class EntryDriver:
     def add_entries(self, entries: list[Entry]):
         session = SessionMaker()
         session.add_all(entries)
+        session.commit()
+        session.close()
+
+    def add_alias(self, entry_url: str, alias: str):
+        session = SessionMaker()
+        entry = session.query(Entry).filter(Entry.entry_url == entry_url).first()
+
+        if not entry:
+            raise Exception(f"DomainDriver: {entry_url} does not exist")
+        update_values = {}
+        update_values["alias_urls"] = func.array_append(Entry.alias_urls, alias)
+
+        # Update the link
+        session.query(Entry).filter(Entry.entry_url == entry_url).update(
+            update_values
+        )
         session.commit()
         session.close()
 
@@ -142,9 +161,11 @@ class EntryDriver:
 class DomainDriver:
     def contains_domain(self, domain_url: str) -> bool:
         session = SessionMaker()
-        exists = session.query(Domain).get(domain_url) is not None
+        is_primary_key = session.query(Domain).get(domain_url) is not None
+        is_alias = session.query(Domain).filter(Domain.alias_domains.contains([domain_url])).first() is not None
+
         session.close()
-        return exists
+        return is_primary_key or is_alias
     
     def add_domain(self, domain: Domain):
         session = SessionMaker()
@@ -170,6 +191,23 @@ class DomainDriver:
     def remove_domain(self, domain_url: str):
         session = SessionMaker()
         session.query(Domain).filter(Domain.domain_url == domain_url).delete()
+        session.commit()
+        session.close()
+
+    def add_alias(self, domain_url: str, alias: str):
+        session = SessionMaker()
+        print(domain_url)
+        domain = session.query(Domain).filter(Domain.domain_url == domain_url).first()
+
+        if not domain:
+            raise Exception(f"DomainDriver: {domain_url} does not exist")
+        update_values = {}
+        update_values["alias_domains"] = func.array_append(Domain.alias_domains, alias)
+
+        # Update the link
+        session.query(Domain).filter(Domain.domain_url == domain_url).update(
+            update_values
+        )
         session.commit()
         session.close()
 
@@ -212,9 +250,10 @@ class DomainDriver:
 class ExcludedDomainDriver:
     def contains_excluded_domain(self, domain_url: str) -> bool:
         session = SessionMaker()
-        exists = session.query(ExcludedDomain).get(domain_url) is not None
+        is_primary_key = session.query(ExcludedDomain).get(domain_url) is not None
+        is_alias = session.query(ExcludedDomain).filter(ExcludedDomain.alias_domains.contains([domain_url])).first() is not None
         session.close()
-        return exists
+        return is_primary_key or is_alias
     
     def add_excluded_domain(self, domain: ExcludedDomain):
         session = SessionMaker()
@@ -237,6 +276,23 @@ class ExcludedDomainDriver:
         session.commit()
         session.close()
 
+    def add_alias(self, domain_url: str, alias: str):
+        session = SessionMaker()
+        print(domain_url)
+        domain = session.query(ExcludedDomain).filter(ExcludedDomain.domain_url == domain_url).first()
+
+        if not domain:
+            raise Exception(f"ExcludedDomainDriver: {domain_url} does not exist")
+        update_values = {}
+        update_values["alias_domains"] = func.array_append(ExcludedDomain.alias_domains, alias)
+
+        # Update the link
+        session.query(ExcludedDomain).filter(ExcludedDomain.domain_url == domain_url).update(
+            update_values
+        )
+        session.commit()
+        session.close()
+
     def clear(self):
         session = SessionMaker()
         session.query(ExcludedDomain).delete()
@@ -254,4 +310,3 @@ def remove_domain_from_all_tables(domain_url):
     DomainDriver().remove_domain(domain_url)
     ExcludedDomainDriver().remove_domain(domain_url)
 
-# remove_domain_from_all_tables("filippo.io")
