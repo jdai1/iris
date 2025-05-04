@@ -11,11 +11,7 @@ from .model import Exchange, LLMArgs, LLMAPIRetryException
 
 load_dotenv()
 
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
-
-anthropic_client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
-async_anthropic_client = anthropic.AsyncAnthropic(api_key=ANTHROPIC_API_KEY)
+OPENAI_API_KEY = os.getenv("PERSONAL_OPENAI_API_KEY")
 
 openai_client = openai.OpenAI(api_key=OPENAI_API_KEY)
 async_openai_client = openai.AsyncOpenAI(api_key=OPENAI_API_KEY)

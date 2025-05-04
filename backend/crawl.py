@@ -24,6 +24,8 @@ from util import (
 from url_utils import (
     add_https_if_missing,
     get_domain,
+    get_url_depth,
+    get_url_path_count,
     is_id_or_static_resource,
     is_from_same_domain_or_subdomain,
     sanitize_url,
@@ -41,8 +43,11 @@ from db import (
 
 # * CONTSTANTS
 PAGE_TIMEOUT_MS = 5000
-BATCH_SIZE = 25
-MAX_INTERNAL_LINKS_Q_SIZE = 1000
+BATCH_SIZE = 50
+MAX_INTERNAL_LINKS_Q_SIZE = 2000
+MAX_CRAWL_ITER_PATIENCE = 10
+URL_DEPTH_TOLERANCE = 10
+URL_REPETITION_TOLERANCE = 3
 
 NOT_A_BLOG_OR_PERSON_REASON = "Excluded b/c website was not a blog run by an individual"
 TIMEOUT_ERROR_REASON = (
@@ -81,9 +86,8 @@ class Crawler:
         # Do we want to just delete all rows in the DB associated with this domain and re-ingest it completely?
 
         await self.crawler.start()
-        domain = None
         try:
-            domain = await self.ingest(url)
+            await self.ingest(url)
         except SkipCrawlingDomainException as e:
             print_warn(f"SKIPPING {url}: {e}")
         except FatalException as e:
@@ -93,10 +97,7 @@ class Crawler:
             await self.crawler.close()
             return
 
-        if domain is None:
-            domain = await self._get_domain(url)
-        assert domain is not None
-        
+        domain = await self._get_domain(url)
         for one_hop_domain_url in domain.external_domains:
             if self.domain_driver.contains_domain(one_hop_domain_url):
                 print_warn(f"SKIPPING {one_hop_domain_url} b/c already scraped")
@@ -109,18 +110,10 @@ class Crawler:
                     print_err(
                         f"FATAL EXCEPTION; Failed to scrape a one-hop domain ({one_hop_domain_url}) b/c of error: {e}"
                     )
-                    self.excluded_domain_driver.add_excluded_domain(
-                        ExcludedDomain(
-                            domain_url=get_domain(one_hop_domain_url),
-                            entity="Unknown",
-                            alias_domains=[],
-                            reason=OTHER_ERROR_REASON
-                        )
-                    )
         await self.crawler.close()
         
 
-    async def ingest(self, url: str) -> Domain:        
+    async def ingest(self, url: str):        
         # * High-level logic
         # 1) Determine if we want to crawl this domain
         # - handle redirects, classify domain with LLM, check if domain or aliases already exist in ExcludedDomains or Domains table
@@ -157,8 +150,6 @@ class Crawler:
         # perform full crawl with retry logic; adds external/internal links to domain object
         await self._crawl_domain_with_retries(domain=domain)
 
-        return domain
-
     async def _validate_and_create_domain(self, url: str) -> Domain:
         # sanitize URL
         url = sanitize_url(url)
@@ -168,7 +159,19 @@ class Crawler:
         self._assert_domain_absent_in_db(pre_redirect_domain_url)
 
         # post-redirect URL
-        crawler_res = await self._crawl_url(url=url)
+
+        try:
+            crawler_res = await self._crawl_url(url=url)
+        except Exception as e:
+            self.excluded_domain_driver.add_excluded_domain(
+                ExcludedDomain(
+                    domain_url=pre_redirect_domain_url,
+                    entity="Unknown",
+                    alias_domains=[],
+                    reason=OTHER_ERROR_REASON
+                )
+            )
+            raise SkipCrawlingDomainException(f"Skipping {pre_redirect_domain_url} b/c scraping the URL failed")
         post_redirect_domain_url = get_domain(crawler_res.redirected_url)
 
         alias_url = None
@@ -180,9 +183,12 @@ class Crawler:
             )
 
         # clasify domain to determine if we should pursue it
-        domain_classifier_res = await self._classify_domain(
-            url=url, cleaned_html=crawler_res.cleaned_html
+        domain_classifier_agent = ClassifyDomainAgent()
+        domain_classifier_res = await domain_classifier_agent.async_call(
+            url=url, html=crawler_res.cleaned_html
         )
+        assert isinstance(domain_classifier_res.structured_output, ClassifyDomainAgentOutput)
+        domain_classifier_res = domain_classifier_res.structured_output
 
         def _is_valid_individual_blog(
             domain_classifier_res: ClassifyDomainAgentOutput,
@@ -217,7 +223,7 @@ class Crawler:
             entries=[],
         )
 
-    async def _get_domain(self, url: str) -> Optional[Domain]:
+    async def _get_domain(self, url: str) -> Domain:
         pre_redirect_domain_url = get_domain(url)
         if self.domain_driver.contains_domain(pre_redirect_domain_url):
             return self.domain_driver.get_domain(pre_redirect_domain_url)
@@ -243,16 +249,6 @@ class Crawler:
             raise SkipCrawlingDomainException(
                 f"Skipping {domain_url} b/c it is already present in the ExcludedDomains table"
             )
-
-    async def _classify_domain(
-        self, url: str, cleaned_html: str
-    ) -> ClassifyDomainAgentOutput:
-        domain_classifier_agent = ClassifyDomainAgent()
-        domain_classifier_res = await domain_classifier_agent.async_call(
-            url=url, html=cleaned_html
-        )
-        assert isinstance(domain_classifier_res.structured_output, ClassifyDomainAgentOutput)
-        return domain_classifier_res.structured_output
 
     async def _crawl_domain_with_retries(self, domain: Domain):
         batch_size = BATCH_SIZE
@@ -339,6 +335,8 @@ class Crawler:
         timeout_error_links: list[str] = []
         other_error_links: list[str] = []
 
+        iters_since_new_entry = 0
+
         # BFS through all internal (same-domain) links in batches
         while True:
             batch_urls = []
@@ -350,8 +348,19 @@ class Crawler:
             if not internal_links_queue and not batch_urls:
                 break
 
-            print("batch_urls", batch_urls, "\n")
-            print("visited", visited, "\n")
+            print_warn(f"iters since new entry: {iters_since_new_entry}")
+            if iters_since_new_entry >= MAX_CRAWL_ITER_PATIENCE:
+                break
+
+            if len(internal_links_queue) > MAX_INTERNAL_LINKS_Q_SIZE:
+                for x in sorted(internal_links_queue):
+                    print(x)
+                raise TooManyInternalLinks(f"{len(internal_links_queue)} links —— too many!")
+
+            print_warn(f"# skipped links {len(nontarget_internal_links)}")
+            print_warn(f"# internal links {len(internal_links_queue)}")
+            print_warn(f"# external domains {len(external_domains)}")
+            print_warn(f"# visited {len(visited)}")
 
             # run LLM to parse blog entry information form HTML
             tasks = [self._parse_url_to_entry(url=url, domain=domain, visited=visited) for url in batch_urls]
@@ -364,6 +373,7 @@ class Crawler:
             new_target_links = []
             new_nontarget_links = []
 
+            entry_added = False
             for current_url, res in zip(batch_urls, results):
                 if isinstance(res, BaseException):
                     if len(res.args) >= 1 and is_timeout_message(res.args[0]):
@@ -376,13 +386,13 @@ class Crawler:
                 is_blog, entry, new_internal_links, new_external_links = res
 
                 if is_blog:
+                    entry_added = True
                     entries.append(entry)
                     new_target_links.append(entry.entry_url)
                 else:
                     new_nontarget_links.append(entry.entry_url)
 
                 assert current_url == sanitize_url(current_url)
-                assert current_url not in visited
 
                 # add current url & aliases to visited
                 visited[entry.entry_url] = True
@@ -392,32 +402,24 @@ class Crawler:
                 new_external_domains_batch += [get_domain(link) for link in new_external_links]
                 new_external_links_batch += [link for link in new_external_links]
                 new_internal_links_batch += [link for link in new_internal_links]
-
             
-            internal_links_queue = list(set(new_internal_links_batch + internal_links_queue))
-            # internal_links_queue = [l for l in internal_links_queue if l not in visited]
-            
+            internal_links_queue = list(set(new_internal_links_batch + internal_links_queue))            
             target_internal_links = list(set(new_target_links + target_internal_links))
             nontarget_internal_links = list(set(new_nontarget_links + nontarget_internal_links))
             external_links = list(set(new_external_links_batch + external_links))
             external_domains = list(set(new_external_domains_batch + external_domains))
 
-            print(f"added {len(new_target_links)} blog posts: {new_target_links}")
-            print(f"skipped {len(new_nontarget_links)} links: {new_nontarget_links}")
+            print_warn(f"added {len(new_target_links)} blog posts: {new_target_links}")
+            print_warn(f"skipped {len(new_nontarget_links)} links: {new_nontarget_links}")
 
-            print("# skipped links", len(nontarget_internal_links))
-            print("# internal links", len(internal_links_queue))
-            print("# external domains", len(external_domains))
-            print("# visited", len(visited))
-
+            # if 
+            iters_since_new_entry = (iters_since_new_entry + 1) if not entry_added else 0
+            
             # * If more than 20% of all crawls are timing out, then throw an error.
             if len(timeout_error_links) / len(visited) > 0.2:
                 raise TooManyCrawlingTimeoutsException(
                     f"len(timeout_error_links) / len(visited) = {len(timeout_error_links) / len(visited)} > 0.2"
                 )
-
-            if len(internal_links_queue) > MAX_INTERNAL_LINKS_Q_SIZE:
-                raise TooManyInternalLinks(f"{len(internal_links_queue)} links —— too many!")
 
         return (
             entries,
@@ -500,12 +502,26 @@ class Crawler:
             raise FatalException(f"Crawling {url} failed with error: {str(e)}")
 
     def _is_valid_internal_link(self, domain_url: str, url: str) -> bool:
-        return not is_id_or_static_resource(url) and is_from_same_domain_or_subdomain(url, domain_url)
+        # * A valid link is determined by a number of things:
+        # 1) As of now, IRIS can only scrape web content — this means no jpgs, gifs, zips, etc. Eventually, scraping PDFs would be cool, e.g. for sriramk's website
+        # 2) We only want to pursue links that are from the same domain or a subdomain of the original domain_url. For example, going from benkuhn.net => scraps.benkuhn.net is fine, but going from bigdanzblog.wordpress.com => wordpress.com isn't
+        # 3) We additionally want to add preventative measures for infinite loops, e.g. https://davepagurek.com/badjokes/index.php/index.php/index.php/index.php/me.php/me.php/me.php.
+        # These measures include a) capping the length of the path of the URL, and b) placing a limit on the repetition allowed in the URL
+
+        # NOTE: I'm sure as the scraper sees more websites, more things will get added here!
+        path_count = get_url_path_count(url)
+        return (
+            not is_id_or_static_resource(url) and 
+            is_from_same_domain_or_subdomain(url, domain_url) and 
+            get_url_depth(url) < URL_DEPTH_TOLERANCE and
+            (max(path_count.values()) if path_count else 0) < URL_REPETITION_TOLERANCE
+        )
 
 
 if __name__ == "__main__":
     crawler = Crawler()
     asyncio.run(crawler.spider("https://thume.ca/"))
+    # asyncio.run(crawler.spider("https://robert.ocallahan.org"))
 
     # asyncio.run(spider("https://bigdanzblog.wordpress.com/"))
     # asyncio.run(spider("projects.drogon.net"))

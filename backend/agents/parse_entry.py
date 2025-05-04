@@ -37,6 +37,8 @@ class ParseEntryAgent(Agent):
             - Is the HTML representative of a standalone blog post, written in English? If no, we should not pursue.
             - If the HTML is only representative of a part of a blog (e.g. a teaser or a tag), then it is likely that the blog is located at a separate URL on the website. In this case, we should not pursue the tag.
             - Similarly, if the HTML is representative of multiple blog posts, (e.g. a blog compilation or feed), it is likely the singular blogs are located at a separate URL, and you should not attempt to pursue the collection as one.
+            - If the HTMl is representative of a text editor for comments or edits, do not pursue
+            - If the HTML is lacking sufficient text (e.g. the central feature seems to be an image or video), do not pursue.
 
         You only need to fill the remainder of the fields if you should_pursue is True. Otherwise, you may leave them all blank, e.g. "" for a string value and [] for a list value.
 

@@ -2,6 +2,8 @@ from db import EntryDriver, DomainDriver, ExcludedDomainDriver
 from url_utils import get_domain
 import sys
 
+import argparse
+
 entry_driver = EntryDriver()
 domain_driver = DomainDriver()
 excluded_domain_driver = ExcludedDomainDriver()
@@ -50,9 +52,7 @@ def inspect_entries_that_link_to_this_url(url: str):
         print(e.title, e.entry_url)
 
 
-def inspect_domain_and_entries():
-    domain_url = sys.argv[1]
-    
+def inspect_domain_and_entries(domain_url: str):
     inspect_domain(domain_url)
     inspect_entries_of_domain(domain_url)
 
@@ -63,10 +63,17 @@ def print_all_domains():
 
     print("======== Excluded Domains ========")
     for domain in excluded_domain_driver.get_all_excluded_domains():
-        print(domain.domain_url)
+        print(domain.domain_url, domain.reason)
     
 
 if __name__ == "__main__":
-    # print_all_domains()
+    argparser = argparse.ArgumentParser()
+    argparser.add_argument("--print_domains", action="store_true")
+    argparser.add_argument("--inspect", type=str)
 
-    inspect_domain_and_entries()
+    args = argparser.parse_args()
+
+    if args.print_domains:
+        print_all_domains()
+    if args.inspect:
+        inspect_domain_and_entries(args.inspect)

@@ -310,3 +310,5 @@ def remove_domain_from_all_tables(domain_url):
     DomainDriver().remove_domain(domain_url)
     ExcludedDomainDriver().remove_domain(domain_url)
 
+
+remove_domain_from_all_tables("davepagurek.com")

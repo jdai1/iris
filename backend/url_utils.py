@@ -1,5 +1,6 @@
 from urllib.parse import urlparse
 import re
+from collections import Counter
 
 """ Filter out all static resources and ID URLs while webscraping """
 def is_id_or_static_resource(url: str) -> bool:
@@ -41,6 +42,14 @@ def sanitize_url(url: str):
     url = add_https_if_missing(url)
     url = url.rstrip("/")
     return url
+
+
+def get_url_depth(url: str) -> int:
+    return len([p for p in urlparse(url).path.split('/') if p])
+
+def get_url_path_count(url: str) -> Counter:
+    return Counter([p for p in urlparse(url).path.split('/') if p])
+
 
 # NOTE: Crawl4ai defines an interal link to be any link that shares the same domain or has a parent domain
 # encompassing the subdomain. e.g. if it crawled jdai1.github.io and found github.io, it would
