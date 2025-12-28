@@ -3,6 +3,8 @@ import uuid
 
 from pydantic import BaseModel
 
+from app.enums.core import DomainStatus
+
 
 class PageLinks(BaseModel):
     """Links extracted from a crawled page."""
@@ -47,3 +49,38 @@ class LinkMappingCreateParams(BaseModel):
 
     source_link_id: uuid.UUID
     target_link_id: uuid.UUID
+
+
+class DomainMappingCreateParams(BaseModel):
+    """Parameters for creating a domain mapping."""
+
+    source_domain_id: uuid.UUID
+    target_domain_id: uuid.UUID
+
+
+class DomainCreateParams(BaseModel):
+    """Parameters for creating a domain."""
+
+    domain_url: str
+    entity: str | None = None
+    name: str | None = None
+    status: DomainStatus = DomainStatus.PENDING
+    error_message: str | None = None
+
+
+class LinkCreateParams(BaseModel):
+    """Parameters for creating a link."""
+
+    url: str
+    domain_id: uuid.UUID
+
+
+class EntryCreateParams(BaseModel):
+    """Parameters for creating an entry."""
+
+    link_id: uuid.UUID
+    title: str
+    summary: str
+    topics: list[str]
+    author: str
+    date_published: date | None = None

@@ -1,5 +1,7 @@
 from pydantic import BaseModel
 
+from app.enums.core import EntityType
+
 
 class EntryParseResult(BaseModel):
     """Result of parsing an entry from HTML."""
@@ -16,6 +18,6 @@ class DomainClassificationResult(BaseModel):
     """Result of classifying a domain."""
 
     url: str
-    entity: str
+    entity: EntityType
     name: str
     blog: bool

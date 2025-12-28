@@ -1,13 +1,21 @@
 import os
+from dotenv import load_dotenv
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, scoped_session
 
-from models.mixins import Base
 
-# Get database URL from environment or use default
-DATABASE_URL = os.getenv(
-    "DATABASE_URL", "postgresql://postgres:1234@localhost:5432/postgres"
-)
+load_dotenv()
+
+ENVIRONMENT = os.getenv("ENVIRONMENT")
+DEV_DATABASE_URL = os.getenv("DEV_DATABASE_URL")
+PROD_DATABASE_URL = os.getenv("PROD_DATABASE_URL")
+
+if not DEV_DATABASE_URL:
+    raise ValueError("DEV_DATABASE_URL environment variable is required")
+if not PROD_DATABASE_URL:
+    raise ValueError("PROD_DATABASE_URL environment variable is required")
+
+DATABASE_URL = PROD_DATABASE_URL if ENVIRONMENT == "production" else DEV_DATABASE_URL
 
 # Create sync engine
 engine = create_engine(DATABASE_URL, echo=False)

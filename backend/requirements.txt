@@ -1,0 +1,4 @@
+factory-boy>=3.3.0
+Faker>=19.0.0
+python-dotenv>=1.0.0
+

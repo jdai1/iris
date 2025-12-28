@@ -26,9 +26,10 @@ async def extract_structured(
     prompt: str,
     output_model: type[T],
     system_prompt: str = "",
-    model_name: str = "gpt-4o-mini",
+    model_name: str = "gpt-5-mini-2025-08-07",
     temperature: float = 0.0,
-    max_tokens: int = 4096,
+    max_completion_tokens: int = 4096,
+    client: AsyncOpenAI | None = None,
 ) -> T:
     """
     Extract structured data from a prompt using an LLM
@@ -44,7 +45,7 @@ async def extract_structured(
     Returns:
         Instance of output_model with extracted structured data
     """
-    client = _get_client()
+    client = client or _get_client()
 
     messages = []
     if system_prompt:
@@ -55,8 +56,7 @@ async def extract_structured(
         model=model_name,
         messages=messages,
         response_format=output_model,
-        temperature=temperature,
-        max_tokens=max_tokens,
+        max_completion_tokens=max_completion_tokens,
     )
 
     parsed = response.choices[0].message.parsed

@@ -3,18 +3,20 @@ import pytest
 
 from app.services.llm_services import parse_entry
 from app.utils.scrape_utils import crawl_url
+from openai import AsyncOpenAI
+import os
+
+
+@pytest.fixture
+async def openai_client():
+    client = AsyncOpenAI(api_key=os.getenv("PERSONAL_OPENAI_API_KEY"))
+    yield client
+    await client.close()  # important
 
 
 @pytest.mark.asyncio
-async def test_quote_page_not_classified_as_entry():
-    """Test that a quote/media page is correctly identified as NOT an entry."""
-    test_url = "https://jdai1.github.io/media/chesky"
-
-    # This is a quote page with:
-    # - "← Back to Media" navigation
-    # - Attribution "- Brian Chesky" at the end
-    # - It's displaying someone else's words
-    # Should NOT be classified as an entry (should_pursue=False)
+async def test_quote_page_not_classified_as_entry(openai_client):
+    test_url = "https://jdai1.github.io/media/bluelock"
 
     async with aiohttp.ClientSession() as session:
         # Crawl the URL to get HTML
@@ -22,9 +24,11 @@ async def test_quote_page_not_classified_as_entry():
 
         # Parse entry using the classifier
         parse_result = await parse_entry(
-            url=crawl_result.redirected_url, html=crawl_result.cleaned_html
+            url=crawl_result.redirected_url,
+            html=crawl_result.cleaned_html,
+            client=openai_client,
         )
-
+        breakpoint()
         # Assert that this quote page is NOT classified as an entry
         assert not parse_result.should_pursue, (
             "Expected should_pursue=False for quote/media page, but got True. "

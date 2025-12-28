@@ -3,10 +3,15 @@ from urllib.parse import urljoin
 import aiohttp
 from bs4 import BeautifulSoup
 
-from constants import PAGE_TIMEOUT_MS
-from exceptions import FatalException
-from schemas.crawl import PageCrawlResult, PageLinks
-from utils.url_utils import add_https_if_missing, is_external_link, sanitize_url
+from app.constants import MAX_HTML_SIZE_BYTES, PAGE_TIMEOUT_MS
+from app.exceptions import FatalException
+from app.schemas.crawl import PageCrawlResult, PageLinks
+from app.utils.url_utils import (
+    add_https_if_missing,
+    get_domain,
+    is_external_link,
+    sanitize_url,
+)
 
 
 async def crawl_url(
@@ -36,6 +41,7 @@ async def crawl_url(
             if is_external_link(link, redirected_url):
                 external_links.append(link)
             else:
+                assert get_domain(url) in link
                 internal_links.append(link)
 
         links = PageLinks(
@@ -61,6 +67,8 @@ async def fetch_html(
     """
     Fetch HTML from URL with redirect handling.
 
+    HTML content is capped at MAX_HTML_SIZE_BYTES to prevent excessive memory usage.
+
     Returns:
         (html_content, final_url_after_redirects)
     """
@@ -68,7 +76,18 @@ async def fetch_html(
         url = add_https_if_missing(url)
         async with session.get(url, allow_redirects=True, timeout=timeout) as response:
             response.raise_for_status()
-            html = await response.text()
+
+            # Read full content
+            content = await response.read()
+
+            # Truncate if exceeds limit
+            if len(content) > MAX_HTML_SIZE_BYTES:
+                content = content[:MAX_HTML_SIZE_BYTES]
+                html = content.decode("utf-8", errors="replace")
+                html += "\n<!-- HTML truncated due to size limit -->"
+            else:
+                html = content.decode("utf-8", errors="replace")
+
             final_url = str(response.url)
             return html, final_url
     except Exception as e:
@@ -91,6 +110,33 @@ def extract_links_from_html(html: str, base_url: str) -> list[str]:
         links.append(absolute_url)
 
     return links
+
+
+def extract_text_from_html(html: str) -> str:
+    """
+    Extract text content from HTML using BeautifulSoup.
+
+    Removes script and style elements, then extracts and cleans text content.
+    This significantly reduces the size of content sent to LLMs.
+
+    Returns:
+        Cleaned text content
+    """
+    soup = BeautifulSoup(html, "html.parser")
+
+    # Remove script and style elements
+    for element in soup(["script", "style"]):
+        element.decompose()
+
+    # Get text
+    text = soup.get_text()
+
+    # Clean up whitespace
+    lines = (line.strip() for line in text.splitlines())
+    chunks = (phrase.strip() for line in lines for phrase in line.split("  "))
+    text = "\n".join(chunk for chunk in chunks if chunk)
+
+    return text
 
 
 def extract_links_from_crawl_result(

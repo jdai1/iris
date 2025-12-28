@@ -14,4 +14,3 @@ def get_date_today() -> datetime.date:
 
 def is_timeout_message(msg: str) -> bool:
     return "Timeout" in msg and "exceeded" in msg
-

@@ -1,30 +1,30 @@
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date
 import uuid
 
-from sqlalchemy import DateTime, ForeignKey, Index, String, UniqueConstraint, func
+from sqlalchemy import ForeignKey, Index, String, UniqueConstraint
 from sqlalchemy.dialects.postgresql import ARRAY, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-from models.mixins import Base, TimestampMixin
+from app.enums.core import DomainStatus
+from app.models.mixins import Base, TimestampMixin
 
 
 class Domain(Base, TimestampMixin):
     __tablename__ = "domains"
-    __table_args__ = (
-        Index("idx_domains_excluded", "excluded"),
-        Index("idx_domains_url", "domain_url"),
-    )
+    __table_args__ = (Index("idx_domains_url", "domain_url"),)
 
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
     domain_url: Mapped[str] = mapped_column(unique=True, nullable=False, index=True)
-    entity: Mapped[str] = mapped_column(nullable=False)
-    name: Mapped[str] = mapped_column(nullable=False)
+    entity: Mapped[str | None] = mapped_column(nullable=True)
+    name: Mapped[str | None] = mapped_column(nullable=True)
 
-    excluded: Mapped[bool] = mapped_column(default=False, nullable=False)
-    reason: Mapped[str | None] = mapped_column(nullable=True)
+    status: Mapped[DomainStatus] = mapped_column(
+        default=DomainStatus.PENDING, nullable=False
+    )
+    error_message: Mapped[str | None] = mapped_column(nullable=True)
 
     links: Mapped[list["Link"]] = relationship("Link", back_populates="domain")
 
@@ -41,13 +41,11 @@ class Link(Base, TimestampMixin):
         ForeignKey("domains.id"), nullable=False, index=True
     )
     domain: Mapped["Domain"] = relationship("Domain", back_populates="links")
-    entry_id: Mapped[uuid.UUID | None] = mapped_column(
-        ForeignKey("entries.id"), nullable=True
-    )
-    # Relationship via Link.entry_id → Entry.id
+    # Relationship via Entry.link_id → Link.id (one-to-one)
     entry: Mapped[Entry | None] = relationship(
         "Entry",
-        foreign_keys=[entry_id],
+        back_populates="link",
+        uselist=False,
     )
 
 
@@ -61,10 +59,11 @@ class Entry(Base, TimestampMixin):
     link_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("links.id"), unique=True, nullable=False, index=True
     )
-    # Relationship via Entry.link_id → Link.id
+    # Relationship via Entry.link_id → Link.id (one-to-one)
     link: Mapped["Link"] = relationship(
         "Link",
         foreign_keys=[link_id],
+        back_populates="entry",
     )
     title: Mapped[str] = mapped_column(nullable=False)
     summary: Mapped[str] = mapped_column(nullable=False)

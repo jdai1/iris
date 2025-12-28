@@ -1,10 +1,8 @@
-from datetime import date, datetime
-from typing import List, Optional
-import uuid
+from datetime import datetime
+from typing import Optional
 
-from sqlalchemy import DateTime, ForeignKey, Index, UniqueConstraint, func
-from sqlalchemy.dialects.postgresql import ARRAY, UUID
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+from sqlalchemy import DateTime, func
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
 class Base(DeclarativeBase):
