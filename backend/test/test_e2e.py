@@ -99,6 +99,8 @@ def test_index_jdai1_github_io(db_session):
 
     print("✅ E2E test completed successfully!")
 
+    breakpoint()
+
 
 def test_scrape_forbidden_site(db_session):
     """E2E test: Attempt to scrape a site that forbids scraping (gmail.com)."""

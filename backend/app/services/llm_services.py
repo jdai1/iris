@@ -1,6 +1,8 @@
-from app.services.llm_platform import extract_structured
-from app.schemas.llm import DomainClassificationResult, EntryParseResult
 from openai import AsyncOpenAI
+
+from app.enums.core import EntityType
+from app.schemas.llm import DomainClassificationResult, EntryParseResult
+from app.services.llm_platform import extract_structured
 
 
 async def parse_entry(
@@ -14,7 +16,7 @@ async def parse_entry(
 
     Args:
         url: The URL of the webpage
-        html: The cleaned HTML content
+        html: The text content extracted from HTML (not raw HTML)
         client: Optional OpenAI client
         description: Optional description of the person who owns the blog
 
@@ -22,13 +24,13 @@ async def parse_entry(
         EntryParseResult with extracted information
     """
     system_prompt = """
-Yout job is to complete a unit of work in a larger goal. The larger goal is, given the webpage of a
+Your job is to complete a unit of work in a larger goal. The larger goal is, given the webpage of a
 writer's personal blog, to index all the entries of the blog. The steps are as follows:
 1. Run BFS to collect all unique URLs that share the same domain as the starting URL
 2. For each URL, crawl the webpage and parse the entry into structured data
 
 
-The unit of work you will be doing is to parse the HTML obtained by crawling a single URL into structured data.
+The unit of work you will be doing is to parse the text content obtained by crawling a single URL into structured data.
 
 An entry should be a self-contained written piece that represents personal expression, reflection, or narrative. Valid entries include:
 - Personal takes and opinions (on any topic)
@@ -44,27 +46,28 @@ Since this is the web, there will be a lot of noise. You should not pursue entri
 - Product listings, catalogs, or commercial pages
 - Simple status updates or micro-posts without substantive content
 
-If the HTML is not representative of a valid entry, you should NOT pursue, and can leave
+If the text content is not representative of a valid entry, you should NOT pursue, and can leave
 all other fields blank.
+
+The summary should be a concise summary of the entry that captures the main idea or message written from the third person.
 """
 
     user_prompt = f"""
-        URL:
-        {url}
-        
-        HTML: test
-        {html}
+URL:
+{url}
+
+Text content:
+{html}
 """
 
     if description:
         user_prompt += f"""
-        Description of the writer:
-        {description}
+Description of the writer:
+{description}
 """
 
     user_prompt += """
-        
-        You've been provided the URL and HTML for a web page with content. Parse the HTML into structured data.
+You've been provided the URL and text content for a web page. Parse the text content into structured data.
         """
 
     return await extract_structured(
@@ -88,7 +91,6 @@ async def classify_domain(
     Returns:
         DomainClassificationResult with extracted information
     """
-    from app.enums.core import EntityType
 
     entity_types = ", ".join([e.value for e in EntityType])
 

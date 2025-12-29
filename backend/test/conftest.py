@@ -1,6 +1,7 @@
 from unittest.mock import patch
 
 import pytest
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 import app.db as db
@@ -17,6 +18,11 @@ from test.factories import (
 @pytest.fixture(scope="session")
 def db_engine():
     """Create database engine and tables for the test session."""
+    # Create pgvector extension if it doesn't exist
+    with db.engine.connect() as conn:
+        conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+        conn.commit()
+
     Base.metadata.create_all(db.engine)
     yield db.engine
     Base.metadata.drop_all(db.engine)

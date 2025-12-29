@@ -14,6 +14,12 @@ class EntryParseResult(BaseModel):
     date_published: str
 
 
+class EntryWithEmbedding(EntryParseResult):
+    """Entry parse result with its embedding vector."""
+
+    embedding: list[float]
+
+
 class DomainClassificationResult(BaseModel):
     """Result of classifying a domain."""
 

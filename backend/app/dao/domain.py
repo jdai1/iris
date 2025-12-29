@@ -78,3 +78,10 @@ def get_or_create_domain_by_url(domain_url: str) -> Domain:
         error_message=None,
     )
     return create_domain(params)
+
+
+def reset_domain_status(domain: Domain, status: DomainStatus, error_message: str | None = None) -> None:
+    """Reset domain status."""
+    domain.status = status
+    domain.error_message = error_message
+    db.session.commit()

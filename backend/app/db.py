@@ -1,8 +1,10 @@
 import os
 from dotenv import load_dotenv
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker, scoped_session
 
+from app.models.mixins import Base
+import app.models.models
 
 load_dotenv()
 
@@ -19,6 +21,12 @@ DATABASE_URL = PROD_DATABASE_URL if ENVIRONMENT == "production" else DEV_DATABAS
 
 # Create sync engine
 engine = create_engine(DATABASE_URL, echo=False)
+
+# Create pgvector extension and tables
+with engine.connect() as conn:
+    conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+    conn.commit()
+Base.metadata.create_all(engine)
 
 # Create session factory
 SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)

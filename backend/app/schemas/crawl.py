@@ -84,3 +84,4 @@ class EntryCreateParams(BaseModel):
     topics: list[str]
     author: str
     date_published: date | None = None
+    embedding: list[float]

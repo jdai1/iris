@@ -6,6 +6,7 @@ import uuid
 from sqlalchemy import ForeignKey, Index, String, UniqueConstraint
 from sqlalchemy.dialects.postgresql import ARRAY, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+from pgvector.sqlalchemy import Vector
 from app.enums.core import DomainStatus
 from app.models.mixins import Base, TimestampMixin
 
@@ -70,6 +71,7 @@ class Entry(Base, TimestampMixin):
     topics: Mapped[list[str]] = mapped_column(ARRAY(String), nullable=False)
     author: Mapped[str] = mapped_column(nullable=False)
     date_published: Mapped[date | None] = mapped_column(nullable=True)
+    embedding: Mapped[list[float]] = mapped_column(Vector(1536), nullable=False)
 
 
 class LinkAliasMapping(Base, TimestampMixin):

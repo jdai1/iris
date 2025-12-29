@@ -12,6 +12,7 @@ def create_entry(params: EntryCreateParams) -> Entry:
         topics=params.topics,
         author=params.author,
         date_published=params.date_published,
+        embedding=params.embedding,
     )
     db.session.add(entry)
     db.session.flush()
@@ -28,6 +29,7 @@ def create_entries_batch(params_list: list[EntryCreateParams]) -> list[Entry]:
             topics=params.topics,
             author=params.author,
             date_published=params.date_published,
+            embedding=params.embedding,
         )
         for params in params_list
     ]

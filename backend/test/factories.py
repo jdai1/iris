@@ -54,6 +54,7 @@ class EntryFactory(factory.alchemy.SQLAlchemyModelFactory):
     topics = factory.LazyFunction(lambda: ["technology", "programming"])
     author = factory.Faker("name")
     date_published = factory.LazyFunction(lambda: date.today())
+    embedding = factory.LazyFunction(lambda: [0.0] * 1536)  # Dummy embedding vector
 
 
 class LinkMappingFactory(factory.alchemy.SQLAlchemyModelFactory):

@@ -1,24 +1,33 @@
 import asyncio
-import logging
 import uuid
 
 import aiohttp
 import app.db as db
-from app.constants import URL_DEPTH_TOLERANCE, URL_REPETITION_TOLERANCE
+from app.constants import (
+    MAX_INTERNAL_LINKS_Q_SIZE,
+    TOO_MANY_INTERNAL_LINKS_REASON,
+    URL_DEPTH_TOLERANCE,
+    URL_REPETITION_TOLERANCE,
+)
 from app.dao.domain import (
     create_domains_batch,
     get_domains_by_urls,
     get_or_create_domain_by_url,
 )
 from app.dao.entry import create_entries_batch
+from sqlalchemy import select
 from app.dao.link import create_links_batch, get_links_by_urls
 from app.dao.mappings import (
     create_domain_mappings_batch,
     create_link_mappings_batch,
 )
 from app.enums.core import DomainStatus
-from app.exceptions import FatalException, SkipCrawlingDomainException
-from app.models.models import Domain, Link
+from app.exceptions import (
+    FatalException,
+    SkipCrawlingDomainException,
+    TooManyInternalLinksException,
+)
+from app.models.models import Domain, Entry, Link
 from app.schemas.crawl import (
     DomainCreateParams,
     DomainMappingCreateParams,
@@ -27,7 +36,8 @@ from app.schemas.crawl import (
     LinkMappingCreateParams,
     PageCrawlResult,
 )
-from app.schemas.llm import EntryParseResult
+from app.schemas.llm import EntryWithEmbedding
+from app.services.embedding_service import generate_embedding
 from app.services.llm_services import classify_domain, parse_entry
 from app.utils.date_utils import parse_date
 from app.utils.scrape_utils import crawl_url, extract_text_from_html
@@ -39,12 +49,7 @@ from app.utils.url_utils import (
     is_id_or_static_resource,
     sanitize_url,
 )
-import os
-
-logging.basicConfig(
-    level=os.getenv("LOG_LEVEL", "INFO").upper(),
-)
-logger = logging.getLogger(__name__)
+from app.utils.logger import scraper_logger as logger
 
 
 def _is_valid_internal_link(domain_url: str, url: str) -> bool:
@@ -162,6 +167,13 @@ async def _crawl_pages(
                 if not _is_valid_internal_link(domain_url, link):
                     logger.debug(f"SKIP (invalid): {link}")
                     continue
+
+                # Check if queue exceeds maximum size
+                if len(queue) >= MAX_INTERNAL_LINKS_Q_SIZE:
+                    raise TooManyInternalLinksException(
+                        f"Queue size ({len(queue)}) exceeds maximum ({MAX_INTERNAL_LINKS_Q_SIZE})"
+                    )
+
                 queue.append((link, depth + 1))
                 new_links_added += 1
                 logger.debug(f"QUEUED (depth={depth + 1}): {link}")
@@ -188,16 +200,16 @@ async def _crawl_pages(
 
 async def _extract_data(
     url_to_crawl_result: dict[str, PageCrawlResult], batch_size: int = 10
-) -> dict[str, EntryParseResult]:
+) -> dict[str, EntryWithEmbedding]:
     """
-    Process all HTML via LLM to extract entries.
+    Process all HTML via LLM to extract entries and generate embeddings.
 
     Args:
         url_to_crawl_result: Dict mapping url -> PageCrawlResult
         batch_size: Batch size for parallel processing
 
     Returns:
-        Dict mapping url -> EntryParseResult (only includes entries where should_pursue=True)
+        Dict mapping url -> EntryWithEmbedding (only includes entries where should_pursue=True)
     """
     logger.info(
         "Starting LLM processing",
@@ -207,11 +219,56 @@ async def _extract_data(
         },
     )
 
-    url_to_entry: dict[str, EntryParseResult] = {}
+    url_to_entry: dict[str, EntryWithEmbedding] = {}
     urls = list(url_to_crawl_result.keys())
     total_batches = (len(urls) + batch_size - 1) // batch_size
     batch_num = 0
     total_errors = 0
+
+    async def process_entry(url: str) -> EntryWithEmbedding | None:
+        """Parse entry and generate embedding for a single URL."""
+        try:
+            # Parse entry
+            parsed_result = await parse_entry(
+                url=url,
+                html=extract_text_from_html(url_to_crawl_result[url].cleaned_html),
+            )
+
+            if not parsed_result.should_pursue:
+                logger.debug(f"SKIP [{url}]: should_pursue=False")
+                return None
+
+            # Generate embedding
+            title = (
+                parsed_result.title.replace("\x00", " ")
+                if "\x00" in parsed_result.title
+                else parsed_result.title
+            )
+            summary = (
+                parsed_result.summary.replace("\x00", " ")
+                if "\x00" in parsed_result.summary
+                else parsed_result.summary
+            )
+            text_to_embed = f"{title} {summary}"
+            embedding = await generate_embedding(text_to_embed)
+
+            # Create EntryWithEmbedding
+            entry_with_embedding = EntryWithEmbedding(
+                should_pursue=parsed_result.should_pursue,
+                title=parsed_result.title,
+                summary=parsed_result.summary,
+                topics=parsed_result.topics,
+                author=parsed_result.author,
+                date_published=parsed_result.date_published,
+                embedding=embedding,
+            )
+
+            logger.info(f'ENTRY [{url}]: "{parsed_result.title[:60]}..."')
+            return entry_with_embedding
+
+        except Exception as e:
+            logger.error(f"ERROR [{url}]: {type(e).__name__}: {str(e)[:80]}")
+            return None
 
     for i in range(0, len(urls), batch_size):
         batch_num += 1
@@ -219,34 +276,25 @@ async def _extract_data(
         logger.info(
             f"LLM Batch {batch_num}/{total_batches}: Processing {len(batch_urls)} pages..."
         )
-        for url in batch_urls:
-            logger.debug(f"Processing: {url}")
 
-        # Process HTML in parallel
-        parse_tasks = [
-            parse_entry(url=url, html=url_to_crawl_result[url].cleaned_html)
-            for url in batch_urls
-        ]
-        parsed_results = await asyncio.gather(*parse_tasks, return_exceptions=True)
+        # Process entries in parallel (parse + generate embedding)
+        results = await asyncio.gather(
+            *[process_entry(url) for url in batch_urls], return_exceptions=True
+        )
 
-        # Filter successful results where should_pursue=True
+        # Collect successful entries
         batch_entries = 0
         batch_errors = 0
-        for url, parsed_result in zip(batch_urls, parsed_results):
-            if isinstance(parsed_result, Exception):
+        for url, result in zip(batch_urls, results):
+            if isinstance(result, Exception):
                 batch_errors += 1
                 total_errors += 1
                 logger.error(
-                    f"ERROR [{url}]: {type(parsed_result).__name__}: {str(parsed_result)[:80]}"
+                    f"ERROR [{url}]: {type(result).__name__}: {str(result)[:80]}"
                 )
-                continue
-
-            if parsed_result.should_pursue:
-                url_to_entry[url] = parsed_result  # type: ignore
+            elif result is not None and isinstance(result, EntryWithEmbedding):
+                url_to_entry[url] = result
                 batch_entries += 1
-                logger.info(f'ENTRY [{url}]: "{parsed_result.title[:60]}..."')
-            else:
-                logger.debug(f"SKIP [{url}]: should_pursue=False")
 
         logger.info(
             f"LLM Batch {batch_num} complete: {batch_entries} entries found, {batch_errors} errors"
@@ -263,28 +311,85 @@ async def _extract_data(
     return url_to_entry
 
 
-def _create_entries(
-    url_to_entry: dict[str, EntryParseResult],
+def _delete_orphaned_entries(
+    url_to_entry: dict[str, EntryWithEmbedding],
     url_to_link_obj: dict[str, Link],
 ) -> None:
-    """Create Entry objects for URLs that have entries."""
+    """
+    Delete entries for links that were crawled but no longer have entries (orphaned).
+
+    Note: Links themselves are never deleted, only entries.
+
+    Args:
+        url_to_entry: Dict mapping url -> EntryWithEmbedding (only entry URLs)
+        url_to_link_obj: Dict mapping url -> Link (all internal crawled URLs)
+    """
+    all_crawled_link_ids = {link.id for link in url_to_link_obj.values()}
+    link_ids_with_entries = {url_to_link_obj[url].id for url in url_to_entry.keys()}
+    link_ids_orphaned = all_crawled_link_ids - link_ids_with_entries
+
+    if not link_ids_orphaned:
+        return
+
+    # Only delete entries for orphaned links
+    stmt = select(Entry).where(Entry.link_id.in_(link_ids_orphaned))
+    entries_to_delete = db.session.execute(stmt).scalars().all()
+
+    if entries_to_delete:
+        for entry in entries_to_delete:
+            db.session.delete(entry)
+        db.session.flush()
+        logger.info(f"Deleted {len(entries_to_delete)} orphaned entries")
+
+
+def _create_or_update_entries(
+    url_to_entry: dict[str, EntryWithEmbedding],
+    url_to_link_obj: dict[str, Link],
+) -> None:
+    """
+    Create or update Entry objects for URLs that have entries.
+
+    If an entry already exists for a link, it is deleted first (since link_id is unique).
+    """
+    if not url_to_entry:
+        logger.info("No entries to create")
+        return
+
+    # Get link_ids that will have entries
+    link_ids_with_entries = {
+        url_to_link_obj[url].id
+        for url in url_to_entry.keys()
+        if url_to_link_obj[url].entry
+    }
+
+    # Delete existing entries for links that will have entries (to handle updates)
+    if link_ids_with_entries:
+        stmt = select(Entry).where(Entry.link_id.in_(link_ids_with_entries))
+        existing_entries = db.session.execute(stmt).scalars().all()
+        if existing_entries:
+            for entry in existing_entries:
+                db.session.delete(entry)
+            db.session.flush()
+            logger.info(
+                f"Deleted {len(existing_entries)} existing entries to be updated"
+            )
+
+    # Create entry params with embeddings
     entry_params = []
-    for url, parsed_entry in url_to_entry.items():
+    for url, entry in url_to_entry.items():
         # Sanitize fields
         title = (
-            parsed_entry.title.replace("\x00", " ")
-            if "\x00" in parsed_entry.title
-            else parsed_entry.title
+            entry.title.replace("\x00", " ") if "\x00" in entry.title else entry.title
         )
         summary = (
-            parsed_entry.summary.replace("\x00", " ")
-            if "\x00" in parsed_entry.summary
-            else parsed_entry.summary
+            entry.summary.replace("\x00", " ")
+            if "\x00" in entry.summary
+            else entry.summary
         )
         author = (
-            parsed_entry.author.replace("\x00", " ")
-            if "\x00" in parsed_entry.author
-            else parsed_entry.author
+            entry.author.replace("\x00", " ")
+            if "\x00" in entry.author
+            else entry.author
         )
 
         link = url_to_link_obj[url]
@@ -292,14 +397,15 @@ def _create_entries(
             link_id=link.id,
             title=title,
             summary=summary,
-            topics=parsed_entry.topics,
+            topics=entry.topics,
             author=author,
-            date_published=parse_date(parsed_entry.date_published),
+            date_published=parse_date(entry.date_published),
+            embedding=entry.embedding,
         )
         entry_params.append(params)
 
     create_entries_batch(entry_params)
-    logger.info(f"{len(entry_params)} entries created")
+    logger.info(f"{len(entry_params)} entries created with embeddings")
 
 
 def _collect_external_links(
@@ -428,7 +534,7 @@ async def _validate_domain(
                 "entity": classification.entity.value
                 if classification.entity
                 else None,
-                "name": classification.name,
+                "entity_name": classification.name,
                 "blog": classification.blog,
             },
         )
@@ -462,6 +568,10 @@ async def _validate_domain(
             f"Domain {domain.domain_url} failed validation: {str(e)}"
         ) from e
     except Exception as e:
+        import traceback
+
+        traceback.print_exc()
+        breakpoint()
         # Other failure
         domain.status = DomainStatus.OTHER_FAILURE
         domain.error_message = str(e)
@@ -500,7 +610,7 @@ def _create_domain_mappings(
 
 def _index_data(
     url_to_crawl_result: dict[str, PageCrawlResult],
-    url_to_entry: dict[str, EntryParseResult],
+    url_to_entry: dict[str, EntryWithEmbedding],
     domain_url: str,
     domain: Domain,
 ):
@@ -509,10 +619,9 @@ def _index_data(
 
     Args:
         url_to_crawl_result: Dict mapping url -> PageCrawlResult
-        url_to_entry: Dict mapping url -> EntryParseResult (only entry URLs)
+        url_to_entry: Dict mapping url -> EntryWithEmbedding (only entry URLs)
         domain_url: Domain URL
         domain: Domain object (already created in PENDING state)
-        classification_result: Optional classification result with entity, name, blog
 
     Returns:
         Updated Domain object
@@ -626,8 +735,11 @@ def _index_data(
 
     logger.info(f"{len(all_link_objs)} links ready")
 
-    # Create Entries for URLs that have entries
-    _create_entries(url_to_entry, url_to_link_obj)
+    # Delete orphaned entries (links that no longer have entries)
+    _delete_orphaned_entries(url_to_entry, url_to_link_obj)
+
+    # Create or update entries for URLs that have entries
+    _create_or_update_entries(url_to_entry, url_to_link_obj)
 
     # Create link mappings: internal --> external
     _create_internal_external_link_mappings(
@@ -714,24 +826,33 @@ def scrape_domain(
         return
 
     # Step 1 & 2: Crawl and extract data
-    async def _run_async_helpers():
-        async with aiohttp.ClientSession() as http_session:
-            # Step 1: BFS to collect PageCrawlResult objects
-            url_to_crawl_result = await _crawl_pages(
-                http_session=http_session,
-                start_url=url,
-                domain_url=domain_url,
-                max_depth=max_depth,
-                batch_size=batch_size,
-            )
-            # Step 2: Process all HTML via LLM
-            logger.info("Calling _extract_data()...")
-            url_to_entry = await _extract_data(
-                url_to_crawl_result=url_to_crawl_result, batch_size=batch_size
-            )
-            return url_to_crawl_result, url_to_entry
+    try:
 
-    url_to_crawl_result, url_to_entry = asyncio.run(_run_async_helpers())
+        async def _run_async_helpers():
+            async with aiohttp.ClientSession() as http_session:
+                # Step 1: BFS to collect PageCrawlResult objects
+                url_to_crawl_result = await _crawl_pages(
+                    http_session=http_session,
+                    start_url=url,
+                    domain_url=domain_url,
+                    max_depth=max_depth,
+                    batch_size=batch_size,
+                )
+                # Step 2: Process all HTML via LLM and generate embeddings
+                logger.info("Calling _extract_data()...")
+                url_to_entry = await _extract_data(
+                    url_to_crawl_result=url_to_crawl_result, batch_size=batch_size
+                )
+                return url_to_crawl_result, url_to_entry
+
+        url_to_crawl_result, url_to_entry = asyncio.run(_run_async_helpers())
+    except TooManyInternalLinksException as e:
+        # Too many internal links - update domain status
+        domain.status = DomainStatus.OTHER_FAILURE
+        domain.error_message = TOO_MANY_INTERNAL_LINKS_REASON
+        db.session.commit()
+        logger.warning(f"Domain {domain_url} has too many internal links: {str(e)}")
+        return
 
     # Final summary
     logger.info(

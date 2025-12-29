@@ -13,11 +13,11 @@ async def openai_client():
     yield client
     await client.close()  # important
 
-
+@pytest.mark.parametrize(("test_url", "expected_should_pursue"), [
+    ("https://rkg.blog", False)
+])
 @pytest.mark.asyncio
-async def test_quote_page_not_classified_as_entry(openai_client):
-    test_url = "https://jdai1.github.io/media/bluelock"
-
+async def test_quote_page_not_classified_as_entry(openai_client: AsyncOpenAI, test_url: str, expected_should_pursue: bool):
     async with aiohttp.ClientSession() as session:
         # Crawl the URL to get HTML
         crawl_result = await crawl_url(session, test_url)
@@ -28,10 +28,4 @@ async def test_quote_page_not_classified_as_entry(openai_client):
             html=crawl_result.cleaned_html,
             client=openai_client,
         )
-        breakpoint()
-        # Assert that this quote page is NOT classified as an entry
-        assert not parse_result.should_pursue, (
-            "Expected should_pursue=False for quote/media page, but got True. "
-            "This page has 'Back to Media' navigation and attribution '- Brian Chesky', "
-            "so it should be excluded as a quote/media page."
-        )
+        assert not parse_result.should_pursue

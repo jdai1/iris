@@ -1,4 +1,5 @@
 factory-boy>=3.3.0
 Faker>=19.0.0
 python-dotenv>=1.0.0
-
+psycopg2-binary>=2.9.0
+pgvector>=0.3.0
