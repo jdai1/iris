@@ -3,7 +3,8 @@
 # Initialize custom logger before importing other modules
 from app.utils.logger import scraper_logger  # noqa: F401
 
-from app.dao.domain import get_domain_by_url, reset_domain_status
+import app.db as db
+from app.dao.domain import get_domain_by_url, update_domain_status
 from app.enums.core import DomainStatus
 from app.services.core import scrape_domain
 from app.utils.db_utils import print_domain_state
@@ -32,7 +33,8 @@ def scrape_domain_cmd(url: str, max_depth: int = 10, batch_size: int = 50) -> No
             return
         print()
 
-        reset_domain_status(domain=domain, status=DomainStatus.PENDING)
+        update_domain_status(domain=domain, status=DomainStatus.PENDING)
+        db.session.commit()
 
     # Run the scraper
     scrape_domain(

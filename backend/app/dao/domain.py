@@ -80,8 +80,16 @@ def get_or_create_domain_by_url(domain_url: str) -> Domain:
     return create_domain(params)
 
 
-def reset_domain_status(domain: Domain, status: DomainStatus, error_message: str | None = None) -> None:
-    """Reset domain status."""
+def update_domain_status(
+    domain: Domain, status: DomainStatus, error_message: str | None = None
+) -> None:
+    """
+    Update domain status and error message.
+
+    Uses flush() to persist changes within a transaction.
+    Call db.session.commit() separately if you need to commit the transaction.
+    """
     domain.status = status
-    domain.error_message = error_message
-    db.session.commit()
+    if error_message is not None:
+        domain.error_message = error_message
+    db.session.flush()

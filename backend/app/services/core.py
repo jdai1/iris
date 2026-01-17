@@ -13,13 +13,21 @@ from app.dao.domain import (
     create_domains_batch,
     get_domains_by_urls,
     get_or_create_domain_by_url,
+    update_domain_status,
 )
-from app.dao.entry import create_entries_batch
-from sqlalchemy import select
+from app.dao.entry import (
+    create_entries_batch,
+    delete_entries_by_link_ids,
+    get_entries_by_link_ids,
+)
 from app.dao.link import create_links_batch, get_links_by_urls
 from app.dao.mappings import (
     create_domain_mappings_batch,
+    create_link_alias_mapping,
     create_link_mappings_batch,
+    get_existing_domain_mappings,
+    get_existing_link_alias_mappings,
+    get_existing_link_mappings,
 )
 from app.enums.core import DomainStatus
 from app.exceptions import (
@@ -27,7 +35,7 @@ from app.exceptions import (
     SkipCrawlingDomainException,
     TooManyInternalLinksException,
 )
-from app.models.models import Domain, Entry, Link
+from app.models.models import Domain, Link
 from app.schemas.crawl import (
     DomainCreateParams,
     DomainMappingCreateParams,
@@ -147,6 +155,7 @@ async def _crawl_pages(
                     continue
                 if final_url in visited:
                     logger.debug("SKIP: Redirect target already visited")
+                    url_to_crawl_result[url] = crawl_result  # type: ignore
                     continue
 
             # Store crawl result
@@ -194,7 +203,7 @@ async def _crawl_pages(
             "total_batches": batch_num,
         },
     )
-
+    breakpoint()
     return url_to_crawl_result
 
 
@@ -211,16 +220,37 @@ async def _extract_data(
     Returns:
         Dict mapping url -> EntryWithEmbedding (only includes entries where should_pursue=True)
     """
+    # Filter out redirect sources (alias URLs) - only process final destination URLs
+    final_urls_to_process = {
+        url: crawl_result
+        for url, crawl_result in url_to_crawl_result.items()
+        if url
+        == crawl_result.redirected_url  # Only process if URL is final destination
+    }
+
+    skipped_aliases = len(url_to_crawl_result) - len(final_urls_to_process)
+    if skipped_aliases > 0:
+        alias_urls = {
+            url
+            for url, crawl_result in url_to_crawl_result.items()
+            if url != crawl_result.redirected_url
+        }
+        logger.info(
+            f"Skipping {skipped_aliases} redirect alias URLs (only processing final destinations)"
+        )
+        logger.debug(f"Skipped redirect aliases: {sorted(alias_urls)}")
+
     logger.info(
         "Starting LLM processing",
         extra={
-            "total_pages": len(url_to_crawl_result),
+            "total_pages": len(final_urls_to_process),
+            "skipped_aliases": skipped_aliases,
             "batch_size": batch_size,
         },
     )
 
     url_to_entry: dict[str, EntryWithEmbedding] = {}
-    urls = list(url_to_crawl_result.keys())
+    urls = list(final_urls_to_process.keys())
     total_batches = (len(urls) + batch_size - 1) // batch_size
     batch_num = 0
     total_errors = 0
@@ -231,7 +261,7 @@ async def _extract_data(
             # Parse entry
             parsed_result = await parse_entry(
                 url=url,
-                html=extract_text_from_html(url_to_crawl_result[url].cleaned_html),
+                html=extract_text_from_html(final_urls_to_process[url].cleaned_html),
             )
 
             if not parsed_result.should_pursue:
@@ -332,14 +362,9 @@ def _delete_orphaned_entries(
         return
 
     # Only delete entries for orphaned links
-    stmt = select(Entry).where(Entry.link_id.in_(link_ids_orphaned))
-    entries_to_delete = db.session.execute(stmt).scalars().all()
-
-    if entries_to_delete:
-        for entry in entries_to_delete:
-            db.session.delete(entry)
-        db.session.flush()
-        logger.info(f"Deleted {len(entries_to_delete)} orphaned entries")
+    deleted_count = delete_entries_by_link_ids(link_ids_orphaned)
+    if deleted_count > 0:
+        logger.info(f"Deleted {deleted_count} orphaned entries")
 
 
 def _create_or_update_entries(
@@ -355,17 +380,9 @@ def _create_or_update_entries(
         logger.info("No entries to create")
         return
 
-    # Get link_ids that will have entries
-    link_ids_with_entries = {
-        url_to_link_obj[url].id
-        for url in url_to_entry.keys()
-        if url_to_link_obj[url].entry
-    }
-
-    # Delete existing entries for links that will have entries (to handle updates)
-    if link_ids_with_entries:
-        stmt = select(Entry).where(Entry.link_id.in_(link_ids_with_entries))
-        existing_entries = db.session.execute(stmt).scalars().all()
+    link_ids = {url_to_link_obj[url].id for url in url_to_entry.keys()}
+    if link_ids:
+        existing_entries = get_entries_by_link_ids(link_ids)
         if existing_entries:
             for entry in existing_entries:
                 db.session.delete(entry)
@@ -440,6 +457,67 @@ def _collect_external_links(
     return external_urls_set, external_domains_set, internal_to_external_mappings
 
 
+def _create_link_alias_mappings(
+    url_to_crawl_result: dict[str, PageCrawlResult],
+    all_link_objs: dict[str, Link],
+    domain_url: str,
+) -> None:
+    """Create link alias mappings for redirects (alias_url -> canonical_link)."""
+    logger.info("Creating link alias mappings for redirects...")
+
+    alias_mappings_to_create = []
+
+    for url, crawl_result in url_to_crawl_result.items():
+        # Check if this is a redirect (alias)
+        if url != crawl_result.redirected_url:
+            redirected_url = sanitize_url(crawl_result.redirected_url)
+            alias_url = sanitize_url(url)
+
+            # Only create alias mappings for internal links
+            if not is_from_same_domain_or_subdomain(redirected_url, domain_url):
+                continue
+
+            # Both URLs must exist in all_link_objs
+            if alias_url not in all_link_objs or redirected_url not in all_link_objs:
+                continue
+
+            alias_link = all_link_objs[alias_url]
+            canonical_link = all_link_objs[redirected_url]
+
+            # Skip self-references
+            if alias_link.id == canonical_link.id:
+                continue
+
+            alias_mappings_to_create.append((alias_url, canonical_link.id))
+
+    if not alias_mappings_to_create:
+        logger.debug("No link alias mappings to create")
+        return
+
+    # Check for existing mappings
+    alias_urls = {alias_url for alias_url, _ in alias_mappings_to_create}
+    existing_aliases = get_existing_link_alias_mappings(alias_urls)
+
+    # Filter out existing mappings
+    new_mappings = [
+        (alias_url, canonical_link_id)
+        for alias_url, canonical_link_id in alias_mappings_to_create
+        if alias_url not in existing_aliases
+    ]
+
+    if new_mappings:
+        for alias_url, canonical_link_id in new_mappings:
+            create_link_alias_mapping(alias_url, canonical_link_id)
+        logger.info(
+            f"{len(new_mappings)} link alias mappings created "
+            f"({len(alias_mappings_to_create) - len(new_mappings)} already existed)"
+        )
+    else:
+        logger.debug(
+            f"All {len(alias_mappings_to_create)} link alias mappings already exist"
+        )
+
+
 def _create_internal_external_link_mappings(
     internal_to_external_mappings: dict[str, list[str]],
     url_to_link_obj: dict[str, Link],
@@ -477,13 +555,37 @@ def _create_internal_external_link_mappings(
             )
             internal_external_mapping_params.append(params)
 
-    if internal_external_mapping_params:
-        create_link_mappings_batch(internal_external_mapping_params)
+    if not internal_external_mapping_params:
+        logger.debug("No internal --> external link mappings to create")
+        return
+
+    # Query database for existing mappings to avoid unique constraint violations
+    source_link_ids = {
+        params.source_link_id for params in internal_external_mapping_params
+    }
+    target_link_ids = {
+        params.target_link_id for params in internal_external_mapping_params
+    }
+
+    existing_pairs = get_existing_link_mappings(source_link_ids, target_link_ids)
+
+    # Filter out mappings that already exist
+    new_mapping_params = [
+        params
+        for params in internal_external_mapping_params
+        if (params.source_link_id, params.target_link_id) not in existing_pairs
+    ]
+
+    if new_mapping_params:
+        create_link_mappings_batch(new_mapping_params)
         logger.info(
-            f"{len(internal_external_mapping_params)} internal --> external link mappings created"
+            f"{len(new_mapping_params)} internal --> external link mappings created "
+            f"({len(internal_external_mapping_params) - len(new_mapping_params)} already existed)"
         )
     else:
-        logger.debug("No internal --> external link mappings to create")
+        logger.debug(
+            f"All {len(internal_external_mapping_params)} link mappings already exist"
+        )
 
 
 async def _validate_domain(
@@ -544,8 +646,7 @@ async def _validate_domain(
         domain.name = classification.name
 
         if not classification.blog:
-            domain.status = DomainStatus.NOT_A_BLOG
-            db.session.flush()
+            update_domain_status(domain, DomainStatus.NOT_A_BLOG)
             logger.warning("Domain is not a blog, marking as NOT_A_BLOG")
             raise SkipCrawlingDomainException(
                 f"Domain {domain.domain_url} is not a blog"
@@ -561,9 +662,7 @@ async def _validate_domain(
         raise
     except FatalException as e:
         # Scraping failed - update domain status
-        domain.status = DomainStatus.SCRAPING_FAILED
-        domain.error_message = str(e)
-        db.session.flush()
+        update_domain_status(domain, DomainStatus.SCRAPING_FAILED, str(e))
         raise SkipCrawlingDomainException(
             f"Domain {domain.domain_url} failed validation: {str(e)}"
         ) from e
@@ -573,9 +672,7 @@ async def _validate_domain(
         traceback.print_exc()
         breakpoint()
         # Other failure
-        domain.status = DomainStatus.OTHER_FAILURE
-        domain.error_message = str(e)
-        db.session.flush()
+        update_domain_status(domain, DomainStatus.OTHER_FAILURE, str(e))
         raise SkipCrawlingDomainException(
             f"Domain {domain.domain_url} failed validation: {str(e)}"
         ) from e
@@ -601,11 +698,30 @@ def _create_domain_mappings(
         )
         domain_mapping_params.append(params)
 
-    if domain_mapping_params:
-        create_domain_mappings_batch(domain_mapping_params)
-        logger.info(f"{len(domain_mapping_params)} domain mappings created")
-    else:
+    if not domain_mapping_params:
         logger.debug("No domain mappings to create")
+        return
+
+    # Query database for existing mappings to avoid unique constraint violations
+    target_domain_ids = {params.target_domain_id for params in domain_mapping_params}
+
+    existing_pairs = get_existing_domain_mappings(domain.id, target_domain_ids)
+
+    # Filter out mappings that already exist
+    new_mapping_params = [
+        params
+        for params in domain_mapping_params
+        if (params.source_domain_id, params.target_domain_id) not in existing_pairs
+    ]
+
+    if new_mapping_params:
+        create_domain_mappings_batch(new_mapping_params)
+        logger.info(
+            f"{len(new_mapping_params)} domain mappings created "
+            f"({len(domain_mapping_params) - len(new_mapping_params)} already existed)"
+        )
+    else:
+        logger.debug(f"All {len(domain_mapping_params)} domain mappings already exist")
 
 
 def _index_data(
@@ -735,6 +851,9 @@ def _index_data(
 
     logger.info(f"{len(all_link_objs)} links ready")
 
+    # Create link alias mappings for redirects
+    _create_link_alias_mappings(url_to_crawl_result, all_link_objs, domain_url)
+
     # Delete orphaned entries (links that no longer have entries)
     _delete_orphaned_entries(url_to_entry, url_to_link_obj)
 
@@ -750,8 +869,7 @@ def _index_data(
     _create_domain_mappings(domain, external_domains_set, external_domain_objs)
 
     # Update domain status to SUCCESS after successful indexing
-    domain.status = DomainStatus.SUCCESS
-    domain.error_message = None
+    update_domain_status(domain, DomainStatus.SUCCESS, None)
 
     logger.info("Committing transaction...")
     db.session.commit()
@@ -848,8 +966,9 @@ def scrape_domain(
         url_to_crawl_result, url_to_entry = asyncio.run(_run_async_helpers())
     except TooManyInternalLinksException as e:
         # Too many internal links - update domain status
-        domain.status = DomainStatus.OTHER_FAILURE
-        domain.error_message = TOO_MANY_INTERNAL_LINKS_REASON
+        update_domain_status(
+            domain, DomainStatus.OTHER_FAILURE, TOO_MANY_INTERNAL_LINKS_REASON
+        )
         db.session.commit()
         logger.warning(f"Domain {domain_url} has too many internal links: {str(e)}")
         return
