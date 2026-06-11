@@ -1,5 +1,0 @@
-#!/bin/bash
-# Iris CLI shortcut - calls python3 -m scripts.main with all arguments
-
-python3 -m scripts.main "$@"
-

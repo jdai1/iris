@@ -1,1 +1,23 @@
 .DS_Store
+
+# Environment variables
+.env
+backend/.env
+
+# Python
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+backend/.venv/
+backend/*.db
+logs/
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/*.tsbuildinfo
+frontend/vite.config.js
+frontend/vite.config.d.ts
+
+# Editor
+.vscode/
