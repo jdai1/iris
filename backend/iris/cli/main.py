@@ -327,7 +327,12 @@ def cmd_reclassify_documents(args: argparse.Namespace) -> None:
 
 def cmd_source_priorities(args: argparse.Namespace) -> None:
     with session_scope() as session:
-        priorities = plan_sources(session, limit=args.limit)
+        priorities = plan_sources(
+            session,
+            limit=args.limit,
+            seed_source_id=args.seed_source_id,
+            seed_domain=args.seed_domain,
+        )
         for idx, item in enumerate(priorities, start=1):
             source = item.source
             print(
@@ -342,6 +347,7 @@ def cmd_autopilot(args: argparse.Namespace) -> None:
         "autopilot starting: "
         f"budget_sources={args.budget_sources} max_pages={args.max_pages} max_depth={args.max_depth} "
         f"max_documents_per_source={args.max_documents_per_source or 'none'} "
+        f"seed_source_id={args.seed_source_id or 'none'} seed_domain={args.seed_domain or 'none'} "
         f"skip_existing={bool(args.skip_existing)} embed={not args.no_embed} dry_run={bool(args.dry_run)}",
         flush=True,
     )
@@ -354,6 +360,8 @@ def cmd_autopilot(args: argparse.Namespace) -> None:
         dry_run=args.dry_run,
         embed=not args.no_embed,
         openai_embeddings=True if args.openai_embeddings else None,
+        seed_source_id=args.seed_source_id,
+        seed_domain=args.seed_domain,
     )
     print(
         f"index_run {run.id} {run.status}: planned={run.planned_sources} attempted={run.attempted_sources} "
@@ -597,6 +605,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     priorities = subparsers.add_parser("source-priorities")
     priorities.add_argument("--limit", type=int, default=20)
+    priorities.add_argument("--seed-source-id", type=int, default=None)
+    priorities.add_argument("--seed-domain", default=None)
     priorities.set_defaults(func=cmd_source_priorities)
 
     autopilot = subparsers.add_parser("autopilot")
@@ -609,6 +619,8 @@ def build_parser() -> argparse.ArgumentParser:
     autopilot.add_argument("--embed", action="store_true", help=argparse.SUPPRESS)
     autopilot.add_argument("--no-embed", action="store_true")
     autopilot.add_argument("--openai-embeddings", action="store_true")
+    autopilot.add_argument("--seed-source-id", type=int, default=None)
+    autopilot.add_argument("--seed-domain", default=None)
     autopilot.add_argument("--show-events", type=int, default=20)
     autopilot.add_argument("--verbose-events", action="store_true")
     autopilot.set_defaults(func=cmd_autopilot)

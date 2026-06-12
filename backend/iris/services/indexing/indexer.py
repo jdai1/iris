@@ -54,11 +54,10 @@ OBVIOUS_NON_SOURCE_DOMAIN_PARTS = {
     "thelancet.com",
     "thedailybeast.com",
     "tvtropes.org",
+    "wikipedia.org",
     "youtu.be",
     "youtube.com",
 }
-
-SPIDER_SEED_DOMAIN = "benkuhn.net"
 
 
 @dataclass(frozen=True)
@@ -67,8 +66,9 @@ class SourcePriority:
     score: float
     inbound_links: int
     referring_sources: int
-    feed_signal: float
-    manual_seed_bonus: float
+    bfs_links: int
+    bfs_seed_source_id: int | None
+    bfs_seed_domain: str | None
     reason: str
 
 
@@ -95,7 +95,14 @@ def log_event(
     return event
 
 
-def plan_sources(session: Session, limit: int = 20) -> list[SourcePriority]:
+def plan_sources(
+    session: Session,
+    limit: int = 20,
+    *,
+    seed_source_id: int | None = None,
+    seed_domain: str | None = None,
+) -> list[SourcePriority]:
+    seed_source = _resolve_bfs_seed_source(session, seed_source_id=seed_source_id, seed_domain=seed_domain)
     sources = session.execute(
         select(Source)
         .where(Source.status == SourceStatus.QUEUED.value)
@@ -103,47 +110,26 @@ def plan_sources(session: Session, limit: int = 20) -> list[SourcePriority]:
     ).scalars().all()
     source_ids = [source.id for source in sources]
     inbound_by_source, referring_by_source = _link_counts_for_sources(session, source_ids)
-    seed_links_by_source = _seed_link_counts_for_sources(session, source_ids)
+    bfs_links_by_source = (
+        _bfs_link_counts_for_sources(session, source_ids, seed_source.id)
+        if seed_source
+        else inbound_by_source
+    )
     priorities = [
         _score_source_from_counts(
             source,
             inbound_links=inbound_by_source.get(source.id, 0),
             referring_sources=referring_by_source.get(source.id, 0),
-            seed_links=seed_links_by_source.get(source.id, 0),
+            bfs_links=bfs_links_by_source.get(source.id, 0),
+            bfs_seed_source_id=seed_source.id if seed_source else None,
+            bfs_seed_domain=seed_source.canonical_domain if seed_source else None,
         )
         for source in sources
-        if seed_links_by_source.get(source.id, 0) > 0
+        if bfs_links_by_source.get(source.id, 0) > 0
+        and not _has_obvious_non_source_domain(source.canonical_domain)
     ]
     priorities.sort(key=lambda item: item.score, reverse=True)
     return priorities[:limit]
-
-
-def _score_source(session: Session, source: Source) -> SourcePriority:
-    inbound_links = session.scalar(
-        select(func.count(Link.id))
-        .join(Document, Link.source_document_id == Document.id)
-        .join(Source, Document.source_id == Source.id)
-        .where(Link.target_source_id == source.id)
-        .where(Document.document_type == DocumentType.ESSAY.value)
-        .where(Document.crawl_status == CrawlStatus.FETCHED.value)
-        .where(Source.status == SourceStatus.INDEXED.value)
-    ) or 0
-    referring_sources = session.scalar(
-        select(func.count(distinct(Document.source_id)))
-        .join(Link, Link.source_document_id == Document.id)
-        .join(Source, Document.source_id == Source.id)
-        .where(Link.target_source_id == source.id)
-        .where(Document.document_type == DocumentType.ESSAY.value)
-        .where(Document.crawl_status == CrawlStatus.FETCHED.value)
-        .where(Source.status == SourceStatus.INDEXED.value)
-    ) or 0
-    seed_links_by_source = _seed_link_counts_for_sources(session, [source.id])
-    return _score_source_from_counts(
-        source,
-        inbound_links=inbound_links,
-        referring_sources=referring_sources,
-        seed_links=seed_links_by_source.get(source.id, 0),
-    )
 
 
 def _link_counts_for_sources(session: Session, source_ids: list[int]) -> tuple[dict[int, int], dict[int, int]]:
@@ -174,29 +160,27 @@ def _link_counts_for_sources(session: Session, source_ids: list[int]) -> tuple[d
     return inbound_by_source, referring_by_source
 
 
-def _seed_link_counts_for_sources(session: Session, source_ids: list[int]) -> dict[int, int]:
+def _bfs_link_counts_for_sources(session: Session, source_ids: list[int], seed_source_id: int) -> dict[int, int]:
     if not source_ids:
         return {}
-    referring_source = aliased(Source)
     rows = session.execute(
         select(
             Link.target_source_id,
             func.count(Link.id),
         )
         .join(Document, Link.source_document_id == Document.id)
-        .join(referring_source, Document.source_id == referring_source.id)
         .where(Link.target_source_id.in_(source_ids))
+        .where(Document.source_id == seed_source_id)
         .where(Document.document_type == DocumentType.ESSAY.value)
         .where(Document.crawl_status == CrawlStatus.FETCHED.value)
-        .where(referring_source.canonical_domain == SPIDER_SEED_DOMAIN)
         .group_by(Link.target_source_id)
     ).all()
-    seed_links_by_source: dict[int, int] = {}
-    for source_id, seed_links in rows:
+    bfs_links_by_source: dict[int, int] = {}
+    for source_id, bfs_links in rows:
         if source_id is None:
             continue
-        seed_links_by_source[int(source_id)] = int(seed_links or 0)
-    return seed_links_by_source
+        bfs_links_by_source[int(source_id)] = int(bfs_links or 0)
+    return bfs_links_by_source
 
 
 def _score_source_from_counts(
@@ -204,37 +188,51 @@ def _score_source_from_counts(
     *,
     inbound_links: int,
     referring_sources: int,
-    seed_links: int = 0,
+    bfs_links: int,
+    bfs_seed_source_id: int | None,
+    bfs_seed_domain: str | None,
 ) -> SourcePriority:
-    feed_signal = 1.0 if source.rss_url or source.sitemap_url else 0.0
-    manual_seed_bonus = 1.0 if source.discovered_from_source_id is None else 0.0
-    skip_penalty = 1.0 if _has_obvious_non_source_domain(source.canonical_domain) else 0.0
-    score = (
-        100.0 * seed_links
-        + 2.0 * feed_signal
-        - 500.0 * skip_penalty
-    )
+    score = float(bfs_links)
     reason_parts = [
-        f"seed={SPIDER_SEED_DOMAIN}",
-        f"seed_links={seed_links}",
+        "algorithm=bfs",
+        f"bfs_links={bfs_links}",
         f"inbound={inbound_links}",
         f"ref_sources={referring_sources}",
     ]
-    if feed_signal:
-        reason_parts.append("feed/sitemap")
-    if manual_seed_bonus:
-        reason_parts.append("manual_seed")
-    if skip_penalty:
-        reason_parts.append("obvious_non_source")
+    if bfs_seed_domain:
+        reason_parts.append(f"seed={bfs_seed_domain}")
+    else:
+        reason_parts.append("seed=all_indexed_sources")
     return SourcePriority(
         source=source,
         score=score,
         inbound_links=inbound_links,
         referring_sources=referring_sources,
-        feed_signal=feed_signal,
-        manual_seed_bonus=manual_seed_bonus,
+        bfs_links=bfs_links,
+        bfs_seed_source_id=bfs_seed_source_id,
+        bfs_seed_domain=bfs_seed_domain,
         reason=", ".join(reason_parts),
     )
+
+
+def _resolve_bfs_seed_source(
+    session: Session,
+    *,
+    seed_source_id: int | None,
+    seed_domain: str | None,
+) -> Source | None:
+    if seed_source_id is not None:
+        source = session.get(Source, seed_source_id)
+        if not source:
+            raise ValueError(f"seed source not found: {seed_source_id}")
+        return source
+    if seed_domain:
+        normalized = seed_domain.strip().lower().removeprefix("www.")
+        source = session.execute(select(Source).where(Source.canonical_domain == normalized)).scalar_one_or_none()
+        if not source:
+            raise ValueError(f"seed source domain not found: {normalized}")
+        return source
+    return None
 
 
 def _has_obvious_non_source_domain(domain: str | None) -> bool:
@@ -252,6 +250,8 @@ def run_autopilot(
     dry_run: bool = False,
     embed: bool = True,
     openai_embeddings: bool | None = None,
+    seed_source_id: int | None = None,
+    seed_domain: str | None = None,
 ) -> IndexRun:
     init_db()
     session = SessionLocal()
@@ -266,7 +266,7 @@ def run_autopilot(
     try:
         session.add(run)
         session.flush()
-        planned = plan_sources(session, limit=budget_sources)
+        planned = plan_sources(session, limit=budget_sources, seed_source_id=seed_source_id, seed_domain=seed_domain)
         run.planned_sources = len(planned)
         logger.info(
             "index run %s planned %s source(s): %s",
@@ -459,7 +459,8 @@ def _priority_payload(priority: SourcePriority) -> dict:
         "score": round(priority.score, 4),
         "inbound_links": priority.inbound_links,
         "referring_sources": priority.referring_sources,
-        "feed_signal": priority.feed_signal,
-        "manual_seed_bonus": priority.manual_seed_bonus,
+        "bfs_links": priority.bfs_links,
+        "bfs_seed_source_id": priority.bfs_seed_source_id,
+        "bfs_seed_domain": priority.bfs_seed_domain,
         "reason": priority.reason,
     }

@@ -45,16 +45,16 @@ def test_source_priorities_prefer_referenced_sources(session):
     assert {item.source.id for item in priorities} == {target.id}
 
 
-def test_source_priorities_prefer_liked_source_frontier(session):
-    ben = get_or_create_source(session, "https://benkuhn.net", status="indexed")
+def test_source_priorities_use_bfs_seed_frontier(session):
+    seed = get_or_create_source(session, "https://seed.test", status="indexed")
     generic = get_or_create_source(session, "https://indexed.test", status="indexed")
     liked_target = get_or_create_source(session, "https://liked-target.test", status="queued")
     popular_target = get_or_create_source(session, "https://popular-target.test", status="queued")
-    ben_doc = add_essay(session, ben, "Ben Essay", "substantive writing about software")
+    seed_doc = add_essay(session, seed, "Seed Essay", "substantive writing about software")
     generic_doc = add_essay(session, generic, "Generic Essay", "substantive writing about software")
     session.add(
         Link(
-            source_document_id=ben_doc.id,
+            source_document_id=seed_doc.id,
             target_url="https://liked-target.test/",
             target_domain="liked-target.test",
             target_source_id=liked_target.id,
@@ -73,11 +73,44 @@ def test_source_priorities_prefer_liked_source_frontier(session):
         )
     session.flush()
 
-    priorities = plan_sources(session, limit=2)
+    priorities = plan_sources(session, limit=2, seed_domain="seed.test")
 
     assert priorities[0].source.id == liked_target.id
-    assert "seed=benkuhn.net" in priorities[0].reason
-    assert "seed_links=1" in priorities[0].reason
+    assert {item.source.id for item in priorities} == {liked_target.id}
+    assert "algorithm=bfs" in priorities[0].reason
+    assert "seed=seed.test" in priorities[0].reason
+    assert "bfs_links=1" in priorities[0].reason
+
+
+def test_source_priorities_skip_obvious_non_sources(session):
+    seed = get_or_create_source(session, "https://seed.test", status="indexed")
+    youtube = get_or_create_source(session, "https://youtube.com", status="queued")
+    target = get_or_create_source(session, "https://writer.test", status="queued")
+    seed_doc = add_essay(session, seed, "Seed Essay", "substantive writing about software")
+    for idx in range(10):
+        session.add(
+            Link(
+                source_document_id=seed_doc.id,
+                target_url=f"https://youtube.com/watch?v={idx}",
+                target_domain="youtube.com",
+                target_source_id=youtube.id,
+                link_type="external",
+            )
+        )
+    session.add(
+        Link(
+            source_document_id=seed_doc.id,
+            target_url="https://writer.test/",
+            target_domain="writer.test",
+            target_source_id=target.id,
+            link_type="external",
+        )
+    )
+    session.flush()
+
+    priorities = plan_sources(session, limit=5, seed_source_id=seed.id)
+
+    assert [item.source.id for item in priorities] == [target.id]
 
 
 def test_autopilot_dry_run_records_plan(session):
