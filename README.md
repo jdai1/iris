@@ -6,10 +6,10 @@ Local-first search and digest over a self-growing corpus of substantive blogs an
 
 ```bash
 cd backend
-python3 -m venv .venv
-.venv/bin/python -m pip install -r requirements.txt
+uv venv --python 3.14.3 .venv
+uv pip install --python .venv/bin/python -r requirements.txt
 .venv/bin/python -m iris.cli init-db
-.venv/bin/python -m uvicorn iris.api:app --reload --host 127.0.0.1 --port 8000
+.venv/bin/python -m uvicorn iris.routes:app --reload --host 127.0.0.1 --port 8000
 ```
 
 The app reads `DATABASE_URL` first, then `DEV_DATABASE_URL`, then falls back to `sqlite:///backend/iris.db`.

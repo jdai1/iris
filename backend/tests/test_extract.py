@@ -1,4 +1,8 @@
-from iris.extract import extract_page
+import pytest
+
+from iris.services.common.config import MissingOpenAIKeyError
+from iris.services.ingestion import document_classifier
+from iris.services.ingestion.extract import extract_page
 
 
 def test_extract_classifies_substantive_essay():
@@ -12,7 +16,6 @@ def test_extract_classifies_substantive_essay():
     assert page.document_type == "essay"
     assert page.title == "Small Teams"
     assert page.author == "Jane"
-    assert page.quality_score > 0.5
     assert page.links[0].url == "https://example.com/next"
 
 
@@ -72,3 +75,40 @@ def test_extract_ignores_non_english_pages():
     """
     page = extract_page(html, "https://example.com/hebrew")
     assert page.document_type == "ignore"
+
+
+def test_extract_can_use_llm_for_ambiguous_documents(monkeypatch):
+    monkeypatch.setattr(document_classifier, "require_openai_api_key", lambda _feature: "test-key")
+    monkeypatch.setattr(
+        document_classifier,
+        "_classify_document_with_llm",
+        lambda **_kwargs: document_classifier.DocumentClassification(
+            document_type="collection",
+            confidence=0.91,
+            reason="LLM saw this as an anthology/index page.",
+        ),
+    )
+    html = """
+    <html><head><title>Selected Notes</title></head><body><main>
+    <p>""" + " ".join(["A short editorial note about a group of readings and collected arguments."] * 50) + """</p>
+    </main></body></html>
+    """
+
+    page = extract_page(html, "https://example.com/selected-notes")
+
+    assert page.document_type == "collection"
+
+
+def test_ambiguous_document_llm_requires_openai_key(monkeypatch):
+    def missing_key(_feature):
+        raise MissingOpenAIKeyError("missing test key")
+
+    monkeypatch.setattr(document_classifier, "require_openai_api_key", missing_key)
+    html = """
+    <html><head><title>Selected Notes</title></head><body><main>
+    <p>""" + " ".join(["A short editorial note about a group of readings and collected arguments."] * 50) + """</p>
+    </main></body></html>
+    """
+
+    with pytest.raises(MissingOpenAIKeyError):
+        extract_page(html, "https://example.com/selected-notes")

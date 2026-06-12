@@ -77,10 +77,6 @@ def same_domain(a: str, b: str) -> bool:
     return domain_for_url(a) == domain_for_url(b)
 
 
-def url_hash(url: str) -> str:
-    return hashlib.sha256(normalize_url(url).encode("utf-8")).hexdigest()
-
-
 def content_hash(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 

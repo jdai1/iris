@@ -8,7 +8,7 @@ from urllib.parse import urljoin
 
 from bs4 import BeautifulSoup
 
-from iris.document_classifier import classify_document
+from iris.services.ingestion.document_classifier import classify_document
 
 
 @dataclass(frozen=True)
@@ -27,7 +27,6 @@ class ExtractedPage:
     summary: str
     topics: list[str]
     document_type: str
-    quality_score: float
     links: list[ExtractedLink]
 
 
@@ -160,6 +159,5 @@ def extract_page(html: str, final_url: str) -> ExtractedPage:
         summary=summary,
         topics=topics,
         document_type=classification.document_type,
-        quality_score=classification.quality_score,
         links=links,
     )

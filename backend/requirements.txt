@@ -6,3 +6,4 @@ psycopg2-binary>=2.9.9
 sqlalchemy>=2.0.30
 uvicorn[standard]>=0.30.0
 pytest>=8.3.0
+ruff>=0.15.17

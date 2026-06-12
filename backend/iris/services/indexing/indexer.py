@@ -8,27 +8,28 @@ from datetime import datetime, timezone
 from sqlalchemy import distinct, func, select
 from sqlalchemy.orm import Session, aliased
 
-from iris.crawler import crawl_source
-from iris.db import SessionLocal, init_db
-from iris.embedding import dumps_embedding, embed_text
-from iris.models import CrawlJob, Document, IndexEvent, IndexRun, Link, Source
-from iris.url_utils import root_url_for_domain
+from iris.dao.db import SessionLocal, init_db
+from iris.models import (
+    CrawlJob,
+    CrawlJobStatus,
+    CrawlStatus,
+    Document,
+    DocumentType,
+    IndexEvent,
+    IndexEventType,
+    IndexMode,
+    IndexRun,
+    IndexRunStatus,
+    Link,
+    Source,
+    SourceStatus,
+)
+from iris.services.common.url_utils import root_url_for_domain
+from iris.services.ingestion.crawler import Crawler
+from iris.services.ingestion.embedding import dumps_embedding, embed_text
 
 
 logger = logging.getLogger("iris.indexer")
-
-BROAD_SOURCE_TYPES = {
-    "catalog",
-    "code_host",
-    "commerce",
-    "non_target",
-    "platform",
-    "publication",
-    "publishing_platform",
-    "reference",
-    "social",
-    "video_platform",
-}
 
 OBVIOUS_NON_SOURCE_DOMAIN_PARTS = {
     "archive.org",
@@ -66,10 +67,8 @@ class SourcePriority:
     score: float
     inbound_links: int
     referring_sources: int
-    classifier_confidence: float
     feed_signal: float
     manual_seed_bonus: float
-    broad_platform_penalty: float
     reason: str
 
 
@@ -99,7 +98,7 @@ def log_event(
 def plan_sources(session: Session, limit: int = 20) -> list[SourcePriority]:
     sources = session.execute(
         select(Source)
-        .where(Source.status == "queued")
+        .where(Source.status == SourceStatus.QUEUED.value)
         .order_by(Source.first_seen_at.asc())
     ).scalars().all()
     source_ids = [source.id for source in sources]
@@ -125,18 +124,18 @@ def _score_source(session: Session, source: Source) -> SourcePriority:
         .join(Document, Link.source_document_id == Document.id)
         .join(Source, Document.source_id == Source.id)
         .where(Link.target_source_id == source.id)
-        .where(Document.document_type == "essay")
-        .where(Document.crawl_status == "fetched")
-        .where(Source.status == "indexed")
+        .where(Document.document_type == DocumentType.ESSAY.value)
+        .where(Document.crawl_status == CrawlStatus.FETCHED.value)
+        .where(Source.status == SourceStatus.INDEXED.value)
     ) or 0
     referring_sources = session.scalar(
         select(func.count(distinct(Document.source_id)))
         .join(Link, Link.source_document_id == Document.id)
         .join(Source, Document.source_id == Source.id)
         .where(Link.target_source_id == source.id)
-        .where(Document.document_type == "essay")
-        .where(Document.crawl_status == "fetched")
-        .where(Source.status == "indexed")
+        .where(Document.document_type == DocumentType.ESSAY.value)
+        .where(Document.crawl_status == CrawlStatus.FETCHED.value)
+        .where(Source.status == SourceStatus.INDEXED.value)
     ) or 0
     seed_links_by_source = _seed_link_counts_for_sources(session, [source.id])
     return _score_source_from_counts(
@@ -160,9 +159,9 @@ def _link_counts_for_sources(session: Session, source_ids: list[int]) -> tuple[d
         .join(Document, Link.source_document_id == Document.id)
         .join(referring_source, Document.source_id == referring_source.id)
         .where(Link.target_source_id.in_(source_ids))
-        .where(Document.document_type == "essay")
-        .where(Document.crawl_status == "fetched")
-        .where(referring_source.status == "indexed")
+        .where(Document.document_type == DocumentType.ESSAY.value)
+        .where(Document.crawl_status == CrawlStatus.FETCHED.value)
+        .where(referring_source.status == SourceStatus.INDEXED.value)
         .group_by(Link.target_source_id)
     ).all()
     inbound_by_source: dict[int, int] = {}
@@ -187,8 +186,8 @@ def _seed_link_counts_for_sources(session: Session, source_ids: list[int]) -> di
         .join(Document, Link.source_document_id == Document.id)
         .join(referring_source, Document.source_id == referring_source.id)
         .where(Link.target_source_id.in_(source_ids))
-        .where(Document.document_type == "essay")
-        .where(Document.crawl_status == "fetched")
+        .where(Document.document_type == DocumentType.ESSAY.value)
+        .where(Document.crawl_status == CrawlStatus.FETCHED.value)
         .where(referring_source.canonical_domain == SPIDER_SEED_DOMAIN)
         .group_by(Link.target_source_id)
     ).all()
@@ -207,16 +206,12 @@ def _score_source_from_counts(
     referring_sources: int,
     seed_links: int = 0,
 ) -> SourcePriority:
-    confidence = max(0.0, min(float(source.quality_score or 0.0), 1.0))
     feed_signal = 1.0 if source.rss_url or source.sitemap_url else 0.0
     manual_seed_bonus = 1.0 if source.discovered_from_source_id is None else 0.0
-    broad_penalty = 1.0 if source.source_type in BROAD_SOURCE_TYPES else 0.0
     skip_penalty = 1.0 if _has_obvious_non_source_domain(source.canonical_domain) else 0.0
     score = (
         100.0 * seed_links
         + 2.0 * feed_signal
-        + 1.0 * confidence
-        - 25.0 * broad_penalty
         - 500.0 * skip_penalty
     )
     reason_parts = [
@@ -225,14 +220,10 @@ def _score_source_from_counts(
         f"inbound={inbound_links}",
         f"ref_sources={referring_sources}",
     ]
-    if confidence:
-        reason_parts.append(f"classifier={confidence:.2f}")
     if feed_signal:
         reason_parts.append("feed/sitemap")
     if manual_seed_bonus:
         reason_parts.append("manual_seed")
-    if broad_penalty:
-        reason_parts.append(f"broad_type={source.source_type}")
     if skip_penalty:
         reason_parts.append("obvious_non_source")
     return SourcePriority(
@@ -240,10 +231,8 @@ def _score_source_from_counts(
         score=score,
         inbound_links=inbound_links,
         referring_sources=referring_sources,
-        classifier_confidence=confidence,
         feed_signal=feed_signal,
         manual_seed_bonus=manual_seed_bonus,
-        broad_platform_penalty=broad_penalty,
         reason=", ".join(reason_parts),
     )
 
@@ -267,8 +256,8 @@ def run_autopilot(
     init_db()
     session = SessionLocal()
     run = IndexRun(
-        status="running",
-        mode="autopilot",
+        status=IndexRunStatus.RUNNING.value,
+        mode=IndexMode.AUTOPILOT.value,
         dry_run=1 if dry_run else 0,
         budget_sources=budget_sources,
         max_pages=max_pages,
@@ -288,14 +277,14 @@ def run_autopilot(
         log_event(
             session,
             run,
-            "plan_created",
+            IndexEventType.PLAN_CREATED.value,
             f"planned {len(planned)} source(s)",
             payload={"sources": [_priority_payload(item) for item in planned]},
         )
         session.commit()
 
         if dry_run:
-            run.status = "succeeded"
+            run.status = IndexRunStatus.SUCCEEDED.value
             run.stop_reason = "dry_run"
             run.finished_at = datetime.now(timezone.utc)
             session.commit()
@@ -303,7 +292,7 @@ def run_autopilot(
 
         for priority in planned:
             source = session.get(Source, priority.source.id)
-            if not source or source.status != "queued":
+            if not source or source.status != SourceStatus.QUEUED.value:
                 continue
             logger.info(
                 "source start domain=%s score=%.3f reason=%s",
@@ -325,13 +314,13 @@ def run_autopilot(
             )
             session.commit()
 
-        run.status = "succeeded"
+        run.status = IndexRunStatus.SUCCEEDED.value
         run.stop_reason = "budget_exhausted" if planned else "no_queued_sources"
         run.finished_at = datetime.now(timezone.utc)
         session.commit()
         return run
     except KeyboardInterrupt:
-        run.status = "stopped"
+        run.status = IndexRunStatus.STOPPED.value
         run.stop_reason = "interrupted"
         run.finished_at = datetime.now(timezone.utc)
         session.commit()
@@ -342,7 +331,7 @@ def run_autopilot(
         session = SessionLocal()
         existing = session.get(IndexRun, run.id)
         if existing:
-            existing.status = "failed"
+            existing.status = IndexRunStatus.FAILED.value
             existing.errors += 1
             existing.stop_reason = str(exc)
             existing.finished_at = datetime.now(timezone.utc)
@@ -367,29 +356,28 @@ def _run_one_source(
     openai_embeddings: bool | None,
 ) -> CrawlJob:
     run.attempted_sources += 1
-    root_homepage = root_url_for_domain(source.homepage_url)
-    if source.homepage_url != root_homepage:
+    root_url = root_url_for_domain(source.url)
+    if source.url != root_url:
         log_event(
             session,
             run,
-            "source_homepage_normalized",
+            IndexEventType.SOURCE_HOMEPAGE_NORMALIZED.value,
             f"normalized homepage for {source.canonical_domain}",
             source_id=source.id,
-            payload={"before": source.homepage_url, "after": root_homepage},
+            payload={"before": source.url, "after": root_url},
         )
-        source.homepage_url = root_homepage
+        source.url = root_url
     before_docs = session.scalar(select(func.count(Document.id)).where(Document.source_id == source.id)) or 0
     log_event(
         session,
         run,
-        "source_started",
+        IndexEventType.SOURCE_STARTED.value,
         f"starting {source.canonical_domain}",
         source_id=source.id,
         payload=_priority_payload(priority),
     )
     session.commit()
-    job = crawl_source(
-        session,
+    job = Crawler(session).crawl_source(
         source,
         max_pages=max_pages,
         max_depth=max_depth,
@@ -399,18 +387,18 @@ def _run_one_source(
     job.index_run_id = run.id
     after_docs = session.scalar(select(func.count(Document.id)).where(Document.source_id == source.id)) or 0
     new_docs = max(0, after_docs - before_docs)
-    if job.status == "succeeded":
+    if job.status == CrawlJobStatus.SUCCEEDED.value:
         run.crawled_sources += 1
-    elif job.status == "skipped" and source.status == "ignored":
+    elif job.status == CrawlJobStatus.SKIPPED.value and source.status == SourceStatus.IGNORED.value:
         run.ignored_sources += 1
-    elif job.status == "failed":
+    elif job.status == CrawlJobStatus.FAILED.value:
         run.errors += 1
     run.documents_indexed += job.documents_indexed
     run.links_seen += job.links_seen
     run.sources_discovered += job.sources_discovered
 
     embedded = 0
-    if embed and job.status == "succeeded":
+    if embed and job.status == CrawlJobStatus.SUCCEEDED.value:
         embedded = embed_source_documents(session, source, openai=openai_embeddings)
     logger.info(
         "source finish domain=%s status=%s fetched=%s docs=%s links=%s discovered=%s embedded=%s",
@@ -426,7 +414,7 @@ def _run_one_source(
     log_event(
         session,
         run,
-        "source_finished",
+        IndexEventType.SOURCE_FINISHED.value,
         f"finished {source.canonical_domain}: {job.status}",
         source_id=source.id,
         crawl_job_id=job.id,
@@ -452,8 +440,8 @@ def embed_source_documents(session: Session, source: Source, *, openai: bool | N
     documents = session.execute(
         select(Document)
         .where(Document.source_id == source.id)
-        .where(Document.document_type == "essay")
-        .where(Document.crawl_status == "fetched")
+        .where(Document.document_type == DocumentType.ESSAY.value)
+        .where(Document.crawl_status == CrawlStatus.FETCHED.value)
         .where(Document.embedding.is_(None))
     ).scalars().all()
     for document in documents:
@@ -468,13 +456,10 @@ def _priority_payload(priority: SourcePriority) -> dict:
         "source_id": priority.source.id,
         "domain": priority.source.canonical_domain,
         "status": priority.source.status,
-        "source_type": priority.source.source_type,
         "score": round(priority.score, 4),
         "inbound_links": priority.inbound_links,
         "referring_sources": priority.referring_sources,
-        "classifier_confidence": priority.classifier_confidence,
         "feed_signal": priority.feed_signal,
         "manual_seed_bonus": priority.manual_seed_bonus,
-        "broad_platform_penalty": priority.broad_platform_penalty,
         "reason": priority.reason,
     }

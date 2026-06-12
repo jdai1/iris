@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import httpx
 
-from iris.crawler import Crawler
+from iris.services.ingestion.crawler import Crawler
 from iris.models import CrawlJob, Document, Link, Source
-from iris.repository import get_or_create_source
+from iris.dao.core import get_or_create_source
 
 
 def client_for_fixture() -> httpx.Client:
@@ -172,7 +172,6 @@ def test_ignored_source_is_skipped(session):
         session,
         "https://www.youtube.com/",
         status="ignored",
-        source_type="video_platform",
     )
     job = Crawler(session, client_for_fixture()).crawl_source(source, max_pages=10, max_depth=1)
 

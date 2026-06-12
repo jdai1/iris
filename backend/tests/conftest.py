@@ -5,8 +5,8 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
-from iris import db
-from iris.db import Base
+from iris.dao import db
+from iris.dao.db import Base
 
 
 @pytest.fixture()

@@ -1,6 +1,13 @@
 from __future__ import annotations
 
-from iris.source_classifier import classify_source_homepage, classify_source_url
+import pytest
+
+from iris.services.common.config import MissingOpenAIKeyError
+from iris.services.ingestion import source_classifier
+from iris.services.ingestion.source_classifier import (
+    classify_source_homepage,
+    classify_source_url,
+)
 
 
 def test_classifier_ignores_reference_and_video_platforms():
@@ -11,15 +18,15 @@ def test_classifier_ignores_reference_and_video_platforms():
     repec = classify_source_url("https://ideas.repec.org/p/foo/bar.html")
 
     assert youtube.status == "ignored"
-    assert youtube.source_type == "video_platform"
+    assert "video platform" in youtube.reason
     assert wikipedia.status == "ignored"
-    assert wikipedia.source_type == "reference"
+    assert "reference" in wikipedia.reason
     assert arxiv.status == "ignored"
-    assert arxiv.source_type == "reference"
+    assert "reference" in arxiv.reason
     assert google_books.status == "ignored"
-    assert google_books.source_type == "reference"
+    assert "reference" in google_books.reason
     assert repec.status == "ignored"
-    assert repec.source_type == "reference"
+    assert "reference" in repec.reason
 
 
 def test_classifier_ignores_broad_publication_and_media_domains():
@@ -28,11 +35,11 @@ def test_classifier_ignores_broad_publication_and_media_domains():
     flickr = classify_source_url("https://flickr.com/photos/example")
 
     assert slate.status == "ignored"
-    assert slate.source_type == "publication"
+    assert "publication" in slate.reason
     assert economist.status == "ignored"
-    assert economist.source_type == "publication"
+    assert "publication" in economist.reason
     assert flickr.status == "ignored"
-    assert flickr.source_type == "media_platform"
+    assert "media platform" in flickr.reason
 
 
 def test_classifier_ignores_broad_publishing_platform_roots():
@@ -41,11 +48,11 @@ def test_classifier_ignores_broad_publishing_platform_roots():
     wp_me = classify_source_url("https://wp.me/foo")
 
     assert wordpress.status == "ignored"
-    assert wordpress.source_type == "publishing_platform"
+    assert "publishing platform" in wordpress.reason
     assert blogger.status == "ignored"
-    assert blogger.source_type == "publishing_platform"
+    assert "publishing platform" in blogger.reason
     assert wp_me.status == "ignored"
-    assert wp_me.source_type == "publishing_platform"
+    assert "publishing platform" in wp_me.reason
 
 
 def test_classifier_keeps_personal_subdomains_and_unknown_domains_queueable():
@@ -54,9 +61,9 @@ def test_classifier_keeps_personal_subdomains_and_unknown_domains_queueable():
     unknown = classify_source_url("https://benkuhn.net/essay")
 
     assert substack.status == "queued"
-    assert substack.source_type == "newsletter"
+    assert "personal platform" in substack.reason
     assert personal_site.status == "queued"
-    assert personal_site.source_type == "personal_site"
+    assert "personal platform" in personal_site.reason
     assert unknown.status == "queued"
 
 
@@ -78,7 +85,7 @@ def test_classifier_rejects_professional_service_homepage_before_llm():
     result = classify_source_homepage("https://seattleanxiety.com/", html)
 
     assert result.status == "ignored"
-    assert result.source_type == "professional_service"
+    assert "professional service" in result.reason
 
 
 def test_classifier_rejects_gambling_spam_homepage_before_llm():
@@ -96,7 +103,7 @@ def test_classifier_rejects_gambling_spam_homepage_before_llm():
     result = classify_source_homepage("https://rationalconspiracy.com/", html)
 
     assert result.status == "ignored"
-    assert result.source_type == "spam_gambling"
+    assert "gambling" in result.reason
 
 
 def test_classifier_rejects_non_english_homepage_before_platform_shortcut():
@@ -113,4 +120,43 @@ def test_classifier_rejects_non_english_homepage_before_platform_shortcut():
     result = classify_source_homepage("https://example.wordpress.com/", html)
 
     assert result.status == "ignored"
-    assert result.source_type == "non_english"
+    assert "non-English" in result.reason
+
+
+def test_classifier_requires_api_key_for_unclear_homepage(monkeypatch):
+    def missing_key(_feature):
+        raise MissingOpenAIKeyError("missing test key")
+
+    monkeypatch.setattr(source_classifier, "require_openai_api_key", missing_key)
+    html = """
+    <html><head><title>Maybe a Blog</title></head><body><main>
+    I write about software, organizations, and research taste. These notes are
+    written as essays and posts for readers who like longform thinking.
+    </main></body></html>
+    """
+
+    with pytest.raises(MissingOpenAIKeyError):
+        classify_source_homepage("https://maybe-blog.com/", html)
+
+
+def test_personal_platform_suffix_still_uses_homepage_llm(monkeypatch):
+    monkeypatch.setattr(source_classifier, "require_openai_api_key", lambda _feature: "test-key")
+    monkeypatch.setattr(
+        source_classifier,
+        "_classify_with_openai",
+        lambda _key, _url, _context: {
+            "should_crawl": False,
+            "confidence": 0.88,
+            "reason": "This is a product site, not an essay archive.",
+        },
+    )
+    html = """
+    <html><head><title>Example Substack</title></head><body><main>
+    Subscribe to our product updates, feature launches, pricing notes, and customer announcements.
+    </main></body></html>
+    """
+
+    result = classify_source_homepage("https://example.substack.com/", html)
+
+    assert result.status == "ignored"
+    assert "product site" in result.reason

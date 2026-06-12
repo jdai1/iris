@@ -1,8 +1,8 @@
-from iris.digest import get_digest, record_feedback
-from iris.embedding import dumps_embedding, embed_text
+from iris.services.retrieval.digest import get_digest, record_feedback
+from iris.services.ingestion.embedding import dumps_embedding, embed_text
 from iris.models import Document
-from iris.repository import get_or_create_source, upsert_document
-from iris.search import search_documents
+from iris.dao.core import get_or_create_source, upsert_document
+from iris.services.retrieval.search import search_documents
 
 
 def add_doc(session, source, title, text):
@@ -10,7 +10,6 @@ def add_doc(session, source, title, text):
         session,
         source=source,
         url=f"https://{source.canonical_domain}/{title.lower().replace(' ', '-')}",
-        final_url=f"https://{source.canonical_domain}/{title.lower().replace(' ', '-')}",
         document_type="essay",
         crawl_status="fetched",
         title=title,
@@ -20,7 +19,6 @@ def add_doc(session, source, title, text):
         summary=text[:240],
         topics=["teams", "software"],
         embedding=dumps_embedding(embed_text(text)),
-        quality_score=0.8,
         content_hash=title,
     )
 

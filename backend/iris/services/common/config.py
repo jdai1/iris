@@ -6,8 +6,8 @@ from pathlib import Path
 from dotenv import dotenv_values, load_dotenv
 
 
-ROOT_DIR = Path(__file__).resolve().parents[2]
-BACKEND_DIR = ROOT_DIR / "backend"
+BACKEND_DIR = Path(__file__).resolve().parents[3]
+ROOT_DIR = BACKEND_DIR.parent
 
 load_dotenv(BACKEND_DIR / ".env")
 
@@ -27,12 +27,18 @@ DEFAULT_MAX_PAGES = int(os.getenv("IRIS_DEFAULT_MAX_PAGES", "80"))
 DEFAULT_MAX_DEPTH = int(os.getenv("IRIS_DEFAULT_MAX_DEPTH", "3"))
 SOURCE_CLASSIFIER_MODEL = os.getenv("IRIS_SOURCE_CLASSIFIER_MODEL", "gpt-4.1-nano")
 SOURCE_CLASSIFIER_TIMEOUT_SECONDS = float(os.getenv("IRIS_SOURCE_CLASSIFIER_TIMEOUT_SECONDS", "20"))
+DOCUMENT_CLASSIFIER_MODEL = os.getenv("IRIS_DOCUMENT_CLASSIFIER_MODEL", "gpt-4.1-nano")
+DOCUMENT_CLASSIFIER_TIMEOUT_SECONDS = float(os.getenv("IRIS_DOCUMENT_CLASSIFIER_TIMEOUT_SECONDS", "20"))
 EMBEDDING_MODEL = os.getenv("IRIS_EMBEDDING_MODEL", "text-embedding-3-small")
 USE_OPENAI_EMBEDDINGS = os.getenv("IRIS_USE_OPENAI_EMBEDDINGS", "0").lower() in {"1", "true", "yes"}
 EMBEDDING_TIMEOUT_SECONDS = float(os.getenv("IRIS_EMBEDDING_TIMEOUT_SECONDS", "20"))
 SEARCH_RERANK_MODEL = os.getenv("IRIS_SEARCH_RERANK_MODEL", "gpt-4.1-nano")
 USE_LLM_RERANKER = os.getenv("IRIS_USE_LLM_RERANKER", "0").lower() in {"1", "true", "yes"}
 SEARCH_RERANK_TIMEOUT_SECONDS = float(os.getenv("IRIS_SEARCH_RERANK_TIMEOUT_SECONDS", "25"))
+
+
+class MissingOpenAIKeyError(RuntimeError):
+    pass
 
 
 def openai_api_key() -> str | None:
@@ -58,3 +64,13 @@ def openai_api_key() -> str | None:
             if value:
                 return value
     return None
+
+
+def require_openai_api_key(feature: str) -> str:
+    key = openai_api_key()
+    if key:
+        return key
+    raise MissingOpenAIKeyError(
+        f"OpenAI API key is required for {feature}. Set OPENAI_API_KEY, "
+        "PERSONAL_OPENAI_API_KEY, OPENAI_PERSONAL_API_KEY, or IRIS_OPENAI_ENV_FILE."
+    )

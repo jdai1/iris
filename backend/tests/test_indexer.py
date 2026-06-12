@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from iris.embedding import dumps_embedding, embed_text
-from iris.indexer import plan_sources, run_autopilot
+from iris.services.ingestion.embedding import dumps_embedding, embed_text
+from iris.services.indexing.indexer import plan_sources, run_autopilot
 from iris.models import CrawlJob, IndexEvent, IndexRun, Link
-from iris.repository import get_or_create_source, upsert_document
+from iris.dao.core import get_or_create_source, upsert_document
 
 
 def add_essay(session, source, title: str, text: str):
@@ -11,7 +11,6 @@ def add_essay(session, source, title: str, text: str):
         session,
         source=source,
         url=f"https://{source.canonical_domain}/{title.lower().replace(' ', '-')}",
-        final_url=f"https://{source.canonical_domain}/{title.lower().replace(' ', '-')}",
         document_type="essay",
         crawl_status="fetched",
         title=title,
@@ -21,7 +20,6 @@ def add_essay(session, source, title: str, text: str):
         summary=text[:200],
         topics=["software", "essays"],
         embedding=dumps_embedding(embed_text(text)),
-        quality_score=0.8,
         content_hash=title,
     )
 
@@ -29,13 +27,11 @@ def add_essay(session, source, title: str, text: str):
 def test_source_priorities_prefer_referenced_sources(session):
     indexed = get_or_create_source(session, "https://benkuhn.net", status="indexed")
     target = get_or_create_source(session, "https://target.test", status="queued")
-    other = get_or_create_source(session, "https://other.test", status="queued")
     doc = add_essay(session, indexed, "Essay", "substantive writing about software")
     session.add(
         Link(
             source_document_id=doc.id,
             target_url="https://target.test/",
-            normalized_target_url="https://target.test/",
             target_domain="target.test",
             target_source_id=target.id,
             link_type="external",
@@ -60,7 +56,6 @@ def test_source_priorities_prefer_liked_source_frontier(session):
         Link(
             source_document_id=ben_doc.id,
             target_url="https://liked-target.test/",
-            normalized_target_url="https://liked-target.test/",
             target_domain="liked-target.test",
             target_source_id=liked_target.id,
             link_type="external",
@@ -71,7 +66,6 @@ def test_source_priorities_prefer_liked_source_frontier(session):
             Link(
                 source_document_id=generic_doc.id,
                 target_url=f"https://popular-target.test/{idx}",
-                normalized_target_url=f"https://popular-target.test/{idx}",
                 target_domain="popular-target.test",
                 target_source_id=popular_target.id,
                 link_type="external",
@@ -94,7 +88,6 @@ def test_autopilot_dry_run_records_plan(session):
         Link(
             source_document_id=doc.id,
             target_url="https://queued.test/",
-            normalized_target_url="https://queued.test/",
             target_domain="queued.test",
             target_source_id=queued.id,
             link_type="external",

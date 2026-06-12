@@ -1,22 +1,20 @@
 from __future__ import annotations
 
 import json
-from typing import Optional
-
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import desc, func, select
 from sqlalchemy.orm import Session, joinedload
 
-from iris.crawler import crawl_source
-from iris.db import SessionLocal, init_db
-from iris.digest import get_digest, populate_digest, record_feedback
-from iris.models import CrawlJob, Document, IndexEvent, IndexRun, Link, Source
-from iris.repository import get_or_create_source
-from iris.schemas import CrawlOut, DigestItemOut, FeedbackIn, GraphOut, SearchOut, SourceCreate, SourceOut
-from iris.search import search_documents, synthesize_answer
-from iris.serializers import crawl_out, digest_item_out, document_out, source_out
-from iris.source_classifier import classify_source_url
+from iris.services.ingestion.crawler import Crawler
+from iris.dao.db import SessionLocal, init_db
+from iris.services.retrieval.digest import get_digest, populate_digest, record_feedback
+from iris.models import CrawlJob, CrawlJobStatus, Document, DocumentType, IndexEvent, IndexEventType, IndexRun, Link, Source, SourceStatus
+from iris.dao.core import get_or_create_source
+from iris.schemas.api import CrawlSchema, DigestItemSchema, FeedbackSchema, GraphSchema, SearchSchema, SourceCreateSchema, SourceSchema
+from iris.services.retrieval.search import search_documents, synthesize_answer
+from iris.routes.dumps import dump_crawl_job, dump_digest_item, dump_document, dump_source
+from iris.services.ingestion.source_classifier import classify_source_url
 
 
 app = FastAPI(title="Iris", version="0.1.0")
@@ -49,34 +47,34 @@ def health(session: Session = Depends(get_session)) -> dict:
     return {"ok": True, "sources": source_count, "documents": document_count}
 
 
-@app.post("/api/sources", response_model=SourceOut)
-def create_source(payload: SourceCreate, session: Session = Depends(get_session)) -> SourceOut:
+@app.post("/api/sources", response_model=SourceSchema)
+def create_source(payload: SourceCreateSchema, session: Session = Depends(get_session)) -> SourceSchema:
     classification = classify_source_url(payload.url)
     source = get_or_create_source(
         session,
         payload.url,
-        status="queued",
-        source_type=classification.source_type,
+        status=SourceStatus.QUEUED.value,
         force_status=True,
     )
+    source.description = classification.reason
     if payload.crawl_now:
-        crawl_source(session, source, max_pages=payload.max_pages, max_depth=payload.max_depth)
-    return source_out(source)
+        Crawler(session).crawl_source(source, max_pages=payload.max_pages, max_depth=payload.max_depth)
+    return dump_source(source)
 
 
-@app.get("/api/sources", response_model=list[SourceOut])
-def list_sources(session: Session = Depends(get_session)) -> list[SourceOut]:
+@app.get("/api/sources", response_model=list[SourceSchema])
+def list_sources(session: Session = Depends(get_session)) -> list[SourceSchema]:
     sources = session.execute(select(Source).order_by(Source.first_seen_at.desc())).scalars().all()
-    return [source_out(source) for source in sources]
+    return [dump_source(source) for source in sources]
 
 
-@app.post("/api/sources/{source_id}/crawl", response_model=CrawlOut)
-def crawl_source_endpoint(source_id: int, max_pages: int = 80, max_depth: int = 3, session: Session = Depends(get_session)) -> CrawlOut:
+@app.post("/api/sources/{source_id}/crawl", response_model=CrawlSchema)
+def crawl_source_endpoint(source_id: int, max_pages: int = 80, max_depth: int = 3, session: Session = Depends(get_session)) -> CrawlSchema:
     source = session.get(Source, source_id)
     if not source:
         raise HTTPException(status_code=404, detail="Source not found")
-    job = crawl_source(session, source, max_pages=max_pages, max_depth=max_depth)
-    return crawl_out(job)
+    job = Crawler(session).crawl_source(source, max_pages=max_pages, max_depth=max_depth)
+    return dump_crawl_job(job)
 
 
 @app.get("/api/documents")
@@ -84,8 +82,8 @@ def list_documents(
     session: Session = Depends(get_session),
     limit: int = 50,
     offset: int = 0,
-    source_id: Optional[int] = None,
-    document_type: Optional[str] = None,
+    source_id: int | None = None,
+    document_type: str | None = None,
 ) -> dict:
     statement = select(Document).options(joinedload(Document.source)).order_by(Document.last_crawled_at.desc())
     if source_id:
@@ -94,13 +92,12 @@ def list_documents(
         statement = statement.where(Document.document_type == document_type)
     total = _count_statement(session, statement)
     documents = session.execute(statement.limit(_clamped_limit(limit)).offset(max(offset, 0))).scalars().all()
-    return _page_response([document_out(document) for document in documents], total, limit, offset)
+    return _page_response([dump_document(document) for document in documents], total, limit, offset)
 
 
 @app.get("/api/admin/overview")
 def admin_overview(session: Session = Depends(get_session)) -> dict:
     source_statuses = dict(session.execute(select(Source.status, func.count(Source.id)).group_by(Source.status)).all())
-    source_types = dict(session.execute(select(Source.source_type, func.count(Source.id)).group_by(Source.source_type)).all())
     document_types = {
         f"{doc_type}/{status}": count
         for doc_type, status, count in session.execute(
@@ -112,7 +109,7 @@ def admin_overview(session: Session = Depends(get_session)) -> dict:
     totals = {
         "sources": session.scalar(select(func.count(Source.id))) or 0,
         "documents": session.scalar(select(func.count(Document.id))) or 0,
-        "essay_documents": session.scalar(select(func.count(Document.id)).where(Document.document_type == "essay")) or 0,
+        "essay_documents": session.scalar(select(func.count(Document.id)).where(Document.document_type == DocumentType.ESSAY.value)) or 0,
         "links": session.scalar(select(func.count(Link.id))) or 0,
         "resolved_links": session.scalar(select(func.count(Link.id)).where(Link.target_document_id.is_not(None))) or 0,
         "crawl_jobs": session.scalar(select(func.count(CrawlJob.id))) or 0,
@@ -121,15 +118,14 @@ def admin_overview(session: Session = Depends(get_session)) -> dict:
     return {
         "totals": totals,
         "source_statuses": source_statuses,
-        "source_types": source_types,
         "document_types": document_types,
     }
 
 
 @app.get("/api/admin/sources")
 def admin_sources(
-    status: Optional[str] = None,
-    q: Optional[str] = None,
+    status: str | None = None,
+    q: str | None = None,
     limit: int = 200,
     offset: int = 0,
     session: Session = Depends(get_session),
@@ -152,7 +148,7 @@ def admin_sources(
         select(
             Document.source_id,
             func.count(Document.id).label("document_count"),
-            func.count(Document.id).filter(Document.document_type == "essay").label("essay_count"),
+            func.count(Document.id).filter(Document.document_type == DocumentType.ESSAY.value).label("essay_count"),
         )
         .group_by(Document.source_id)
         .subquery()
@@ -191,10 +187,8 @@ def admin_sources(
         {
             "id": source.id,
             "canonical_domain": source.canonical_domain,
-            "homepage_url": source.homepage_url,
-            "source_type": source.source_type,
+            "url": source.url,
             "status": source.status,
-            "quality_score": source.quality_score,
             "description": source.description,
             "rss_url": source.rss_url,
             "sitemap_url": source.sitemap_url,
@@ -250,9 +244,9 @@ def admin_sources(
 def admin_crawl_jobs(
     limit: int = 100,
     offset: int = 0,
-    status: Optional[str] = None,
-    source_id: Optional[int] = None,
-    index_run_id: Optional[int] = None,
+    status: str | None = None,
+    source_id: int | None = None,
+    index_run_id: int | None = None,
     session: Session = Depends(get_session),
 ) -> dict:
     statement = select(CrawlJob, Source).join(Source, CrawlJob.source_id == Source.id).order_by(desc(CrawlJob.started_at))
@@ -322,7 +316,7 @@ def _finished_events_by_job(session: Session, job_ids: list[int]) -> dict[int, d
     events = session.execute(
         select(IndexEvent)
         .where(IndexEvent.crawl_job_id.in_(job_ids))
-        .where(IndexEvent.event_type == "source_finished")
+        .where(IndexEvent.event_type == IndexEventType.SOURCE_FINISHED.value)
     ).scalars().all()
     parsed: dict[int, dict] = {}
     for event in events:
@@ -347,17 +341,17 @@ def _job_outcome(
     status: str,
     pages_fetched: int,
     documents_indexed: int,
-    error: Optional[str],
+    error: str | None,
     event_payload: dict,
-    run: Optional[IndexRun],
+    run: IndexRun | None,
 ) -> str:
-    if status == "skipped":
+    if status == CrawlJobStatus.SKIPPED.value:
         return "rejected by source classifier"
-    if status == "failed":
+    if status == CrawlJobStatus.FAILED.value:
         return (error or "crawl failed").splitlines()[0]
-    if status == "running":
+    if status == CrawlJobStatus.RUNNING.value:
         return "currently crawling"
-    if status != "succeeded":
+    if status != CrawlJobStatus.SUCCEEDED.value:
         return status
     max_documents = event_payload.get("max_documents_per_source")
     if max_documents and documents_indexed >= int(max_documents):
@@ -372,7 +366,7 @@ def _job_outcome(
 def admin_index_runs(
     limit: int = 50,
     offset: int = 0,
-    status: Optional[str] = None,
+    status: str | None = None,
     session: Session = Depends(get_session),
 ) -> dict:
     statement = select(IndexRun).order_by(desc(IndexRun.started_at))
@@ -413,11 +407,11 @@ def get_document(document_id: int, session: Session = Depends(get_session)) -> d
         raise HTTPException(status_code=404, detail="Document not found")
     outgoing = session.execute(select(Link).where(Link.source_document_id == document_id)).scalars().all()
     incoming = session.execute(select(Link).where(Link.target_document_id == document_id)).scalars().all()
-    payload = document_out(document).model_dump()
+    payload = dump_document(document).model_dump()
     payload["extracted_text"] = document.extracted_text
     payload["outgoing_links"] = [
         {
-            "target_url": link.normalized_target_url,
+            "target_url": link.target_url,
             "target_domain": link.target_domain,
             "target_document_id": link.target_document_id,
             "anchor_text": link.anchor_text,
@@ -428,7 +422,7 @@ def get_document(document_id: int, session: Session = Depends(get_session)) -> d
     payload["incoming_links"] = [
         {
             "source_document_id": link.source_document_id,
-            "target_url": link.normalized_target_url,
+            "target_url": link.target_url,
             "anchor_text": link.anchor_text,
         }
         for link in incoming
@@ -436,17 +430,17 @@ def get_document(document_id: int, session: Session = Depends(get_session)) -> d
     return payload
 
 
-@app.get("/api/search", response_model=SearchOut)
-def search(q: str, limit: int = 12, session: Session = Depends(get_session)) -> SearchOut:
+@app.get("/api/search", response_model=SearchSchema)
+def search(q: str, limit: int = 12, session: Session = Depends(get_session)) -> SearchSchema:
     search_row, ranked = search_documents(session, q, limit=limit, persist=True)
     answer = search_row.answer if search_row else synthesize_answer(q, ranked)
-    return SearchOut(
+    return SearchSchema(
         search_id=search_row.id if search_row else None,
         query=q,
         answer=answer or "",
         results=[
             {
-                "document": document_out(item.document),
+                "document": dump_document(item.document),
                 "score": item.score,
                 "reason": item.reason,
             }
@@ -455,20 +449,20 @@ def search(q: str, limit: int = 12, session: Session = Depends(get_session)) -> 
     )
 
 
-@app.get("/api/digest", response_model=list[DigestItemOut])
-def digest(limit: int = 20, session: Session = Depends(get_session)) -> list[DigestItemOut]:
+@app.get("/api/digest", response_model=list[DigestItemSchema])
+def digest(limit: int = 20, session: Session = Depends(get_session)) -> list[DigestItemSchema]:
     items = get_digest(session, limit=limit)
-    return [digest_item_out(item) for item in items]
+    return [dump_digest_item(item) for item in items]
 
 
-@app.post("/api/digest/populate", response_model=list[DigestItemOut])
-def populate_digest_endpoint(limit: int = 30, session: Session = Depends(get_session)) -> list[DigestItemOut]:
+@app.post("/api/digest/populate", response_model=list[DigestItemSchema])
+def populate_digest_endpoint(limit: int = 30, session: Session = Depends(get_session)) -> list[DigestItemSchema]:
     items = populate_digest(session, limit=limit)
-    return [digest_item_out(item) for item in items]
+    return [dump_digest_item(item) for item in items]
 
 
 @app.post("/api/feedback")
-def feedback(payload: FeedbackIn, session: Session = Depends(get_session)) -> dict:
+def feedback(payload: FeedbackSchema, session: Session = Depends(get_session)) -> dict:
     record_feedback(
         session,
         document_id=payload.document_id,
@@ -480,8 +474,8 @@ def feedback(payload: FeedbackIn, session: Session = Depends(get_session)) -> di
     return {"ok": True}
 
 
-@app.get("/api/graph", response_model=GraphOut)
-def graph(document_id: Optional[int] = None, session: Session = Depends(get_session)) -> GraphOut:
+@app.get("/api/graph", response_model=GraphSchema)
+def graph(document_id: int | None = None, session: Session = Depends(get_session)) -> GraphSchema:
     if document_id:
         document_ids = {document_id}
         links = session.execute(
@@ -516,4 +510,4 @@ def graph(document_id: Optional[int] = None, session: Session = Depends(get_sess
         for link in links
         if link.target_document_id
     ]
-    return GraphOut(nodes=nodes, edges=edges)
+    return GraphSchema(nodes=nodes, edges=edges)

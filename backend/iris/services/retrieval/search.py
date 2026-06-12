@@ -8,9 +8,9 @@ import httpx
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from iris.config import SEARCH_RERANK_MODEL, SEARCH_RERANK_TIMEOUT_SECONDS, USE_LLM_RERANKER, openai_api_key
-from iris.embedding import cosine, embed_text, loads_embedding
-from iris.models import Document, Feedback, Link, Search, SearchResult
+from iris.services.common.config import SEARCH_RERANK_MODEL, SEARCH_RERANK_TIMEOUT_SECONDS, USE_LLM_RERANKER, openai_api_key
+from iris.services.ingestion.embedding import cosine, embed_text, loads_embedding
+from iris.models import CrawlStatus, Document, DocumentType, Feedback, FeedbackAction, Link, Search, SearchResult
 
 
 @dataclass(frozen=True)
@@ -31,7 +31,7 @@ def _keyword_score(query_terms: set[str], document: Document) -> float:
             document.title,
             document.author,
             document.summary,
-            document.topics,
+            " ".join(document.topics or []),
             document.extracted_text[:3000] if document.extracted_text else "",
             document.source.name,
             document.source.canonical_domain,
@@ -49,25 +49,24 @@ def search_documents(session: Session, query: str, limit: int = 12, persist: boo
     documents = session.execute(
         select(Document)
         .join(Document.source)
-        .where(Document.document_type == "essay")
-        .where(Document.crawl_status == "fetched")
+        .where(Document.document_type == DocumentType.ESSAY.value)
+        .where(Document.crawl_status == CrawlStatus.FETCHED.value)
     ).scalars().all()
 
     saved_ids = set(
-        session.execute(select(Feedback.document_id).where(Feedback.action.in_(["save", "like", "read"]))).scalars().all()
+        session.execute(select(Feedback.document_id).where(Feedback.action.in_([FeedbackAction.SAVE.value, FeedbackAction.LIKE.value, FeedbackAction.READ.value]))).scalars().all()
     )
     dismissed_ids = set(
-        session.execute(select(Feedback.document_id).where(Feedback.action == "dismiss")).scalars().all()
+        session.execute(select(Feedback.document_id).where(Feedback.action == FeedbackAction.DISMISS.value)).scalars().all()
     )
 
     ranked: list[RankedDocument] = []
     for document in documents:
         semantic = cosine(query_vector, loads_embedding(document.embedding))
         keyword = _keyword_score(query_terms, document)
-        quality = document.quality_score or 0.0
         feedback_bonus = 0.08 if document.id in saved_ids else 0.0
         feedback_penalty = 0.18 if document.id in dismissed_ids else 0.0
-        score = (0.45 * semantic) + (0.4 * keyword) + (0.15 * quality) + feedback_bonus - feedback_penalty
+        score = (0.55 * semantic) + (0.45 * keyword) + feedback_bonus - feedback_penalty
         if score <= 0.03:
             continue
         reason_bits = []
@@ -75,8 +74,6 @@ def search_documents(session: Session, query: str, limit: int = 12, persist: boo
             reason_bits.append(f"keyword overlap {keyword:.0%}")
         if semantic > 0.12:
             reason_bits.append("semantic match")
-        if quality > 0.7:
-            reason_bits.append("high-quality longform")
         if not reason_bits:
             reason_bits.append("related corpus item")
         ranked.append(RankedDocument(document=document, score=score, reason=", ".join(reason_bits)))
@@ -142,7 +139,7 @@ def _llm_rerank_order(api_key: str, query: str, candidates: list[RankedDocument]
             "title": item.document.title,
             "source": item.document.source.canonical_domain,
             "summary": item.document.summary,
-            "topics": item.document.topics,
+            "topics": item.document.topics or [],
             "current_score": round(item.score, 4),
         }
         for item in candidates
@@ -195,13 +192,13 @@ def _expand_with_graph_neighbors(session: Session, ranked: list[RankedDocument],
             if not link.target_document_id or link.target_document_id in seen:
                 continue
             target = session.get(Document, link.target_document_id)
-            if not target or target.document_type != "essay":
+            if not target or target.document_type != DocumentType.ESSAY.value:
                 continue
             expanded.append(
                 RankedDocument(
                     document=target,
                     score=item.score * 0.72,
-                    reason=f"linked from {item.document.title or item.document.final_url}",
+                    reason=f"linked from {item.document.title or item.document.url}",
                 )
             )
             seen.add(target.id)
@@ -215,7 +212,7 @@ def synthesize_answer(query: str, results: list[RankedDocument]) -> str:
         return "No strong matches found in the indexed corpus yet."
     lines = [f"For `{query}`, the strongest matches in the corpus point to:"]
     for item in results[:4]:
-        title = item.document.title or item.document.final_url
+        title = item.document.title or item.document.url
         source = item.document.source.canonical_domain
         summary = (item.document.summary or "").strip()
         lines.append(f"- {title} ({source}): {summary[:220]}")

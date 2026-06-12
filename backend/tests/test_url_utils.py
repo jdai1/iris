@@ -1,4 +1,4 @@
-from iris.url_utils import domain_for_url, normalize_url
+from iris.services.common.url_utils import domain_for_url, normalize_url
 
 
 def test_normalize_url_strips_tracking_and_www():

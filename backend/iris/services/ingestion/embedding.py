@@ -7,7 +7,7 @@ import re
 
 import httpx
 
-from iris.config import EMBEDDING_MODEL, EMBEDDING_TIMEOUT_SECONDS, USE_OPENAI_EMBEDDINGS, openai_api_key
+from iris.services.common.config import EMBEDDING_MODEL, EMBEDDING_TIMEOUT_SECONDS, USE_OPENAI_EMBEDDINGS, openai_api_key
 
 
 DIMENSIONS = 96

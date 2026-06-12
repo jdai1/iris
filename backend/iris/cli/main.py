@@ -10,17 +10,29 @@ from urllib.parse import urlparse
 import httpx
 from sqlalchemy import delete, func, select, text, update
 
-from iris.config import REQUEST_TIMEOUT_SECONDS, USER_AGENT, database_url
-from iris.crawler import crawl_source
-from iris.db import init_db, session_scope
-from iris.digest import get_digest, populate_digest
-from iris.document_classifier import classify_document
-from iris.indexer import plan_sources, run_autopilot
-from iris.models import CrawlJob, Document, IndexEvent, IndexRun, Link, Source
-from iris.repository import get_or_create_source
-from iris.source_classifier import classify_source_homepage, classify_source_url
-from iris.embedding import dumps_embedding, embed_text
-from iris.search import search_documents
+from iris.dao.db import init_db, session_scope
+from iris.dao.core import get_or_create_source
+from iris.models import (
+    CrawlJob,
+    CrawlJobStatus,
+    CrawlStatus,
+    Document,
+    DocumentType,
+    IndexEvent,
+    IndexEventType,
+    IndexRun,
+    Link,
+    Source,
+    SourceStatus,
+)
+from iris.services.common.config import REQUEST_TIMEOUT_SECONDS, USER_AGENT, database_url
+from iris.services.indexing.indexer import plan_sources, run_autopilot
+from iris.services.ingestion.crawler import Crawler
+from iris.services.ingestion.document_classifier import classify_document
+from iris.services.ingestion.embedding import dumps_embedding, embed_text
+from iris.services.ingestion.source_classifier import classify_source_homepage, classify_source_url
+from iris.services.retrieval.digest import get_digest, populate_digest
+from iris.services.retrieval.search import search_documents
 
 
 def configure_logging(verbose: bool = False) -> None:
@@ -48,11 +60,11 @@ def cmd_seed(args: argparse.Namespace) -> None:
         source = get_or_create_source(
             session,
             args.url,
-            status="queued",
-            source_type=classification.source_type,
+            status=SourceStatus.QUEUED.value,
             force_status=True,
         )
-        print(f"source {source.id}: {source.canonical_domain} ({source.status}, {source.source_type})")
+        source.description = classification.reason
+        print(f"source {source.id}: {source.canonical_domain} ({source.status})")
 
 
 def cmd_crawl(args: argparse.Namespace) -> None:
@@ -61,12 +73,11 @@ def cmd_crawl(args: argparse.Namespace) -> None:
         source = get_or_create_source(
             session,
             args.url,
-            status="queued",
-            source_type=classification.source_type,
+            status=SourceStatus.QUEUED.value,
             force_status=True,
         )
-        job = crawl_source(
-            session,
+        source.description = classification.reason
+        job = Crawler(session).crawl_source(
             source,
             max_pages=args.max_pages,
             max_depth=args.max_depth,
@@ -87,9 +98,9 @@ def cmd_search(args: argparse.Namespace) -> None:
         print(search_row.answer if search_row else "")
         for idx, item in enumerate(ranked, start=1):
             doc = item.document
-            print(f"\n{idx}. {doc.title or doc.final_url}")
+            print(f"\n{idx}. {doc.title or doc.url}")
             print(f"   {doc.source.canonical_domain} | score={item.score:.3f} | {item.reason}")
-            print(f"   {doc.final_url}")
+            print(f"   {doc.url}")
             if doc.summary:
                 print(f"   {doc.summary[:260]}")
 
@@ -101,7 +112,7 @@ def cmd_digest(args: argparse.Namespace) -> None:
         items = get_digest(session, limit=args.limit)
         for idx, item in enumerate(items, start=1):
             doc = item.document
-            print(f"{idx}. {doc.title or doc.final_url}")
+            print(f"{idx}. {doc.title or doc.url}")
             print(f"   {doc.source.canonical_domain} | score={item.score:.3f}")
             print(f"   {item.reason}")
 
@@ -111,9 +122,6 @@ def cmd_status(_args: argparse.Namespace) -> None:
         print("sources")
         for status, count in session.execute(select(Source.status, func.count(Source.id)).group_by(Source.status)):
             print(f"  {status}: {count}")
-        print("source types")
-        for source_type, count in session.execute(select(Source.source_type, func.count(Source.id)).group_by(Source.source_type)):
-            print(f"  {source_type}: {count}")
         print("documents")
         for doc_type, status, count in session.execute(
             select(Document.document_type, Document.crawl_status, func.count(Document.id)).group_by(
@@ -147,7 +155,7 @@ def cmd_sql(args: argparse.Namespace) -> None:
 
 def cmd_classify_sources(args: argparse.Namespace) -> None:
     with session_scope() as session:
-        statement = select(Source).where(Source.status == "queued").order_by(Source.first_seen_at.asc())
+        statement = select(Source).where(Source.status == SourceStatus.QUEUED.value).order_by(Source.first_seen_at.asc())
         if args.limit:
             statement = statement.limit(args.limit)
         sources = session.execute(statement).scalars().all()
@@ -155,16 +163,14 @@ def cmd_classify_sources(args: argparse.Namespace) -> None:
         ignored = 0
         for source in sources:
             classification = classify_source_for_cli(source)
-            if source.status != classification.status or (
-                source.source_type == "unknown" and classification.source_type != "unknown"
+            if (
+                source.status != classification.status
+                or source.description != classification.reason
             ):
                 source.status = classification.status
-                if source.source_type == "unknown" or args.overwrite_type:
-                    source.source_type = classification.source_type
-                source.quality_score = classification.confidence
                 source.description = classification.reason
                 changed += 1
-            if source.status == "ignored":
+            if source.status == SourceStatus.IGNORED.value:
                 ignored += 1
         print(f"classified={len(sources)} changed={changed} ignored={ignored}")
 
@@ -176,28 +182,26 @@ def classify_source_for_cli(source: Source):
             timeout=REQUEST_TIMEOUT_SECONDS,
             headers={"User-Agent": USER_AGENT},
         ) as client:
-            response = client.get(source.homepage_url)
+            response = client.get(source.url)
             response.raise_for_status()
         return classify_source_homepage(str(response.url), response.text)
     except Exception as exc:
         logging.getLogger("iris.cli").warning("Could not fetch homepage for %s: %s", source.canonical_domain, exc)
-        return classify_source_url(source.homepage_url)
+        return classify_source_url(source.url)
 
 
 def cmd_classify_source(args: argparse.Namespace) -> None:
     with session_scope() as session:
-        source = get_or_create_source(session, args.url, status="queued", force_status=args.force)
+        source = get_or_create_source(session, args.url, status=SourceStatus.QUEUED.value, force_status=args.force)
         classification = classify_source_for_cli(source)
-        if classification.status == "ignored":
-            source.status = "ignored"
-        elif source.status in {"ignored", "failed"} or args.force:
-            source.status = "queued"
-        source.source_type = classification.source_type
-        source.quality_score = classification.confidence
+        if classification.status == SourceStatus.IGNORED.value:
+            source.status = SourceStatus.IGNORED.value
+        elif source.status in {SourceStatus.IGNORED.value, SourceStatus.FAILED.value} or args.force:
+            source.status = SourceStatus.QUEUED.value
         source.description = classification.reason
         print(
             f"source {source.id}: {source.canonical_domain} "
-            f"status={source.status} type={source.source_type} confidence={source.quality_score}"
+            f"status={source.status} confidence={classification.confidence}"
         )
         print(source.description)
 
@@ -218,8 +222,7 @@ def cmd_ignore_source(args: argparse.Namespace) -> None:
             session.execute(delete(Link).where(Link.target_document_id.in_(document_ids)))
             session.execute(delete(Document).where(Document.id.in_(document_ids)))
         session.execute(update(Link).where(Link.target_source_id == source.id).values(target_source_id=None))
-        source.status = "ignored"
-        source.source_type = args.source_type
+        source.status = SourceStatus.IGNORED.value
         source.description = args.reason
         print(f"ignored source {source.id}: {source.canonical_domain}; deleted_docs={len(document_ids) if args.delete_rows else 0}")
 
@@ -228,8 +231,8 @@ def cmd_embed_documents(args: argparse.Namespace) -> None:
     with session_scope() as session:
         statement = (
             select(Document)
-            .where(Document.document_type == "essay")
-            .where(Document.crawl_status == "fetched")
+            .where(Document.document_type == DocumentType.ESSAY.value)
+            .where(Document.crawl_status == CrawlStatus.FETCHED.value)
             .order_by(Document.last_crawled_at.desc())
         )
         if args.missing_only:
@@ -263,8 +266,8 @@ def cmd_audit_documents(args: argparse.Namespace) -> None:
         statement = (
             select(Document)
             .join(Source, Document.source_id == Source.id)
-            .where(Document.crawl_status == "fetched")
-            .order_by(Document.quality_score.asc().nullsfirst(), Document.last_crawled_at.desc())
+            .where(Document.crawl_status == CrawlStatus.FETCHED.value)
+            .order_by(Document.last_crawled_at.desc())
         )
         if args.source:
             statement = statement.where(Source.canonical_domain == args.source)
@@ -275,7 +278,7 @@ def cmd_audit_documents(args: argparse.Namespace) -> None:
         for doc in documents:
             link_count = session.scalar(select(func.count(Link.id)).where(Link.source_document_id == doc.id)) or 0
             classification = classify_document(
-                url=doc.final_url,
+                url=doc.url,
                 title=doc.title,
                 text=doc.extracted_text or "",
                 link_count=link_count,
@@ -285,8 +288,8 @@ def cmd_audit_documents(args: argparse.Namespace) -> None:
             flag = "OK" if classification.document_type == doc.document_type else "RECLASSIFY"
             print(
                 f"  {flag} doc={doc.id} {doc.source.canonical_domain} "
-                f"{doc.document_type}->{classification.document_type} quality={doc.quality_score} "
-                f"links={link_count} title={doc.title or doc.final_url}"
+                f"{doc.document_type}->{classification.document_type} "
+                f"links={link_count} title={doc.title or doc.url}"
             )
             if args.verbose:
                 print(f"    {classification.reason}")
@@ -294,7 +297,7 @@ def cmd_audit_documents(args: argparse.Namespace) -> None:
 
 def cmd_reclassify_documents(args: argparse.Namespace) -> None:
     with session_scope() as session:
-        statement = select(Document).join(Source, Document.source_id == Source.id).where(Document.crawl_status == "fetched")
+        statement = select(Document).join(Source, Document.source_id == Source.id).where(Document.crawl_status == CrawlStatus.FETCHED.value)
         if args.source:
             statement = statement.where(Source.canonical_domain == args.source)
         if args.limit:
@@ -304,23 +307,21 @@ def cmd_reclassify_documents(args: argparse.Namespace) -> None:
         for doc in documents:
             link_count = session.scalar(select(func.count(Link.id)).where(Link.source_document_id == doc.id)) or 0
             classification = classify_document(
-                url=doc.final_url,
+                url=doc.url,
                 title=doc.title,
                 text=doc.extracted_text or "",
                 link_count=link_count,
                 has_author=bool(doc.author),
                 has_published_date=bool(doc.published_at),
             )
-            if doc.document_type != classification.document_type or doc.quality_score != classification.quality_score:
+            if doc.document_type != classification.document_type:
                 changed += 1
                 print(
                     f"doc {doc.id}: {doc.document_type}->{classification.document_type} "
-                    f"quality {doc.quality_score}->{classification.quality_score:.3f} "
-                    f"{doc.title or doc.final_url}"
+                    f"{doc.title or doc.url}"
                 )
                 if not args.dry_run:
                     doc.document_type = classification.document_type
-                    doc.quality_score = classification.quality_score
         print(f"checked={len(documents)} changed={changed} dry_run={args.dry_run}")
 
 
@@ -331,7 +332,7 @@ def cmd_source_priorities(args: argparse.Namespace) -> None:
             source = item.source
             print(
                 f"{idx}. {source.canonical_domain} score={item.score:.3f} "
-                f"status={source.status} type={source.source_type}"
+                f"status={source.status}"
             )
             print(f"   {item.reason}")
 
@@ -423,7 +424,7 @@ def cmd_index_summary(args: argparse.Namespace) -> None:
         sources_by_id = {source.id: source for _job, source in jobs}
 
         plan = _planned_sources_from_events(events)
-        started_source_ids = [event.source_id for event in events if event.event_type == "source_started" and event.source_id]
+        started_source_ids = [event.source_id for event in events if event.event_type == IndexEventType.SOURCE_STARTED.value and event.source_id]
         finished_payloads = _finished_payloads_by_source(events)
 
         print(
@@ -465,7 +466,7 @@ def cmd_index_summary(args: argparse.Namespace) -> None:
 
 def _planned_sources_from_events(events: list[IndexEvent]) -> list[dict]:
     for event in events:
-        if event.event_type != "plan_created" or not event.payload:
+        if event.event_type != IndexEventType.PLAN_CREATED.value or not event.payload:
             continue
         try:
             payload = json.loads(event.payload)
@@ -479,7 +480,7 @@ def _planned_sources_from_events(events: list[IndexEvent]) -> list[dict]:
 def _finished_payloads_by_source(events: list[IndexEvent]) -> dict[int, dict]:
     payloads: dict[int, dict] = {}
     for event in events:
-        if event.event_type != "source_finished" or not event.source_id or not event.payload:
+        if event.event_type != IndexEventType.SOURCE_FINISHED.value or not event.source_id or not event.payload:
             continue
         try:
             payloads[event.source_id] = json.loads(event.payload)
@@ -489,11 +490,11 @@ def _finished_payloads_by_source(events: list[IndexEvent]) -> dict[int, dict]:
 
 
 def _crawl_outcome(run: IndexRun, job: CrawlJob, payload: dict) -> str:
-    if job.status == "skipped":
+    if job.status == CrawlJobStatus.SKIPPED.value:
         return "rejected"
-    if job.status == "failed":
+    if job.status == CrawlJobStatus.FAILED.value:
         return "failed"
-    if job.status != "succeeded":
+    if job.status != CrawlJobStatus.SUCCEEDED.value:
         return job.status
     max_documents = payload.get("max_documents_per_source")
     if max_documents and job.documents_indexed >= int(max_documents):
@@ -563,7 +564,6 @@ def build_parser() -> argparse.ArgumentParser:
 
     classify = subparsers.add_parser("classify-sources")
     classify.add_argument("--limit", type=int, default=0)
-    classify.add_argument("--overwrite-type", action="store_true")
     classify.set_defaults(func=cmd_classify_sources)
 
     classify_one = subparsers.add_parser("classify-source")
@@ -573,7 +573,6 @@ def build_parser() -> argparse.ArgumentParser:
 
     ignore = subparsers.add_parser("ignore-source")
     ignore.add_argument("domain")
-    ignore.add_argument("--source-type", default="ignored")
     ignore.add_argument("--reason", default="manually ignored")
     ignore.add_argument("--delete-rows", action="store_true")
     ignore.set_defaults(func=cmd_ignore_source)

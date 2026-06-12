@@ -5,38 +5,34 @@ from datetime import datetime, timezone
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from iris.models import Document, Link, Source
-from iris.url_utils import domain_for_url, is_valid_http_url, normalize_url, root_url_for_domain, url_hash
+from iris.models import Document, Link, LinkType, Source, SourceStatus
+from iris.services.common.url_utils import domain_for_url, is_valid_http_url, normalize_url, root_url_for_domain
 
 
 def get_or_create_source(
     session: Session,
     url: str,
     *,
-    status: str = "queued",
-    source_type: str = "unknown",
+    status: str = SourceStatus.QUEUED.value,
     discovered_from_source_id: int | None = None,
     force_status: bool = False,
 ) -> Source:
-    homepage = normalize_url(url)
-    root_homepage = root_url_for_domain(homepage)
-    domain = domain_for_url(homepage)
+    normalized_url = normalize_url(url)
+    root_url = root_url_for_domain(normalized_url)
+    domain = domain_for_url(normalized_url)
     source = session.execute(select(Source).where(Source.canonical_domain == domain)).scalar_one_or_none()
     if source:
         if force_status:
             source.status = status
-        elif source.status != "ignored" and status == "ignored":
+        elif source.status != SourceStatus.IGNORED.value and status == SourceStatus.IGNORED.value:
             source.status = status
-        if source.source_type == "unknown" and source_type != "unknown":
-            source.source_type = source_type
-        if source.homepage_url != root_homepage and source.discovered_from_source_id is not None:
-            source.homepage_url = root_homepage
+        if source.url != root_url and source.discovered_from_source_id is not None:
+            source.url = root_url
         return source
     source = Source(
         canonical_domain=domain,
-        homepage_url=root_homepage,
+        url=root_url,
         status=status,
-        source_type=source_type,
         discovered_from_source_id=discovered_from_source_id,
     )
     session.add(source)
@@ -49,7 +45,6 @@ def upsert_document(
     *,
     source: Source,
     url: str,
-    final_url: str,
     document_type: str,
     crawl_status: str,
     title: str | None,
@@ -59,17 +54,14 @@ def upsert_document(
     summary: str | None,
     topics: list[str],
     embedding: str | None,
-    quality_score: float | None,
     content_hash: str | None,
 ) -> Document:
-    final_url = normalize_url(final_url)
-    document = session.execute(select(Document).where(Document.final_url == final_url)).scalar_one_or_none()
+    url = normalize_url(url)
+    document = session.execute(select(Document).where(Document.url == url)).scalar_one_or_none()
     if document is None:
         document = Document(
             source_id=source.id,
-            url=normalize_url(url),
-            final_url=final_url,
-            url_hash=url_hash(final_url),
+            url=url,
         )
         session.add(document)
     document.source_id = source.id
@@ -80,9 +72,8 @@ def upsert_document(
     document.published_at = published_at
     document.extracted_text = extracted_text
     document.summary = summary
-    document.topics = ",".join(topics)
+    document.topics = [topic for topic in topics if topic]
     document.embedding = embedding
-    document.quality_score = quality_score
     document.content_hash = content_hash
     document.last_crawled_at = datetime.now(timezone.utc)
     session.flush()
@@ -102,21 +93,21 @@ def upsert_link(
         raise ValueError(f"invalid link URL: {target_url[:120]}")
     target_domain = domain_for_url(normalized)
     target_source = session.execute(select(Source).where(Source.canonical_domain == target_domain)).scalar_one_or_none()
-    target_document = session.execute(select(Document).where(Document.final_url == normalized)).scalar_one_or_none()
+    target_document = session.execute(select(Document).where(Document.url == normalized)).scalar_one_or_none()
     link = session.execute(
         select(Link).where(
             Link.source_document_id == source_document.id,
-            Link.normalized_target_url == normalized,
+            Link.target_url == normalized,
         )
     ).scalar_one_or_none()
     if link is None:
-        link = Link(source_document_id=source_document.id, normalized_target_url=normalized, target_url=target_url)
+        link = Link(source_document_id=source_document.id, target_url=normalized)
         session.add(link)
     link.target_domain = target_domain
     link.target_source_id = target_source.id if target_source else None
     link.target_document_id = target_document.id if target_document else None
     link.anchor_text = anchor_text
     link.context = context
-    link.link_type = "internal" if target_domain == source_document.source.canonical_domain else "external"
+    link.link_type = LinkType.INTERNAL.value if target_domain == source_document.source.canonical_domain else LinkType.EXTERNAL.value
     session.flush()
     return link

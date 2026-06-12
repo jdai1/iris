@@ -6,7 +6,7 @@ from typing import Iterator
 from sqlalchemy import create_engine
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
-from iris.config import database_url
+from iris.services.common.config import database_url
 
 
 class Base(DeclarativeBase):
@@ -35,4 +35,3 @@ def session_scope() -> Iterator[Session]:
         raise
     finally:
         session.close()
-

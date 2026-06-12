@@ -1,9 +1,8 @@
 export interface Source {
   id: number;
   canonical_domain: string;
-  homepage_url: string;
+  url: string;
   name: string | null;
-  source_type: string;
   status: string;
   rss_url: string | null;
   first_seen_at: string;
@@ -15,14 +14,12 @@ export interface Document {
   source_id: number;
   source_domain: string;
   url: string;
-  final_url: string;
   document_type: string;
   title: string | null;
   author: string | null;
   published_at: string | null;
   summary: string | null;
   topics: string[];
-  quality_score: number | null;
 }
 
 export interface SearchResult {
@@ -49,7 +46,6 @@ export interface DigestItem {
 export interface AdminOverview {
   totals: Record<string, number>;
   source_statuses: Record<string, number>;
-  source_types: Record<string, number>;
   document_types: Record<string, number>;
 }
 
@@ -65,10 +61,8 @@ export interface Page<T> {
 export interface AdminSource {
   id: number;
   canonical_domain: string;
-  homepage_url: string;
-  source_type: string;
+  url: string;
   status: string;
-  quality_score: number | null;
   description: string | null;
   rss_url: string | null;
   sitemap_url: string | null;

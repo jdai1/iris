@@ -38,21 +38,22 @@ Acceptance:
 
 ## 2. Autopilot Crawl Policy
 
-Queued sources should be crawled by priority, not FIFO.
+Queued sources should be crawled by a deliberately simple spider policy first. The current policy is:
 
-Priority formula:
+```text
+Only consider queued sources directly linked from benkuhn.net essay documents.
+```
+
+Temporary priority formula:
 
 ```text
 priority =
-  0.45 * log(1 + inbound_link_count_from_indexed_docs)
-+ 0.20 * log(1 + distinct_referring_sources)
-+ 0.15 * source_classifier_confidence_if_known
-+ 0.10 * overlap_with_user_interests
-+ 0.05 * recency_or_feed_presence
-+ 0.05 * manual_seed_bonus
-- 0.25 * ignored_or_failed_penalty
-- 0.15 * broad_platform_penalty
+  100 * links_from_benkuhn
++ small feed/classifier bonuses
+- broad/non-source penalties
 ```
+
+This is intentionally less clever than global PageRank or global inbound-link scoring. It makes the crawl frontier easy to inspect and debug. Later, generalize the seed from `benkuhn.net` to a small explicit liked-source set once source probing is solid.
 
 Autopilot command:
 
@@ -63,7 +64,7 @@ iris.cli autopilot --budget-sources 20 --max-pages 80 --max-depth 2 --embed
 
 Loop:
 
-1. Compute source priorities.
+1. Compute direct Ben Kuhn outbound-source priorities.
 2. Print top planned sources and reasons.
 3. For each source, classify homepage.
 4. If accepted, crawl bounded pages.

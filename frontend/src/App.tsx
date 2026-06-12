@@ -45,7 +45,7 @@ function DocumentCard({
         <span>{document.document_type}</span>
         {typeof score === 'number' && <span>{score.toFixed(2)}</span>}
       </div>
-      <h3>{document.title ?? document.final_url}</h3>
+      <h3>{document.title ?? document.url}</h3>
       {document.summary && <p className="summary">{document.summary}</p>}
       <p className="reason">{reason}</p>
       <div className="topics">
@@ -54,7 +54,7 @@ function DocumentCard({
         ))}
       </div>
       <div className="card-actions">
-        <a href={document.final_url}>
+        <a href={document.url}>
           <ArrowUpRight size={16} />
           Open
         </a>
@@ -604,7 +604,6 @@ function AdminSourcesTable({ sources }: { sources: AdminSource[] }) {
           <tr>
             <th>Domain</th>
             <th>Status</th>
-            <th>Type</th>
             <th>Docs</th>
             <th>Essays</th>
             <th>Latest Crawl</th>
@@ -616,11 +615,10 @@ function AdminSourcesTable({ sources }: { sources: AdminSource[] }) {
           {sources.map((source) => (
             <tr key={source.id}>
               <td>
-                <a href={source.homepage_url}>{source.canonical_domain}</a>
+                <a href={source.url}>{source.canonical_domain}</a>
                 {source.description && <small>{source.description}</small>}
               </td>
               <td><StatusPill value={source.status} /></td>
-              <td>{source.source_type}</td>
               <td>{source.document_count}</td>
               <td>{source.essay_count}</td>
               <td>{source.latest_job ? <JobLabel job={source.latest_job} /> : 'none'}</td>
@@ -649,17 +647,15 @@ function AdminDocumentsTable({ documents, page, sourceName }: { documents: Docum
             <th>Document</th>
             <th>Source</th>
             <th>Type</th>
-            <th>Quality</th>
             <th>Published</th>
           </tr>
         </thead>
         <tbody>
           {documents.map((document) => (
             <tr key={document.id}>
-              <td><a href={document.final_url}>{document.title || document.final_url}</a></td>
+              <td><a href={document.url}>{document.title || document.url}</a></td>
               <td>{document.source_domain}</td>
               <td>{document.document_type}</td>
-              <td>{document.quality_score?.toFixed(2) ?? '-'}</td>
               <td>{formatDate(document.published_at)}</td>
             </tr>
           ))}

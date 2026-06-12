@@ -13,13 +13,13 @@ from bs4 import BeautifulSoup
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from iris.config import DEFAULT_MAX_DEPTH, DEFAULT_MAX_PAGES, MAX_HTML_BYTES, REQUEST_TIMEOUT_SECONDS, USER_AGENT
-from iris.embedding import dumps_embedding, embed_text
-from iris.extract import extract_page
-from iris.models import CrawlJob, Document, Source
-from iris.repository import get_or_create_source, upsert_document, upsert_link
-from iris.source_classifier import classify_source_homepage
-from iris.url_utils import content_hash, domain_for_url, is_probably_static, is_valid_http_url, normalize_url, same_domain
+from iris.services.common.config import DEFAULT_MAX_DEPTH, DEFAULT_MAX_PAGES, MAX_HTML_BYTES, REQUEST_TIMEOUT_SECONDS, USER_AGENT
+from iris.services.ingestion.embedding import dumps_embedding, embed_text
+from iris.services.ingestion.extract import extract_page
+from iris.models import CrawlJob, CrawlJobStatus, CrawlStatus, Document, DocumentType, LinkType, Source, SourceStatus
+from iris.dao.core import get_or_create_source, upsert_document, upsert_link
+from iris.services.ingestion.source_classifier import classify_source_homepage
+from iris.services.common.url_utils import content_hash, is_probably_static, is_valid_http_url, normalize_url, same_domain
 
 
 logger = logging.getLogger("iris.crawler")
@@ -51,17 +51,17 @@ class Crawler:
         skip_existing: bool = False,
         max_documents: int | None = None,
     ) -> CrawlJob:
-        job = CrawlJob(source_id=source.id, status="running")
+        job = CrawlJob(source_id=source.id, status=CrawlJobStatus.RUNNING.value)
         self.session.add(job)
         self.session.flush()
-        if source.status == "ignored":
-            job.status = "skipped"
-            job.error = f"source is ignored ({source.source_type})"
+        if source.status == SourceStatus.IGNORED.value:
+            job.status = CrawlJobStatus.SKIPPED.value
+            job.error = "source is ignored"
             job.finished_at = datetime.now(timezone.utc)
-            logger.info("Skipping ignored source %s (%s)", source.canonical_domain, source.source_type)
+            logger.info("Skipping ignored source %s", source.canonical_domain)
             self.session.flush()
             return job
-        source.status = "crawling"
+        source.status = SourceStatus.CRAWLING.value
         source.last_checked_at = datetime.now(timezone.utc)
         self.session.flush()
         self.session.commit()
@@ -74,27 +74,23 @@ class Crawler:
                 max_documents or "none",
                 skip_existing,
             )
-            homepage_result = self._fetch(source.homepage_url)
+            homepage_result = self._fetch(source.url)
             classification = classify_source_homepage(homepage_result.final_url, homepage_result.text)
-            source.source_type = classification.source_type
-            source.quality_score = classification.confidence
             source.description = classification.reason
-            if classification.status == "ignored":
-                source.status = "ignored"
-                job.status = "skipped"
+            if classification.status == SourceStatus.IGNORED.value:
+                source.status = SourceStatus.IGNORED.value
+                job.status = CrawlJobStatus.SKIPPED.value
                 job.error = f"source classifier rejected crawl: {classification.reason}"
                 logger.info(
-                    "source rejected domain=%s type=%s reason=%s",
+                    "source rejected domain=%s reason=%s",
                     source.canonical_domain,
-                    classification.source_type,
                     classification.reason,
                 )
                 return job
             confidence = f"{classification.confidence:.2f}" if classification.confidence is not None else "unknown"
             logger.info(
-                "source accepted domain=%s type=%s confidence=%s",
+                "source accepted domain=%s confidence=%s",
                 source.canonical_domain,
-                classification.source_type,
                 confidence,
             )
             candidates = self._candidate_urls(source, homepage_result)
@@ -155,12 +151,12 @@ class Crawler:
                     )
                 else:
                     logger.info("crawl stop domain=%s reason=max_pages limit=%s", source.canonical_domain, max_pages)
-            source.status = "indexed"
-            job.status = "succeeded"
+            source.status = SourceStatus.INDEXED.value
+            job.status = CrawlJobStatus.SUCCEEDED.value
         except Exception as exc:
             logger.exception("Crawl failed for %s", source.canonical_domain)
-            source.status = "failed"
-            job.status = "failed"
+            source.status = SourceStatus.FAILED.value
+            job.status = CrawlJobStatus.FAILED.value
             job.error = str(exc)
         finally:
             job.finished_at = datetime.now(timezone.utc)
@@ -268,7 +264,7 @@ class Crawler:
             normalized = normalize_url(url)
             if normalized in seen or is_probably_static(normalized):
                 continue
-            if not same_domain(normalized, source.homepage_url):
+            if not same_domain(normalized, source.url):
                 continue
             path = urlparse(normalized).path
             if path in {"", "/"}:
@@ -288,8 +284,8 @@ class Crawler:
         skip_existing: bool = False,
         initial_visited: set[str] | None = None,
     ) -> bool:
-        queue: deque[tuple[str, int]] = deque([(source.homepage_url, 0)])
-        queued = {normalize_url(source.homepage_url)}
+        queue: deque[tuple[str, int]] = deque([(source.url, 0)])
+        queued = {normalize_url(source.url)}
         visited: set[str] = set(initial_visited or set())
         while queue and not self._limits_reached(job, max_pages=max_pages, max_documents=max_documents):
             url, depth = queue.popleft()
@@ -301,8 +297,8 @@ class Crawler:
             if depth >= max_depth or not document:
                 continue
             for link in document.outgoing_links:
-                target = normalize_url(link.normalized_target_url)
-                if link.link_type != "internal" or target in queued or is_probably_static(target):
+                target = normalize_url(link.target_url)
+                if link.link_type != LinkType.INTERNAL.value or target in queued or is_probably_static(target):
                     continue
                 queue.append((target, depth + 1))
                 queued.add(target)
@@ -318,7 +314,7 @@ class Crawler:
                 return None
             if skip_existing:
                 existing = self._existing_document_for_url(normalized)
-                if existing and existing.crawl_status == "fetched":
+                if existing and existing.crawl_status == CrawlStatus.FETCHED.value:
                     logger.debug("Skipping already fetched URL: %s", normalized)
                     return existing
             fetched = self._fetch(url)
@@ -330,10 +326,9 @@ class Crawler:
             document = upsert_document(
                 self.session,
                 source=source,
-                url=fetched.url,
-                final_url=fetched.final_url,
+                url=fetched.final_url,
                 document_type=extracted.document_type,
-                crawl_status="fetched",
+                crawl_status=CrawlStatus.FETCHED.value,
                 title=extracted.title,
                 author=extracted.author,
                 published_at=extracted.published_at,
@@ -341,11 +336,10 @@ class Crawler:
                 summary=extracted.summary,
                 topics=extracted.topics,
                 embedding=embedding,
-                quality_score=extracted.quality_score,
                 content_hash=text_hash,
             )
             job.pages_fetched += 1
-            if extracted.document_type == "essay":
+            if extracted.document_type == DocumentType.ESSAY.value:
                 job.documents_indexed += 1
                 logger.info(
                     "doc accepted domain=%s docs=%s fetched=%s title=%s",
@@ -374,12 +368,12 @@ class Crawler:
                     context=extracted_link.context,
                 )
                 job.links_seen += 1
-                if link.link_type == "external" and link.target_domain:
+                if link.link_type == LinkType.EXTERNAL.value and link.target_domain:
                     before = self.session.execute(select(Source).where(Source.canonical_domain == link.target_domain)).scalar_one_or_none()
                     discovered = get_or_create_source(
                         self.session,
                         normalized_target,
-                        status="queued",
+                        status=SourceStatus.QUEUED.value,
                         discovered_from_source_id=source.id,
                     )
                     link.target_source_id = discovered.id
@@ -406,12 +400,12 @@ class Crawler:
 
     def _existing_document_for_url(self, normalized_url: str) -> Document | None:
         candidates = {normalized_url, _alternate_http_scheme(normalized_url)}
-        return self.session.execute(select(Document).where(Document.final_url.in_(candidates))).scalar_one_or_none()
+        return self.session.execute(select(Document).where(Document.url.in_(candidates))).scalar_one_or_none()
 
     def _resolve_links_for_document(self, document: Document) -> None:
         for link in document.outgoing_links:
             target_document = self.session.execute(
-                select(Document).where(Document.final_url == link.normalized_target_url)
+                select(Document).where(Document.url == link.target_url)
             ).scalar_one_or_none()
             if target_document:
                 link.target_document_id = target_document.id
@@ -422,24 +416,6 @@ class Crawler:
                 ).scalar_one_or_none()
                 if target_source:
                     link.target_source_id = target_source.id
-
-
-def crawl_source(
-    session: Session,
-    source: Source,
-    max_pages: int = DEFAULT_MAX_PAGES,
-    max_depth: int = DEFAULT_MAX_DEPTH,
-    *,
-    skip_existing: bool = False,
-    max_documents: int | None = None,
-) -> CrawlJob:
-    return Crawler(session).crawl_source(
-        source,
-        max_pages=max_pages,
-        max_depth=max_depth,
-        skip_existing=skip_existing,
-        max_documents=max_documents,
-    )
 
 
 def _alternate_http_scheme(url: str) -> str:
