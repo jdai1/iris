@@ -11,6 +11,7 @@ import httpx
 
 from iris.backfills.index_run_fk import migrate_index_run_fk
 from iris.backfills.document_crawl_job_fk import migrate_document_crawl_job_fk
+from iris.backfills.source_profiles import backfill_source_profiles
 from iris.dao import db
 from iris.dao import documents as documents_dao
 from iris.dao import maintenance as maintenance_dao
@@ -568,22 +569,11 @@ def cmd_generate_source_profile(args: argparse.Namespace) -> None:
 
 def cmd_backfill_source_profiles(args: argparse.Namespace) -> None:
     with db.session_scope():
-        sources = profile_dao.get_sources_for_profile_backfill(limit=args.limit)
-        changed = 0
-        failed = 0
-        for idx, source in enumerate(sources, start=1):
-            analysis = generate_source_profile(source, force=args.force)
-            if analysis.status == "succeeded":
-                changed += 1
-            else:
-                failed += 1
-            print(
-                f"{idx}/{len(sources)} {source.canonical_domain} status={analysis.status} "
-                f"name={analysis.display_name or 'none'}"
-            )
-            if idx % 10 == 0:
-                db.flush()
-        print(f"profiles checked={len(sources)} succeeded={changed} not_succeeded={failed}")
+        result = backfill_source_profiles(limit=args.limit or None, force=args.force)
+        print(
+            f"profiles checked={result.checked} succeeded={result.succeeded} "
+            f"missing_key={result.missing_key} failed={result.failed}"
+        )
 
 
 def build_parser() -> argparse.ArgumentParser:
