@@ -1,12 +1,9 @@
-import { FormEvent, ReactNode, useEffect, useMemo, useRef, useState } from 'react';
+import { FormEvent, ReactNode, useEffect, useRef, useState } from 'react';
 import {
-  Badge,
   Box,
   Button,
   Flex,
   Heading,
-  HStack,
-  Link,
   SimpleGrid,
   Stack,
   Text,
@@ -25,10 +22,13 @@ import {
 import { EmbeddingExplorer } from './EmbeddingExplorer';
 import { GraphExplorer } from './GraphExplorer';
 import { CorpusSearchForm } from './CorpusSearchForm';
+import { DocumentCard } from './components/DocumentCard';
+import { Pagination, ProfilePagination, type PageState } from './components/Pagination';
+import { ProfileAnalysisCard } from './components/ProfileAnalysisCard';
+import { StatusPill } from './components/StatusPill';
 import type { AdminCrawlJob, AdminIndexRun, AdminOverview, AdminSource, DigestRecommendation, Page, SearchResponse, Document, SourceProfileAnalysis } from './types';
 
 type View = 'search' | 'digest' | 'directory' | 'explore' | 'graph' | 'admin';
-type PageState = { limit: number; offset: number };
 type ProfileTarget = { sourceId: number; domain: string } | null;
 
 const emptyPage = <T,>(): Page<T> => ({
@@ -39,61 +39,6 @@ const emptyPage = <T,>(): Page<T> => ({
   has_next: false,
   has_previous: false,
 });
-
-function DocumentCard({
-  document,
-  reason,
-  score,
-  onOpenProfile,
-  compact = false,
-}: {
-  document: Document;
-  reason: string;
-  score?: number;
-  onOpenProfile?: (sourceId: number, domain: string) => void;
-  compact?: boolean;
-}) {
-  return (
-    <Box as="article" className={compact ? 'document-card document-card-compact' : 'document-card'}>
-      {!compact && (
-        <HStack gap="2" flexWrap="wrap" color="iris.500" fontSize="xs" textTransform="uppercase">
-          <button className="profile-link" type="button" onClick={() => onOpenProfile?.(document.source_id, document.source_domain)}>
-            {document.source_domain}
-          </button>
-          <Text as="span">{document.document_type}</Text>
-          {typeof score === 'number' && <Text as="span">{score.toFixed(2)}</Text>}
-        </HStack>
-      )}
-      <div className={compact ? 'document-title-row' : undefined}>
-        <Heading as="h3" mt="2" mb="3" fontSize="xl" lineHeight="1.2" fontWeight="650">
-          {document.title ?? document.url}
-        </Heading>
-        {compact && (
-          <Link href={document.url} className="document-open-icon" color="iris.900" fontWeight="650" textDecoration="none" aria-label="Open document">
-            <ArrowUpRight size={16} />
-          </Link>
-        )}
-      </div>
-      {document.summary && <Text color="iris.700" lineHeight="1.6" mb="3">{document.summary}</Text>}
-      {!compact && <Text color="iris.500" fontSize="sm" lineHeight="1.55" mb="4">{reason}</Text>}
-      <HStack className="topics" gap="1.5" flexWrap="wrap" mb="4">
-        {document.topics.slice(0, 6).map((topic) => (
-          <Badge key={topic} variant="outline" borderColor="iris.300" color="iris.700" bg="iris.100" fontWeight="500">
-            {topic}
-          </Badge>
-        ))}
-      </HStack>
-      {!compact && (
-        <HStack>
-          <Link href={document.url} color="iris.900" fontWeight="650" textDecoration="none">
-            <ArrowUpRight size={16} />
-            Open
-          </Link>
-        </HStack>
-      )}
-    </Box>
-  );
-}
 
 function SearchView({ onOpenProfile }: { onOpenProfile: (sourceId: number, domain: string) => void }) {
   const [query, setQuery] = useState('');
@@ -385,105 +330,6 @@ function DirectoryView({ target, onOpenProfile }: { target: ProfileTarget; onOpe
           </div>
       )}
     </Box>
-  );
-}
-
-function ProfilePagination<T>({ page, onChange }: { page: Page<T>; onChange: (next: PageState) => void }) {
-  const start = page.total === 0 ? 0 : page.offset + 1;
-  const end = Math.min(page.offset + page.items.length, page.total);
-
-  return (
-    <div className="profile-pagination">
-      <button type="button" disabled={!page.has_previous} onClick={() => onChange({ limit: page.limit, offset: Math.max(0, page.offset - page.limit) })} aria-label="Previous profile documents">
-        ←
-      </button>
-      <span>{start}-{end} of {page.total}</span>
-      <button type="button" disabled={!page.has_next} onClick={() => onChange({ limit: page.limit, offset: page.offset + page.limit })} aria-label="Next profile documents">
-        →
-      </button>
-    </div>
-  );
-}
-
-function ProfileAnalysisCard({ analysis }: { analysis: SourceProfileAnalysis | null }) {
-  const payload = analysis?.payload;
-  const facts = analysis?.scraped_facts;
-  const themes = payload?.themes?.length ? payload.themes : facts?.top_topics?.slice(0, 12).map((item) => item.topic) ?? [];
-  const links = payload?.public_links?.length ? payload.public_links : facts?.public_links ?? [];
-  const contact = payload?.public_contact?.length ? payload.public_contact : facts?.public_contact ?? [];
-  const unavailable = new Set(analysis?.unavailable_sections ?? payload?.unavailable_sections ?? []);
-
-  if (!analysis) {
-    return (
-      <div className="profile-analysis-card">
-        <ProfileUnavailable labels={['bio', 'themes', 'writing style', 'strong takes', 'links', 'contact']} />
-      </div>
-    );
-  }
-
-  return (
-    <div className="profile-analysis-card">
-      {payload?.bio ? <p className="profile-bio">{payload.bio}</p> : <ProfileUnavailable labels={['bio']} />}
-      <ProfileChipSection title="Writes about" items={themes} unavailable={unavailable.has('themes')} />
-      <ProfileChipSection title="Style" items={payload?.writing_style ?? []} unavailable={unavailable.has('writing_style')} />
-      <ProfileTakeSection takes={payload?.strong_takes ?? []} unavailable={unavailable.has('strong_takes')} />
-      <ProfileLinkSection title="Links" links={links} unavailable={unavailable.has('public_links')} />
-      <ProfileLinkSection title="Contact" links={contact} unavailable={unavailable.has('public_contact')} />
-      {payload?.caveats && payload.caveats.length > 0 && (
-        <div className="profile-caveats">
-          {payload.caveats.map((caveat) => <span key={caveat}>{caveat}</span>)}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function ProfileChipSection({ title, items, unavailable }: { title: string; items: string[]; unavailable: boolean }) {
-  if (!items.length) return unavailable ? <ProfileUnavailable labels={[title.toLowerCase()]} /> : null;
-  return (
-    <div className="profile-analysis-section">
-      <h4>{title}</h4>
-      <div className="profile-chip-list">
-        {items.map((item) => <span key={item}>{item}</span>)}
-      </div>
-    </div>
-  );
-}
-
-function ProfileTakeSection({ takes, unavailable }: { takes: Array<{ take: string; evidence_document_ids: number[] }>; unavailable: boolean }) {
-  if (!takes.length) return unavailable ? <ProfileUnavailable labels={['strong takes']} /> : null;
-  return (
-    <div className="profile-analysis-section">
-      <h4>Strong takes</h4>
-      <ul className="profile-take-list">
-        {takes.map((item) => <li key={item.take}>{item.take}</li>)}
-      </ul>
-    </div>
-  );
-}
-
-function ProfileLinkSection({ title, links, unavailable }: { title: string; links: Array<{ label?: string; url?: string; kind?: string }>; unavailable: boolean }) {
-  const usable = links.filter((link) => link.url);
-  if (!usable.length) return unavailable ? <ProfileUnavailable labels={[title.toLowerCase()]} /> : null;
-  return (
-    <div className="profile-analysis-section">
-      <h4>{title}</h4>
-      <div className="profile-link-list">
-        {usable.map((link) => (
-          <a key={link.url} href={link.url}>
-            {link.label || link.kind || link.url}
-          </a>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function ProfileUnavailable({ labels }: { labels: string[] }) {
-  return (
-    <div className="profile-unavailable">
-      {labels.map((label) => <span key={label}>{label} unavailable</span>)}
-    </div>
   );
 }
 
@@ -950,33 +796,6 @@ function AdminDocumentsTable({
   );
 }
 
-function Pagination<T>({ page, onChange }: { page: Page<T>; onChange: (next: PageState) => void }) {
-  const start = page.total === 0 ? 0 : page.offset + 1;
-  const end = Math.min(page.offset + page.items.length, page.total);
-
-  function setLimit(value: string) {
-    onChange({ limit: Number(value), offset: 0 });
-  }
-
-  return (
-    <div className="pagination">
-      <span>{start}-{end} of {page.total}</span>
-      <select value={page.limit} onChange={(event) => setLimit(event.target.value)}>
-        <option value={25}>25 / page</option>
-        <option value={50}>50 / page</option>
-        <option value={100}>100 / page</option>
-        <option value={250}>250 / page</option>
-      </select>
-      <button type="button" disabled={!page.has_previous} onClick={() => onChange({ limit: page.limit, offset: Math.max(0, page.offset - page.limit) })}>
-        Previous
-      </button>
-      <button type="button" disabled={!page.has_next} onClick={() => onChange({ limit: page.limit, offset: page.offset + page.limit })}>
-        Next
-      </button>
-    </div>
-  );
-}
-
 function AdminJobsTable({ jobs, onShowDocuments }: { jobs: AdminCrawlJob[]; onShowDocuments: (job: AdminCrawlJob) => void }) {
   return (
     <div className="admin-table-wrap">
@@ -1093,10 +912,6 @@ function AdminRunsTable({
       </table>
     </div>
   );
-}
-
-function StatusPill({ value }: { value: string }) {
-  return <Badge className={`status-pill status-${value}`} variant="outline" borderRadius="0">{value}</Badge>;
 }
 
 function formatDate(value: string | null | undefined) {

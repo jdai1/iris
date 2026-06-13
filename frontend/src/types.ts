@@ -148,7 +148,7 @@ export interface SourceProfileAnalysis {
     bio?: string;
     themes?: string[];
     writing_style?: string[];
-    strong_takes?: Array<{ take: string; evidence_document_ids: number[] }>;
+    strong_takes?: Array<{ take: string }>;
     public_links?: Array<{ label?: string; url?: string; kind?: string }>;
     public_contact?: Array<{ label?: string; url?: string; kind?: string }>;
     caveats?: string[];
@@ -161,7 +161,6 @@ export interface SourceProfileAnalysis {
     profile_pages?: Array<{ id: number; title: string | null; url: string; summary: string | null }>;
     document_counts?: Record<string, number>;
   } | null;
-  evidence_document_ids: number[];
   unavailable_sections: string[];
   error: string | null;
 }

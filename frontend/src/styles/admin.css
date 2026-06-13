@@ -1,0 +1,287 @@
+.metric-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 18px;
+}
+
+.metric {
+  background: #ffffff;
+  border: 0;
+  border-top: 1px solid #111;
+  padding: 13px 0 18px;
+  min-width: 0;
+}
+
+.metric span {
+  display: block;
+  color: #777;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0;
+  margin-bottom: 6px;
+}
+
+.metric strong {
+  font-size: 26px;
+  font-weight: 440;
+  line-height: 1;
+}
+
+.admin-controls {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.tab-strip {
+  display: flex;
+  gap: 2px;
+  padding: 0;
+  border: 0;
+  border-bottom: 1px solid #e8e8e8;
+  background: #ffffff;
+}
+
+.tab-strip button {
+  border-color: transparent;
+  text-transform: capitalize;
+  min-height: 32px;
+  font-size: 12px;
+}
+
+.tab-strip button.active {
+  background: #ffffff;
+  color: #111;
+  border-bottom-color: #111;
+}
+
+.admin-filter {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) minmax(180px, 1fr) auto;
+  gap: 8px;
+  padding: 0;
+  border: 0;
+  background: #ffffff;
+}
+
+.admin-filter-wide {
+  grid-template-columns: minmax(150px, 1fr) minmax(180px, 1fr) minmax(120px, 0.6fr);
+}
+
+.admin-filter input,
+.admin-filter select {
+  min-height: 32px;
+  padding: 0 2px;
+  background: #ffffff;
+  border: 0;
+  border-bottom: 1px solid #dcdcdc;
+  color: #111;
+  font-size: 12px;
+}
+
+.admin-document-controls {
+  display: grid;
+  gap: 8px;
+}
+
+.admin-scope-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 10px;
+  border: 1px solid #cfcfcb;
+  background: #f4f4f2;
+  color: #333333;
+  font-size: 14px;
+}
+
+.admin-scope-banner button,
+.admin-inline-action {
+  border: 1px solid #d8d8d4;
+  background: #ffffff;
+  color: #111111;
+  min-height: 30px;
+  padding: 0 9px;
+}
+
+.admin-inline-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.admin-table-wrap {
+  overflow: auto;
+  border: 0;
+  border-top: 1px solid #111;
+  background: #ffffff;
+}
+
+.admin-table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 900px;
+  font-size: 12px;
+}
+
+.admin-table th,
+.admin-table td {
+  padding: 11px 10px;
+  border-bottom: 1px solid #eeeeee;
+  text-align: left;
+  vertical-align: top;
+}
+
+.admin-table th {
+  color: #777;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0;
+  background: #ffffff;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.admin-table a {
+  color: #111111;
+  font-weight: 620;
+  text-decoration: none;
+}
+
+.admin-table small {
+  display: block;
+  color: #666666;
+  line-height: 1.35;
+  margin-top: 4px;
+  max-width: 520px;
+}
+
+.admin-document-cell {
+  display: grid;
+  gap: 6px;
+  max-width: 880px;
+}
+
+.admin-document-url {
+  overflow-wrap: anywhere;
+  color: #666666;
+}
+
+.admin-document-cell p {
+  margin: 0;
+  color: #333333;
+  line-height: 1.45;
+  max-width: 860px;
+}
+
+.admin-document-topics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.admin-document-topics span {
+  border: 1px solid #d8d8d4;
+  background: #f7f7f5;
+  color: #333333;
+  font-size: 12px;
+  line-height: 1.2;
+  padding: 3px 6px;
+}
+
+.admin-note {
+  margin: 0 0 10px;
+  color: #666666;
+  font-size: 14px;
+}
+
+.pagination {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  margin: 10px 0;
+  color: #666666;
+  font-size: 14px;
+}
+
+.pagination select,
+.pagination button {
+  border: 1px solid #d8d8d4;
+  background: #ffffff;
+  color: #111111;
+  min-height: 32px;
+  padding: 0 9px;
+}
+
+.job-label {
+  display: grid;
+  gap: 3px;
+  color: #111111;
+  font-weight: 650;
+}
+
+.job-label small {
+  margin: 0;
+  color: #666666;
+  font-weight: 400;
+}
+
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 0 8px;
+  border: 1px solid #d8d8d4;
+  background: #f7f7f5;
+  color: #333333;
+  font-size: 12px;
+}
+
+.status-indexed,
+.status-succeeded {
+  border-color: #96b38d;
+  background: #eef6ea;
+  color: #315c28;
+}
+
+.status-running,
+.status-crawling {
+  border-color: #9fb5d6;
+  background: #edf3fb;
+  color: #284e83;
+}
+
+.status-ignored,
+.status-skipped {
+  border-color: #d4c196;
+  background: #f4f4f2;
+  color: #765c1e;
+}
+
+.status-failed,
+.status-stopped {
+  border-color: #d59a8e;
+  background: #fbebe8;
+  color: #8f2f20;
+}
+
+.empty-state,
+.error {
+  margin-top: 22px;
+  padding: 20px;
+  border: 1px solid #d8d8d4;
+  background: #ffffff;
+  color: #666666;
+}
+
+.error {
+  border-color: #b85542;
+  color: #8f2f20;
+}
+

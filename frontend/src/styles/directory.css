@@ -1,0 +1,221 @@
+.section-header h2 {
+  margin: 0;
+  font-size: 21px;
+  line-height: 1.15;
+  font-weight: 520;
+}
+
+.source-form {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 10px;
+  padding: 0 0 14px;
+  background: #ffffff;
+  border: 0;
+  border-bottom: 1px solid #111;
+  margin-bottom: 18px;
+}
+
+.status-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.source-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 0;
+  background: #ffffff;
+  border: 0;
+  border-bottom: 1px solid #eeeeee;
+}
+
+.source-row div {
+  display: grid;
+  gap: 4px;
+}
+
+.source-row span {
+  color: #777;
+  font-size: 12px;
+}
+
+.profile-panel {
+  display: grid;
+  gap: 18px;
+  width: 100%;
+  min-width: 0;
+}
+
+.directory-view .profile-panel {
+  width: min(1240px, calc(100vw - 208px - (var(--app-search-left) * 2)));
+  margin-left: max(0px, calc((100vw - 208px - 1240px) / 2 - var(--app-search-left)));
+  margin-top: 44px;
+}
+
+.directory-suggestions {
+  position: absolute;
+  top: calc(100% + 10px);
+  left: 0;
+  right: 0;
+  z-index: 8;
+  display: grid;
+  border: 1px solid #e8e8e8;
+  background: rgba(255, 255, 255, 0.98);
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.08);
+}
+
+.directory-suggestions button {
+  display: grid;
+  gap: 3px;
+  width: 100%;
+  min-height: 46px;
+  padding: 8px 10px;
+  border: 0;
+  border-bottom: 1px solid #f0f0f0;
+  background: transparent;
+  color: #111111;
+  text-align: left;
+}
+
+.directory-suggestions span,
+.directory-suggestions small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.directory-suggestions small {
+  color: #777777;
+  font-size: 12px;
+}
+
+.profile-heading {
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid #eeeeee;
+}
+
+.profile-heading h3 {
+  margin: 0;
+  font-size: 26px;
+  font-weight: 520;
+  line-height: 1.15;
+}
+
+.profile-heading p {
+  margin: 8px 0 0;
+  color: #555555;
+  line-height: 1.55;
+}
+
+.profile-heading a {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 30px;
+  height: 30px;
+  color: #555555;
+  text-decoration: none;
+}
+
+.profile-analysis-card {
+  display: grid;
+  gap: 14px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid #eeeeee;
+}
+
+.profile-bio {
+  margin: 0;
+  max-width: 840px;
+  color: #222222;
+  font-size: 16px;
+  line-height: 1.6;
+}
+
+.profile-analysis-section {
+  display: grid;
+  gap: 8px;
+}
+
+.profile-analysis-section h4 {
+  margin: 0;
+  color: #666666;
+  font-size: 11px;
+  font-weight: 620;
+  text-transform: uppercase;
+}
+
+.profile-chip-list,
+.profile-link-list,
+.profile-unavailable,
+.profile-caveats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.profile-chip-list span,
+.profile-unavailable span,
+.profile-caveats span {
+  border: 1px solid #eeeeee;
+  color: #555555;
+  padding: 4px 7px;
+  font-size: 12px;
+}
+
+.profile-unavailable span {
+  color: #999999;
+}
+
+.profile-link-list a {
+  color: #111111;
+  font-size: 13px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.profile-take-list {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding-left: 18px;
+  color: #333333;
+  line-height: 1.5;
+}
+
+.profile-documents {
+  display: grid;
+  gap: 0;
+}
+
+.profile-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding-top: 12px;
+  color: #666666;
+  font-size: 13px;
+}
+
+.profile-pagination button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid #e0e0de;
+  background: #ffffff;
+  color: #111111;
+  padding: 0;
+}
+

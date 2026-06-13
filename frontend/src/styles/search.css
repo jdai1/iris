@@ -1,0 +1,182 @@
+.results-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 360px;
+  gap: 42px;
+  max-width: 1140px;
+  margin: 52px auto 0;
+  align-items: start;
+}
+
+.answer-panel {
+  position: sticky;
+  top: 24px;
+  grid-column: 2;
+  grid-row: 1;
+  padding: 0 0 0 22px;
+  border: 0;
+  border-left: 1px solid #e5e5e5;
+  background: #ffffff;
+}
+
+.results-list {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+.panel-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 700;
+  margin-bottom: 14px;
+  font-size: 12px;
+  text-transform: uppercase;
+  color: #555;
+}
+
+.answer-panel p {
+  margin: 0;
+  white-space: pre-line;
+  color: #333;
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+.tool-trace {
+  display: grid;
+  gap: 8px;
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid #ededed;
+}
+
+.tool-trace div {
+  display: grid;
+  gap: 2px;
+}
+
+.tool-trace strong {
+  font-size: 13px;
+  text-transform: uppercase;
+}
+
+.tool-trace span,
+.tool-trace small {
+  color: #777;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.results-list,
+.digest-stack,
+.source-list {
+  display: grid;
+  gap: 0;
+}
+
+.document-card {
+  background: #fff;
+  border: 0;
+  border-bottom: 1px solid #eeeeee;
+  padding: 22px 0;
+}
+
+.document-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 9px;
+  color: #858585;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0;
+}
+
+.profile-link {
+  border: 0;
+  background: transparent;
+  color: #111111;
+  padding: 0;
+  font: inherit;
+  text-transform: inherit;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.document-card h3 {
+  margin: 8px 0 10px;
+  font-size: 18px;
+  line-height: 1.22;
+  font-weight: 520;
+}
+
+.document-card-compact {
+  padding: 14px 0;
+}
+
+.document-card-compact h3 {
+  margin: 6px 0 8px;
+  font-size: 16px;
+}
+
+.document-card-compact .topics {
+  margin-bottom: 10px;
+}
+
+.document-title-row {
+  display: inline-flex;
+  align-items: flex-start;
+  gap: 8px;
+  max-width: 100%;
+}
+
+.document-title-row h3 {
+  min-width: 0;
+}
+
+.document-open-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  margin-top: 2px;
+}
+
+.summary,
+.reason {
+  margin: 0 0 12px;
+  line-height: 1.65;
+}
+
+.summary {
+  color: #333;
+}
+
+.reason {
+  color: #777;
+  font-size: 13px;
+}
+
+.topics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 12px 0 16px;
+}
+
+.topics span,
+.status-strip span {
+  border: 1px solid #ececec;
+  padding: 3px 7px;
+  color: #555;
+  font-size: 11px;
+  background: #fff;
+}
+
+.card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
