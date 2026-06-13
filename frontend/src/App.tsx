@@ -243,14 +243,14 @@ function DirectoryView({ target, onOpenProfile }: { target: ProfileTarget; onOpe
         sources.items.find((item) => item.canonical_domain === nextQuery.trim().toLowerCase()) ??
         sources.items[0] ??
         null;
-      const nextProfile = source ? { sourceId: source.id, domain: source.canonical_domain } : nextSelected;
+      const nextProfile = source ? { sourceId: source.id, domain: source.canonical_domain } : null;
       setSelectedSource(source);
       setSelected(nextProfile);
       if (source && !nextSelected) setQuery(source.canonical_domain);
       const [documents, analysis] = nextProfile
         ? await Promise.all([
             getAdminDocuments({ ...nextPage, sourceId: nextProfile.sourceId, documentType: 'essay' }),
-            getSourceProfileAnalysis(nextProfile.sourceId),
+            getSourceProfileAnalysis(nextProfile.sourceId).catch(() => null),
           ])
         : [emptyPage<Document>(), null];
       setDocumentsPage(documents);
