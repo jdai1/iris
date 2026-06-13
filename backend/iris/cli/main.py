@@ -15,6 +15,7 @@ from iris.dao import db
 from iris.dao import documents as documents_dao
 from iris.dao import maintenance as maintenance_dao
 from iris.dao import reporting as reporting_dao
+from iris.dao import source_profiles as profile_dao
 from iris.dao.db import init_db
 from iris.dao.sources import get_or_create_source
 from iris.models import (
@@ -40,6 +41,7 @@ from iris.services.ingestion.source_classifier import (
 )
 from iris.services.retrieval.digest import get_digest
 from iris.services.retrieval.search import search_documents, synthesize_answer
+from iris.services.retrieval.source_profiles import generate_source_profile
 
 
 def configure_logging(verbose: bool = False) -> None:
@@ -549,6 +551,41 @@ def cmd_migrate_document_crawl_job_fk(_args: argparse.Namespace) -> None:
         print(f"backfilled={migrate_document_crawl_job_fk()}")
 
 
+def cmd_generate_source_profile(args: argparse.Namespace) -> None:
+    with db.session_scope():
+        source = profile_dao.get_source_by_domain(args.domain)
+        if not source:
+            print(f"source not found: {args.domain}")
+            return
+        analysis = generate_source_profile(source, force=args.force)
+        print(
+            f"profile source={source.canonical_domain} status={analysis.status} "
+            f"display_name={analysis.display_name or 'none'} evidence={len(analysis.evidence_document_ids or [])}"
+        )
+        if analysis.error:
+            print(f"error={analysis.error}")
+
+
+def cmd_backfill_source_profiles(args: argparse.Namespace) -> None:
+    with db.session_scope():
+        sources = profile_dao.get_sources_for_profile_backfill(limit=args.limit)
+        changed = 0
+        failed = 0
+        for idx, source in enumerate(sources, start=1):
+            analysis = generate_source_profile(source, force=args.force)
+            if analysis.status == "succeeded":
+                changed += 1
+            else:
+                failed += 1
+            print(
+                f"{idx}/{len(sources)} {source.canonical_domain} status={analysis.status} "
+                f"name={analysis.display_name or 'none'}"
+            )
+            if idx % 10 == 0:
+                db.flush()
+        print(f"profiles checked={len(sources)} succeeded={changed} not_succeeded={failed}")
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="iris")
     parser.add_argument("--verbose", action="store_true")
@@ -663,6 +700,16 @@ def build_parser() -> argparse.ArgumentParser:
 
     migrate_document_job_fk = subparsers.add_parser("migrate-document-crawl-job-fk")
     migrate_document_job_fk.set_defaults(func=cmd_migrate_document_crawl_job_fk)
+
+    source_profile = subparsers.add_parser("generate-source-profile")
+    source_profile.add_argument("domain")
+    source_profile.add_argument("--force", action="store_true")
+    source_profile.set_defaults(func=cmd_generate_source_profile)
+
+    source_profile_backfill = subparsers.add_parser("backfill-source-profiles")
+    source_profile_backfill.add_argument("--limit", type=int, default=0)
+    source_profile_backfill.add_argument("--force", action="store_true")
+    source_profile_backfill.set_defaults(func=cmd_backfill_source_profiles)
 
     sql = subparsers.add_parser("sql")
     sql.add_argument("query", nargs="?", default="select 1")

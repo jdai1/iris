@@ -19,6 +19,7 @@ from iris.schemas.api import (
     SearchResultSchema,
     SearchSchema,
     SourceCreateSchema,
+    SourceProfileAnalysisSchema,
     SourceSchema,
 )
 from iris.schemas.enums import (
@@ -82,6 +83,7 @@ __all__ = [
     "SourceClassification",
     "SourceClassifierResult",
     "SourceCreateSchema",
+    "SourceProfileAnalysisSchema",
     "SourcePriority",
     "SourceSchema",
     "SourceStatus",

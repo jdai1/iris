@@ -1,4 +1,4 @@
-import type { AdminCrawlJob, AdminIndexRun, AdminOverview, AdminSource, AgentChatResponse, AgentConversation, AgentConversationSummary, DigestRecommendation, Document, EmbeddingMap, EmbeddingNeighbor, GraphResponse, Page, SearchResponse } from './types';
+import type { AdminCrawlJob, AdminIndexRun, AdminOverview, AdminSource, AgentChatResponse, AgentConversation, AgentConversationSummary, DigestRecommendation, Document, EmbeddingMap, EmbeddingNeighbor, GraphResponse, Page, SearchResponse, SourceProfileAnalysis } from './types';
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? 'http://127.0.0.1:8001';
 
@@ -92,6 +92,14 @@ export function getAdminDocuments(params: { limit?: number; offset?: number; sou
   if (params.crawlJobId) search.set('crawl_job_id', String(params.crawlJobId));
   if (params.indexRunId) search.set('index_run_id', String(params.indexRunId));
   return request<Page<Document>>(`/api/documents?${search.toString()}`);
+}
+
+export function getSourceProfileAnalysis(sourceId: number): Promise<SourceProfileAnalysis | null> {
+  return request<SourceProfileAnalysis | null>(`/api/sources/${sourceId}/profile-analysis`);
+}
+
+export function generateSourceProfileAnalysis(sourceId: number, force = false): Promise<SourceProfileAnalysis> {
+  return request<SourceProfileAnalysis>(`/api/sources/${sourceId}/profile-analysis?force=${force ? 'true' : 'false'}`, { method: 'POST' });
 }
 
 export function getAdminCrawlJobs(params: { limit?: number; offset?: number; status?: string; sourceId?: number; indexRunId?: number } = {}): Promise<Page<AdminCrawlJob>> {

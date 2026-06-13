@@ -134,6 +134,38 @@ export interface GraphResponse {
   edges: GraphEdge[];
 }
 
+export interface SourceProfileAnalysis {
+  id: number;
+  source_id: number;
+  source_domain: string;
+  status: string;
+  display_name: string | null;
+  generated_at: string | null;
+  model: string | null;
+  input_fingerprint: string | null;
+  payload: {
+    display_name?: string;
+    bio?: string;
+    themes?: string[];
+    writing_style?: string[];
+    strong_takes?: Array<{ take: string; evidence_document_ids: number[] }>;
+    public_links?: Array<{ label?: string; url?: string; kind?: string }>;
+    public_contact?: Array<{ label?: string; url?: string; kind?: string }>;
+    caveats?: string[];
+    unavailable_sections?: string[];
+  } | null;
+  scraped_facts: {
+    top_topics?: Array<{ topic: string; count: number }>;
+    public_links?: Array<{ label?: string; url?: string; kind?: string }>;
+    public_contact?: Array<{ label?: string; url?: string; kind?: string }>;
+    profile_pages?: Array<{ id: number; title: string | null; url: string; summary: string | null }>;
+    document_counts?: Record<string, number>;
+  } | null;
+  evidence_document_ids: number[];
+  unavailable_sections: string[];
+  error: string | null;
+}
+
 export interface AdminOverview {
   totals: Record<string, number>;
   source_statuses: Record<string, number>;

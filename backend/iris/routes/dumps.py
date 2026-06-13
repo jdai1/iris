@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from iris.models import CrawlJob, Document, Source
-from iris.schemas.api import CrawlSchema, DigestRecommendationSchema, DocumentSchema, SourceSchema
+from iris.models import CrawlJob, Document, Source, SourceProfileAnalysis
+from iris.schemas.api import CrawlSchema, DigestRecommendationSchema, DocumentSchema, SourceProfileAnalysisSchema, SourceSchema
 from iris.schemas.retrieval import DigestRecommendation
 
 
@@ -31,6 +31,24 @@ def dump_document(document: Document) -> DocumentSchema:
         published_at=document.published_at,
         summary=document.summary,
         topics=document.topics or [],
+    )
+
+
+def dump_source_profile_analysis(analysis: SourceProfileAnalysis) -> SourceProfileAnalysisSchema:
+    return SourceProfileAnalysisSchema(
+        id=analysis.id,
+        source_id=analysis.source_id,
+        source_domain=analysis.source.canonical_domain,
+        status=analysis.status,
+        display_name=analysis.display_name,
+        generated_at=analysis.generated_at,
+        model=analysis.model,
+        input_fingerprint=analysis.input_fingerprint,
+        payload=analysis.payload,
+        scraped_facts=analysis.scraped_facts,
+        evidence_document_ids=analysis.evidence_document_ids or [],
+        unavailable_sections=analysis.unavailable_sections or [],
+        error=analysis.error,
     )
 
 

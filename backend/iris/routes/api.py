@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from iris.dao import admin
 from iris.dao import agent as agent_dao
 from iris.dao import db
+from iris.dao import source_profiles as profile_dao
 from iris.services.ingestion.crawler import Crawler
 from iris.dao.db import init_db
 from iris.services.retrieval.digest import get_digest
@@ -41,10 +42,12 @@ from iris.schemas.api import (
     SearchSchema,
     SearchToolTraceSchema,
     SourceCreateSchema,
+    SourceProfileAnalysisSchema,
     SourceSchema,
 )
 from iris.services.retrieval.search import agentic_search, search_documents, synthesize_answer
-from iris.routes.dumps import dump_crawl_job, dump_digest_recommendation, dump_document, dump_source
+from iris.services.retrieval.source_profiles import generate_source_profile
+from iris.routes.dumps import dump_crawl_job, dump_digest_recommendation, dump_document, dump_source, dump_source_profile_analysis
 from iris.services.ingestion.source_classifier import classify_source_url
 
 
@@ -152,6 +155,23 @@ def admin_sources(
 ) -> PageSchema[AdminSourceSchema]:
     items, total = admin.get_admin_sources_page(status=status, q=q, limit=limit, offset=offset)
     return _page_response(items, total, limit, offset)
+
+
+@app.get("/api/sources/{source_id}/profile-analysis", response_model=SourceProfileAnalysisSchema | None)
+def get_source_profile_analysis(source_id: int, _bound_session=Depends(get_session)) -> SourceProfileAnalysisSchema | None:
+    source = profile_dao.get_source(source_id)
+    if not source:
+        raise HTTPException(status_code=404, detail="Source not found")
+    analysis = profile_dao.get_analysis(source_id)
+    return dump_source_profile_analysis(analysis) if analysis else None
+
+
+@app.post("/api/sources/{source_id}/profile-analysis", response_model=SourceProfileAnalysisSchema)
+def generate_source_profile_analysis(source_id: int, force: bool = False, _bound_session=Depends(get_session)) -> SourceProfileAnalysisSchema:
+    source = profile_dao.get_source(source_id)
+    if not source:
+        raise HTTPException(status_code=404, detail="Source not found")
+    return dump_source_profile_analysis(generate_source_profile(source, force=force))
 
 
 @app.get("/api/admin/crawl-jobs", response_model=PageSchema[AdminCrawlJobSchema])

@@ -547,6 +547,72 @@ nav button,
   text-decoration: none;
 }
 
+.profile-analysis-card {
+  display: grid;
+  gap: 14px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid #eeeeee;
+}
+
+.profile-bio {
+  margin: 0;
+  max-width: 840px;
+  color: #222222;
+  font-size: 16px;
+  line-height: 1.6;
+}
+
+.profile-analysis-section {
+  display: grid;
+  gap: 8px;
+}
+
+.profile-analysis-section h4 {
+  margin: 0;
+  color: #666666;
+  font-size: 11px;
+  font-weight: 620;
+  text-transform: uppercase;
+}
+
+.profile-chip-list,
+.profile-link-list,
+.profile-unavailable,
+.profile-caveats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.profile-chip-list span,
+.profile-unavailable span,
+.profile-caveats span {
+  border: 1px solid #eeeeee;
+  color: #555555;
+  padding: 4px 7px;
+  font-size: 12px;
+}
+
+.profile-unavailable span {
+  color: #999999;
+}
+
+.profile-link-list a {
+  color: #111111;
+  font-size: 13px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.profile-take-list {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding-left: 18px;
+  color: #333333;
+  line-height: 1.5;
+}
+
 .profile-documents {
   display: grid;
   gap: 0;
@@ -865,7 +931,9 @@ nav button,
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   gap: 0;
-  min-height: 100vh;
+  height: 100vh;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .graph-toolbar {
@@ -918,6 +986,7 @@ nav button,
 .graph-layout {
   position: relative;
   min-height: 0;
+  overflow: hidden;
   border: 0;
   background: #ffffff;
 }
@@ -925,6 +994,7 @@ nav button,
 .graph-canvas-wrap {
   position: relative;
   min-width: 0;
+  height: 100%;
   overflow: hidden;
   background: #ffffff;
 }
@@ -932,8 +1002,8 @@ nav button,
 .graph-canvas {
   display: block;
   width: 100%;
-  height: calc(100vh - 68px);
-  min-height: 650px;
+  height: 100%;
+  min-height: 0;
   cursor: grab;
   touch-action: none;
   user-select: none;

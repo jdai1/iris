@@ -228,6 +228,22 @@ class AdminSourceSchema(BaseModel):
     latest_job: AdminLatestJobSchema | None
 
 
+class SourceProfileAnalysisSchema(BaseModel):
+    id: int
+    source_id: int
+    source_domain: str
+    status: str
+    display_name: str | None
+    generated_at: datetime | None
+    model: str | None
+    input_fingerprint: str | None
+    payload: dict | None
+    scraped_facts: dict | None
+    evidence_document_ids: list[int]
+    unavailable_sections: list[str]
+    error: str | None
+
+
 class AdminCrawlJobSchema(BaseModel):
     id: int
     source_id: int

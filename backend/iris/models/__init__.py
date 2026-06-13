@@ -21,6 +21,7 @@ from iris.models.sqla import (
     IndexRun,
     Link,
     Source,
+    SourceProfileAnalysis,
 )
 from iris.models.user import (
     AgentConversation,
@@ -59,6 +60,7 @@ __all__ = [
     "Link",
     "LinkType",
     "Source",
+    "SourceProfileAnalysis",
     "SourceStatus",
     "Tag",
     "TagScope",

@@ -60,6 +60,34 @@ class Source(Base):
     sitemap_url: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     documents: Mapped[list["Document"]] = relationship(back_populates="source", cascade="all, delete-orphan")
+    profile_analysis: Mapped["SourceProfileAnalysis | None"] = relationship(back_populates="source", cascade="all, delete-orphan", uselist=False)
+
+
+class SourceProfileAnalysis(Base):
+    """Generated profile analysis for one source, derived from scraped facts and indexed writing."""
+
+    __tablename__ = "source_profile_analyses"
+    __table_args__ = (UniqueConstraint("source_id", name="uq_source_profile_analyses_source"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    source_id: Mapped[int] = mapped_column(ForeignKey("sources.id"), nullable=False, index=True)
+
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(default=utcnow, onupdate=utcnow)
+    generated_at: Mapped[datetime | None] = mapped_column(nullable=True)
+
+    status: Mapped[str] = mapped_column(String(40), default="pending", index=True)
+    model: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    input_fingerprint: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    display_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    payload: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    scraped_facts: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    evidence_document_ids: Mapped[list[int] | None] = mapped_column(JSON, nullable=True)
+    unavailable_sections: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
+
+    source: Mapped[Source] = relationship(back_populates="profile_analysis")
 
 
 class Document(Base):
