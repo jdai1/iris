@@ -1,4 +1,4 @@
-"""Generate evidence-grounded profile analyses for indexed sources."""
+"""Generate profile analyses for indexed sources."""
 
 from __future__ import annotations
 
@@ -7,7 +7,6 @@ import json
 import re
 from collections import Counter
 from dataclasses import dataclass
-from urllib.parse import urlparse
 
 import httpx
 
@@ -16,17 +15,6 @@ from iris.models import Document, Source, SourceProfileAnalysis
 from iris.schemas.enums import DocumentType
 from iris.services.common.config import SOURCE_PROFILE_MODEL, SOURCE_PROFILE_TIMEOUT_SECONDS, openai_api_key
 
-
-SOCIAL_DOMAINS = (
-    "twitter.com",
-    "x.com",
-    "github.com",
-    "linkedin.com",
-    "mastodon",
-    "bsky.app",
-    "youtube.com",
-    "substack.com",
-)
 
 UNAVAILABLE_SECTIONS = ("bio", "themes", "writing_style", "strong_takes", "public_contact", "public_links")
 
@@ -100,7 +88,7 @@ def build_profile_input(source: Source, documents: list[Document]) -> ProfileInp
     profile_docs = [doc for doc in documents if doc.document_type == DocumentType.PROFILE.value]
     essay_docs = [doc for doc in documents if doc.document_type == DocumentType.ESSAY.value]
     collection_docs = [doc for doc in documents if doc.document_type == DocumentType.COLLECTION.value]
-    selected = select_evidence_documents(profile_docs, essay_docs, collection_docs)
+    selected = select_context_documents(profile_docs, essay_docs, collection_docs)
     facts = scraped_facts(source, documents, profile_docs)
     doc_payloads = [document_profile_payload(doc, include_excerpt=doc in selected) for doc in selected]
     # Include metadata for every essay so the model sees the long-tail topic distribution without full text.
@@ -130,21 +118,21 @@ def build_profile_input(source: Source, documents: list[Document]) -> ProfileInp
     )
 
 
-def select_evidence_documents(profile_docs: list[Document], essay_docs: list[Document], collection_docs: list[Document]) -> list[Document]:
-    """Pick a compact, representative set of documents for full-text evidence."""
+def select_context_documents(profile_docs: list[Document], essay_docs: list[Document], collection_docs: list[Document]) -> list[Document]:
+    """Pick profile pages plus a compact essay sample for full-text context."""
     selected: list[Document] = []
-    selected.extend(profile_docs[:6])
+    selected.extend(profile_docs)
     recent = sorted(essay_docs, key=lambda doc: (doc.published_at is not None, doc.published_at, doc.id), reverse=True)
-    selected.extend(recent[:12])
+    selected.extend(recent[:8])
     topic_seen: set[str] = set()
     for doc in essay_docs:
         topics = {topic.lower() for topic in (doc.topics or [])}
         if topics and not topics <= topic_seen:
             selected.append(doc)
             topic_seen |= topics
-        if len(selected) >= 34:
+        if len(selected) >= len(profile_docs) + 20:
             break
-    longform = sorted(essay_docs, key=lambda doc: len(doc.extracted_text or ""), reverse=True)[:8]
+    longform = sorted(essay_docs, key=lambda doc: len(doc.extracted_text or ""), reverse=True)[:4]
     selected.extend(longform)
     selected.extend(collection_docs[:3])
     deduped: list[Document] = []
@@ -154,14 +142,14 @@ def select_evidence_documents(profile_docs: list[Document], essay_docs: list[Doc
             continue
         seen.add(doc.id)
         deduped.append(doc)
-        if len(deduped) >= 45:
+        if len(deduped) >= 40:
             break
     return deduped
 
 
 def scraped_facts(source: Source, documents: list[Document], profile_docs: list[Document]) -> dict:
     """Extract deterministic public facts from indexed source material."""
-    links = public_links(source, documents)
+    links = public_links(source, profile_docs)
     author_counts = Counter(doc.author.strip() for doc in documents if doc.author and doc.author.strip())
     topic_counts = Counter(topic.strip().lower() for doc in documents for topic in (doc.topics or []) if topic and topic.strip())
     return {
@@ -171,7 +159,7 @@ def scraped_facts(source: Source, documents: list[Document], profile_docs: list[
         "sitemap_url": source.sitemap_url,
         "author_candidates": [name for name, _count in author_counts.most_common(5)],
         "top_topics": [{"topic": topic, "count": count} for topic, count in topic_counts.most_common(20)],
-        "profile_pages": [{"id": doc.id, "title": doc.title, "url": doc.url, "summary": doc.summary} for doc in profile_docs[:8]],
+        "profile_pages": [{"id": doc.id, "title": doc.title, "url": doc.url, "summary": doc.summary} for doc in profile_docs],
         "public_links": links["links"],
         "public_contact": links["contact"],
         "document_counts": {
@@ -182,28 +170,24 @@ def scraped_facts(source: Source, documents: list[Document], profile_docs: list[
     }
 
 
-def public_links(source: Source, documents: list[Document]) -> dict[str, list[dict]]:
-    """Extract public links and contact hints from document text and URLs."""
+def public_links(source: Source, profile_docs: list[Document]) -> dict[str, list[dict]]:
+    """Extract public link and contact hints from indexed profile pages."""
     links: list[dict] = [{"label": "homepage", "url": source.url, "kind": "homepage"}]
     contact: list[dict] = []
     seen = {source.url}
-    for doc in documents:
+    for doc in profile_docs:
         url = doc.url
-        lower = url.lower()
-        if any(marker in lower for marker in ("/about", "/contact", "/bio", "/cv", "/resume")) and url not in seen:
+        if url not in seen:
             links.append({"label": doc.title or url, "url": url, "kind": "profile"})
             seen.add(url)
         for match in re.finditer(r"https?://[^\s)>\"]+", doc.extracted_text or ""):
             candidate = match.group(0).rstrip(".,;")
             if candidate in seen:
                 continue
-            host = urlparse(candidate).netloc.lower()
-            if any(domain in host for domain in SOCIAL_DOMAINS):
-                links.append({"label": host, "url": candidate, "kind": "social"})
-                seen.add(candidate)
-        if any(marker in lower for marker in ("/contact", "/about")):
-            for email in re.findall(r"[\w.+-]+@[\w.-]+\.[a-zA-Z]{2,}", doc.extracted_text or ""):
-                contact.append({"label": email, "url": f"mailto:{email}", "kind": "email", "source_document_id": doc.id})
+            links.append({"label": candidate, "url": candidate, "kind": "visible_link"})
+            seen.add(candidate)
+        for email in re.findall(r"[\w.+-]+@[\w.-]+\.[a-zA-Z]{2,}", doc.extracted_text or ""):
+            contact.append({"label": email, "url": f"mailto:{email}", "kind": "email", "source_document_id": doc.id})
     return {"links": links[:30], "contact": contact[:10]}
 
 
@@ -243,7 +227,7 @@ def analyze_profile_with_openai(api_key: str, profile_input: ProfileInput) -> di
     payload = {
         "model": SOURCE_PROFILE_MODEL,
         "instructions": (
-            "Create an evidence-grounded profile analysis for an indexed personal writing source. "
+            "Create a profile analysis for an indexed personal writing source. "
             "Be playful but precise. Capture the writer's online presence, recurring interests, style, and strong takes. "
             "Do not invent identity, credentials, contact info, or claims not supported by the provided documents. "
             "If the person/name is unclear, set display_name to 'Identity unclear'. "
