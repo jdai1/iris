@@ -15,6 +15,7 @@ export interface Document {
   source_domain: string;
   url: string;
   document_type: string;
+  category: string;
   title: string | null;
   author: string | null;
   published_at: string | null;
@@ -29,18 +30,108 @@ export interface SearchResult {
 }
 
 export interface SearchResponse {
-  search_id: number | null;
   query: string;
   answer: string;
   results: SearchResult[];
+  tools: Array<{
+    tool: string;
+    query: string;
+    hits: number;
+    top_titles: string[];
+  }>;
 }
 
-export interface DigestItem {
+export interface AgentStep {
+  kind: string;
+  title: string;
+  detail: string;
+  tool: string | null;
+  query: string | null;
+  hits: number | null;
+}
+
+export interface AgentChatResponse {
+  conversation_id: number;
+  user_message_id: number;
+  assistant_message_id: number;
+  message: string;
+  answer: string;
+  results: SearchResult[];
+  steps: AgentStep[];
+}
+
+export interface AgentConversationSummary {
   id: number;
+  title: string | null;
+  created_at: string;
+  updated_at: string;
+  message_count: number;
+}
+
+export interface AgentMessage {
+  id: number;
+  role: string;
+  content: string;
+  created_at: string;
+  steps: AgentStep[];
+  results: SearchResult[];
+}
+
+export interface AgentConversation {
+  id: number;
+  title: string | null;
+  created_at: string;
+  updated_at: string;
+  messages: AgentMessage[];
+}
+
+export interface DigestRecommendation {
   document: Document;
   score: number;
   reason: string;
-  status: string;
+}
+
+export interface EmbeddingMapPoint {
+  document: Document;
+  x: number;
+  y: number;
+  z: number;
+  cluster_id: number | null;
+}
+
+export interface EmbeddingMap {
+  points: EmbeddingMapPoint[];
+  total_embedded: number;
+  dimensions: number;
+  projection_method: string;
+}
+
+export interface EmbeddingNeighbor {
+  document: Document;
+  similarity: number;
+}
+
+export interface GraphNode {
+  id: string;
+  label: string;
+  type: string;
+  domain: string;
+  url: string | null;
+  subtitle: string | null;
+  summary: string | null;
+  size: number;
+}
+
+export interface GraphEdge {
+  source: string;
+  target: string;
+  label: string | null;
+  weight: number;
+}
+
+export interface GraphResponse {
+  nodes: GraphNode[];
+  edges: GraphEdge[];
 }
 
 export interface AdminOverview {
@@ -96,6 +187,7 @@ export interface AdminCrawlJob {
   pages_fetched: number;
   pages_failed: number;
   documents_indexed: number;
+  current_document_count: number;
   links_seen: number;
   sources_discovered: number;
   started_at: string;
@@ -118,6 +210,7 @@ export interface AdminIndexRun {
   crawled_sources: number;
   ignored_sources: number;
   documents_indexed: number;
+  current_document_count: number;
   links_seen: number;
   sources_discovered: number;
   errors: number;

@@ -29,6 +29,22 @@ class DocumentType(StringEnum):
     IGNORE = "ignore"
 
 
+class DocumentCategory(StringEnum):
+    UNKNOWN = "unknown"
+    SCIENCE = "science"
+    TECHNOLOGY = "technology"
+    SOFTWARE = "software"
+    STARTUPS = "startups"
+    PHILOSOPHY = "philosophy"
+    HISTORY = "history"
+    POLITICS = "politics"
+    ECONOMICS = "economics"
+    HEALTH = "health"
+    CULTURE = "culture"
+    PERSONAL = "personal"
+    OTHER = "other"
+
+
 class CrawlStatus(StringEnum):
     PENDING = "pending"
     FETCHED = "fetched"
@@ -65,25 +81,28 @@ class IndexEventType(StringEnum):
     SOURCE_FINISHED = "source_finished"
 
 
-class DigestStatus(StringEnum):
-    QUEUED = "queued"
-    SHOWN = "shown"
-    SAVED = "saved"
-    DISMISSED = "dismissed"
-    SKIPPED = "skipped"
+class TagScope(StringEnum):
+    SYSTEM = "system"
+    USER = "user"
 
 
-class FeedbackAction(StringEnum):
-    SAVE = "save"
-    DISMISS = "dismiss"
-    SKIP = "skip"
-    OPEN = "open"
-    READ = "read"
-    LIKE = "like"
+class CategoryStatus(StringEnum):
+    ACTIVE = "active"
+    ARCHIVED = "archived"
 
 
-class FeedbackSurface(StringEnum):
-    SEARCH = "search"
-    DIGEST = "digest"
-    SOURCE_QUEUE = "source_queue"
-    DOCUMENT = "document"
+class CategoryAssignmentSource(StringEnum):
+    SYSTEM = "system"
+    USER = "user"
+
+
+class AgentMessageRole(StringEnum):
+    USER = "user"
+    ASSISTANT = "assistant"
+
+
+class AgentStepKind(StringEnum):
+    PLAN = "plan"
+    TOOL = "tool"
+    OBSERVE = "observe"
+    ANSWER = "answer"

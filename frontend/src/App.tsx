@@ -1,22 +1,34 @@
-import { FormEvent, useEffect, useMemo, useState } from 'react';
-import { ArrowUpRight, BookOpen, Check, Database, LayoutDashboard, Play, Plus, Search, Sparkles, X } from 'lucide-react';
+import { FormEvent, ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  createSource,
-  crawlSource,
+  Badge,
+  Box,
+  Button,
+  Flex,
+  Heading,
+  HStack,
+  Link,
+  SimpleGrid,
+  Stack,
+  Text,
+} from '@chakra-ui/react';
+import { ArrowUpRight, BookOpen, GitFork, LayoutDashboard, Orbit, Search, Sparkles, Users } from 'lucide-react';
+import {
   getAdminCrawlJobs,
   getAdminDocuments,
   getAdminIndexRuns,
   getAdminOverview,
   getAdminSources,
   getDigest,
-  getSources,
   searchCorpus,
-  sendFeedback,
 } from './api';
-import type { AdminCrawlJob, AdminIndexRun, AdminOverview, AdminSource, DigestItem, Page, SearchResponse, Source, Document } from './types';
+import { EmbeddingExplorer } from './EmbeddingExplorer';
+import { GraphExplorer } from './GraphExplorer';
+import { CorpusSearchForm } from './CorpusSearchForm';
+import type { AdminCrawlJob, AdminIndexRun, AdminOverview, AdminSource, DigestRecommendation, Page, SearchResponse, Document } from './types';
 
-type View = 'search' | 'digest' | 'sources' | 'admin';
+type View = 'search' | 'digest' | 'directory' | 'explore' | 'graph' | 'admin';
 type PageState = { limit: number; offset: number };
+type ProfileTarget = { sourceId: number; domain: string } | null;
 
 const emptyPage = <T,>(): Page<T> => ({
   items: [],
@@ -31,51 +43,58 @@ function DocumentCard({
   document,
   reason,
   score,
-  onFeedback,
+  onOpenProfile,
+  compact = false,
 }: {
   document: Document;
   reason: string;
   score?: number;
-  onFeedback?: (action: string) => void;
+  onOpenProfile?: (sourceId: number, domain: string) => void;
+  compact?: boolean;
 }) {
   return (
-    <article className="document-card">
-      <div className="document-meta">
-        <span>{document.source_domain}</span>
-        <span>{document.document_type}</span>
-        {typeof score === 'number' && <span>{score.toFixed(2)}</span>}
-      </div>
-      <h3>{document.title ?? document.url}</h3>
-      {document.summary && <p className="summary">{document.summary}</p>}
-      <p className="reason">{reason}</p>
-      <div className="topics">
-        {document.topics.slice(0, 6).map((topic) => (
-          <span key={topic}>{topic}</span>
-        ))}
-      </div>
-      <div className="card-actions">
-        <a href={document.url}>
-          <ArrowUpRight size={16} />
-          Open
-        </a>
-        {onFeedback && (
-          <>
-            <button type="button" onClick={() => onFeedback('save')}>
-              <Check size={16} />
-              Save
-            </button>
-            <button type="button" onClick={() => onFeedback('dismiss')}>
-              <X size={16} />
-              Dismiss
-            </button>
-          </>
+    <Box as="article" className={compact ? 'document-card document-card-compact' : 'document-card'}>
+      {!compact && (
+        <HStack gap="2" flexWrap="wrap" color="iris.500" fontSize="xs" textTransform="uppercase">
+          <button className="profile-link" type="button" onClick={() => onOpenProfile?.(document.source_id, document.source_domain)}>
+            {document.source_domain}
+          </button>
+          <Text as="span">{document.document_type}</Text>
+          {typeof score === 'number' && <Text as="span">{score.toFixed(2)}</Text>}
+        </HStack>
+      )}
+      <div className={compact ? 'document-title-row' : undefined}>
+        <Heading as="h3" mt="2" mb="3" fontSize="xl" lineHeight="1.2" fontWeight="650">
+          {document.title ?? document.url}
+        </Heading>
+        {compact && (
+          <Link href={document.url} className="document-open-icon" color="iris.900" fontWeight="650" textDecoration="none" aria-label="Open document">
+            <ArrowUpRight size={16} />
+          </Link>
         )}
       </div>
-    </article>
+      {document.summary && <Text color="iris.700" lineHeight="1.6" mb="3">{document.summary}</Text>}
+      {!compact && <Text color="iris.500" fontSize="sm" lineHeight="1.55" mb="4">{reason}</Text>}
+      <HStack className="topics" gap="1.5" flexWrap="wrap" mb="4">
+        {document.topics.slice(0, 6).map((topic) => (
+          <Badge key={topic} variant="outline" borderColor="iris.300" color="iris.700" bg="iris.100" fontWeight="500">
+            {topic}
+          </Badge>
+        ))}
+      </HStack>
+      {!compact && (
+        <HStack>
+          <Link href={document.url} color="iris.900" fontWeight="650" textDecoration="none">
+            <ArrowUpRight size={16} />
+            Open
+          </Link>
+        </HStack>
+      )}
+    </Box>
   );
 }
 
-function SearchView() {
+function SearchView({ onOpenProfile }: { onOpenProfile: (sourceId: number, domain: string) => void }) {
   const [query, setQuery] = useState('');
   const [response, setResponse] = useState<SearchResponse | null>(null);
   const [loading, setLoading] = useState(false);
@@ -95,41 +114,40 @@ function SearchView() {
     }
   }
 
-  async function feedback(documentId: number, action: string) {
-    await sendFeedback({
-      document_id: documentId,
-      surface: 'search',
-      action,
-      search_id: response?.search_id,
-    });
-  }
-
   return (
-    <section className="search-view">
-      <form className="search-box" onSubmit={submit}>
-        <Search size={22} />
-        <input
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-          placeholder="Ask anything across the corpus..."
-          autoFocus
-        />
-        <button type="submit" disabled={loading || !query.trim()}>
-          {loading ? 'Searching' : 'Search'}
-        </button>
-      </form>
+    <Box as="section" className="search-view">
+      <CorpusSearchForm
+        className="search-box"
+        value={query}
+        onChange={setQuery}
+        onSubmit={submit}
+        placeholder={loading ? 'Searching...' : 'Ask anything across the corpus...'}
+        disabled={loading || !query.trim()}
+        autoFocus
+      />
 
       {error && <div className="error">{error}</div>}
 
       {response && (
-        <div className="results-layout">
-          <aside className="answer-panel">
+        <Box className="results-layout">
+          <Box as="aside" className="answer-panel">
             <div className="panel-heading">
               <Sparkles size={18} />
               Synthesis
             </div>
             <p>{response.answer}</p>
-          </aside>
+            {response.tools.length > 0 && (
+              <div className="tool-trace">
+                {response.tools.map((tool) => (
+                  <div key={tool.tool}>
+                    <strong>{tool.tool}</strong>
+                    <span>{tool.hits} hits</span>
+                    <small>{tool.top_titles.slice(0, 2).join(' · ') || tool.query}</small>
+                  </div>
+                ))}
+              </div>
+            )}
+          </Box>
           <div className="results-list">
             {response.results.map((result) => (
               <DocumentCard
@@ -137,18 +155,18 @@ function SearchView() {
                 document={result.document}
                 reason={result.reason}
                 score={result.score}
-                onFeedback={(action) => feedback(result.document.id, action)}
+                onOpenProfile={onOpenProfile}
               />
             ))}
           </div>
-        </div>
+        </Box>
       )}
-    </section>
+    </Box>
   );
 }
 
-function DigestView() {
-  const [items, setItems] = useState<DigestItem[]>([]);
+function DigestView({ onOpenProfile }: { onOpenProfile: (sourceId: number, domain: string) => void }) {
+  const [items, setItems] = useState<DigestRecommendation[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -168,136 +186,216 @@ function DigestView() {
     refresh();
   }, []);
 
-  async function feedback(item: DigestItem, action: string) {
-    await sendFeedback({
-      document_id: item.document.id,
-      surface: 'digest',
-      action,
-      digest_item_id: item.id,
-    });
-    setItems((current) => current.filter((candidate) => candidate.id !== item.id));
-  }
-
   if (loading) return <div className="empty-state">Loading digest...</div>;
 
   return (
     <section>
-      <div className="section-header">
+      <Flex className="section-header">
         <div>
-          <h2>Digest</h2>
-          <p>Old and new corpus items ranked by fit, quality, and graph signal.</p>
+          <Heading as="h2" fontSize="2xl" fontWeight="650">Digest</Heading>
+          <Text color="iris.500" mt="1">Old and new corpus items ranked by fit, quality, and graph signal.</Text>
         </div>
-        <button type="button" onClick={refresh}>Refresh</button>
-      </div>
-      <div className="digest-stack">
+        <Button type="button" onClick={refresh} variant="outline" borderRadius="0">Refresh</Button>
+      </Flex>
+      <Stack gap="3">
         {error && <div className="error">{error}</div>}
         {items.map((item) => (
           <DocumentCard
-            key={item.id}
+            key={item.document.id}
             document={item.document}
             reason={item.reason}
             score={item.score}
-            onFeedback={(action) => feedback(item, action)}
+            onOpenProfile={onOpenProfile}
           />
         ))}
         {items.length === 0 && <div className="empty-state">No digest items yet. Add and crawl a source.</div>}
-      </div>
+      </Stack>
     </section>
   );
 }
 
-function SourcesView() {
-  const [sources, setSources] = useState<Source[]>([]);
-  const [url, setUrl] = useState('');
-  const [busyId, setBusyId] = useState<number | null>(null);
+function DirectoryView({ target, onOpenProfile }: { target: ProfileTarget; onOpenProfile: (sourceId: number, domain: string) => void }) {
+  const [query, setQuery] = useState(target?.domain ?? '');
+  const [selectedSource, setSelectedSource] = useState<AdminSource | null>(null);
+  const [suggestions, setSuggestions] = useState<AdminSource[]>([]);
+  const [suggestionsOpen, setSuggestionsOpen] = useState(false);
+  const [documentsPage, setDocumentsPage] = useState<Page<Document>>(emptyPage);
+  const [selected, setSelected] = useState<ProfileTarget>(target);
+  const [documentPageState, setDocumentPageState] = useState<PageState>({ limit: 50, offset: 0 });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const suppressSuggestionsRef = useRef(false);
 
-  async function refresh() {
+  useEffect(() => {
+    setSelected(target);
+    if (target) setQuery(target.domain);
+  }, [target?.sourceId, target?.domain]);
+
+  async function refresh(nextQuery = query, nextSelected = selected, nextPage = documentPageState) {
+    setLoading(true);
     setError(null);
     try {
-      setSources(await getSources());
+      const sources = await getAdminSources({ status: 'indexed', q: nextQuery.trim(), limit: 25 });
+      const source =
+        (nextSelected && sources.items.find((item) => item.id === nextSelected.sourceId)) ??
+        sources.items.find((item) => item.canonical_domain === nextQuery.trim().toLowerCase()) ??
+        sources.items[0] ??
+        null;
+      const nextProfile = source ? { sourceId: source.id, domain: source.canonical_domain } : nextSelected;
+      setSelectedSource(source);
+      setSelected(nextProfile);
+      if (source && !nextSelected) setQuery(source.canonical_domain);
+      setDocumentsPage(
+        nextProfile
+          ? await getAdminDocuments({ ...nextPage, sourceId: nextProfile.sourceId, documentType: 'essay' })
+          : emptyPage<Document>(),
+      );
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Sources failed');
+      setError(err instanceof Error ? err.message : 'Directory failed');
     } finally {
       setLoading(false);
     }
   }
 
   useEffect(() => {
-    refresh();
-  }, []);
+    const nextPage = { limit: 50, offset: 0 };
+    setDocumentPageState(nextPage);
+    refresh(target?.domain ?? '', target, nextPage);
+  }, [target?.sourceId, target?.domain]);
 
-  async function addSource(event: FormEvent) {
+  useEffect(() => {
+    const normalized = query.trim();
+    if (suppressSuggestionsRef.current) {
+      suppressSuggestionsRef.current = false;
+      setSuggestionsOpen(false);
+      return;
+    }
+    if (!normalized) {
+      setSuggestions([]);
+      setSuggestionsOpen(false);
+      return;
+    }
+    let mounted = true;
+    getAdminSources({ status: 'indexed', q: normalized, limit: 8 })
+      .then((page) => {
+        if (!mounted) return;
+        setSuggestions(page.items);
+        setSuggestionsOpen(true);
+      })
+      .catch(() => {
+        if (!mounted) return;
+        setSuggestions([]);
+        setSuggestionsOpen(false);
+      });
+    return () => {
+      mounted = false;
+    };
+  }, [query]);
+
+  function submit(event: FormEvent) {
     event.preventDefault();
-    if (!url.trim()) return;
-    setError(null);
-    try {
-      const source = await createSource(url.trim(), false);
-      setUrl('');
-      setSources((current) => [source, ...current.filter((item) => item.id !== source.id)]);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Add source failed');
-    }
+    const nextPage = { limit: documentPageState.limit, offset: 0 };
+    setDocumentPageState(nextPage);
+    setSuggestionsOpen(false);
+    refresh(query, null, nextPage);
   }
 
-  async function crawl(id: number) {
-    setBusyId(id);
-    setError(null);
-    try {
-      await crawlSource(id);
-      await refresh();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Crawl failed');
-    } finally {
-      setBusyId(null);
-    }
+  function updateQuery(value: string) {
+    setQuery(value);
+    setSuggestionsOpen(Boolean(value.trim()));
   }
 
-  const byStatus = useMemo(() => {
-    return sources.reduce<Record<string, number>>((acc, source) => {
-      acc[source.status] = (acc[source.status] ?? 0) + 1;
-      return acc;
-    }, {});
-  }, [sources]);
+  function selectSuggestion(source: AdminSource) {
+    const nextPage = { limit: documentPageState.limit, offset: 0 };
+    const nextProfile = { sourceId: source.id, domain: source.canonical_domain };
+    suppressSuggestionsRef.current = true;
+    setQuery(source.canonical_domain);
+    setSelected(nextProfile);
+    setSelectedSource(source);
+    setDocumentPageState(nextPage);
+    setSuggestionsOpen(false);
+    refresh(source.canonical_domain, nextProfile, nextPage);
+  }
+
+  function pageProfileDocuments(nextPage: PageState) {
+    setDocumentPageState(nextPage);
+    refresh(selected?.domain ?? query, selected, nextPage);
+  }
 
   return (
-    <section>
-      <div className="section-header">
-        <div>
-          <h2>Sources</h2>
-          <p>Seeds and automatically discovered linked domains.</p>
-        </div>
-      </div>
-      <form className="source-form" onSubmit={addSource}>
-        <input value={url} onChange={(event) => setUrl(event.target.value)} placeholder="https://example.com" />
-        <button type="submit"><Plus size={16} /> Add</button>
-      </form>
-      <div className="status-strip">
-        {Object.entries(byStatus).map(([status, count]) => (
-          <span key={status}>{status}: {count}</span>
-        ))}
-      </div>
-      {error && <div className="error">{error}</div>}
-      {loading ? (
-        <div className="empty-state">Loading sources...</div>
-      ) : (
-        <div className="source-list">
-          {sources.map((source) => (
-            <div className="source-row" key={source.id}>
-              <div>
-                <strong>{source.canonical_domain}</strong>
-                <span>{source.status}{source.rss_url ? ` · RSS` : ''}</span>
-              </div>
-              <button type="button" onClick={() => crawl(source.id)} disabled={busyId === source.id}>
-                <Play size={15} />
-                {busyId === source.id ? 'Crawling' : 'Crawl'}
+    <Box as="section" className="directory-view">
+      <CorpusSearchForm
+        className="search-box"
+        value={query}
+        onChange={updateQuery}
+        onSubmit={submit}
+        placeholder={loading ? 'Loading profile...' : 'Find a person or domain...'}
+        disabled={loading || !query.trim()}
+      >
+        {suggestionsOpen && suggestions.length > 0 && (
+          <div className="directory-suggestions">
+            {suggestions.map((source) => (
+              <button key={source.id} type="button" onClick={() => selectSuggestion(source)}>
+                <span>{source.canonical_domain}</span>
+                {source.description && <small>{source.description}</small>}
               </button>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        )}
+      </CorpusSearchForm>
+
+      {error && <div className="error">{error}</div>}
+      {loading && <div className="empty-state">Loading directory...</div>}
+
+      {!loading && (
+        <div className="profile-panel">
+            {selected ? (
+              <>
+                <div className="profile-heading">
+                  <div>
+                    <h3>{selectedSource?.canonical_domain ?? selected.domain}</h3>
+                    {selectedSource?.description && <p>{selectedSource.description}</p>}
+                  </div>
+                  <a href={selectedSource?.url ?? `https://${selected.domain}`}>
+                    <ArrowUpRight size={16} />
+                  </a>
+                </div>
+                <div className="profile-documents">
+                  {documentsPage.items.map((document) => (
+                    <DocumentCard
+                      key={document.id}
+                      document={document}
+                      reason={document.summary ? 'From this profile.' : 'Indexed essay from this profile.'}
+                      onOpenProfile={onOpenProfile}
+                      compact
+                    />
+                  ))}
+                </div>
+                <ProfilePagination page={documentsPage} onChange={pageProfileDocuments} />
+              </>
+            ) : (
+              <div className="empty-state">Search for an indexed profile.</div>
+            )}
+          </div>
       )}
-    </section>
+    </Box>
+  );
+}
+
+function ProfilePagination<T>({ page, onChange }: { page: Page<T>; onChange: (next: PageState) => void }) {
+  const start = page.total === 0 ? 0 : page.offset + 1;
+  const end = Math.min(page.offset + page.items.length, page.total);
+
+  return (
+    <div className="profile-pagination">
+      <button type="button" disabled={!page.has_previous} onClick={() => onChange({ limit: page.limit, offset: Math.max(0, page.offset - page.limit) })} aria-label="Previous profile documents">
+        ←
+      </button>
+      <span>{start}-{end} of {page.total}</span>
+      <button type="button" disabled={!page.has_next} onClick={() => onChange({ limit: page.limit, offset: page.offset + page.limit })} aria-label="Next profile documents">
+        →
+      </button>
+    </div>
   );
 }
 
@@ -311,6 +409,8 @@ function AdminView() {
   const [query, setQuery] = useState('');
   const [documentSourceId, setDocumentSourceId] = useState<number | undefined>(undefined);
   const [documentType, setDocumentType] = useState('all');
+  const [documentCrawlJobId, setDocumentCrawlJobId] = useState<number | undefined>(undefined);
+  const [documentIndexRunId, setDocumentIndexRunId] = useState<number | undefined>(undefined);
   const [jobStatus, setJobStatus] = useState('all');
   const [jobSourceId, setJobSourceId] = useState<number | undefined>(undefined);
   const [jobRunId, setJobRunId] = useState<number | undefined>(undefined);
@@ -322,6 +422,7 @@ function AdminView() {
   const [activeTable, setActiveTable] = useState<'sources' | 'documents' | 'jobs' | 'runs'>('sources');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const refreshId = useRef(0);
 
   async function refresh(
     nextStatus = status,
@@ -336,26 +437,43 @@ function AdminView() {
     nextJobSourceId = jobSourceId,
     nextJobRunId = jobRunId,
     nextRunStatus = runStatus,
+    nextDocumentCrawlJobId = documentCrawlJobId,
+    nextDocumentIndexRunId = documentIndexRunId,
   ) {
+    const requestId = refreshId.current + 1;
+    refreshId.current = requestId;
     setLoading(true);
     setError(null);
     try {
       const [overviewData, sourceData, documentData, jobData, runData] = await Promise.all([
         getAdminOverview(),
         getAdminSources({ status: nextStatus, q: nextQuery.trim(), ...nextSourcePage }),
-        getAdminDocuments({ ...nextDocumentPage, sourceId: nextDocumentSourceId, documentType: nextDocumentType }),
+        getAdminDocuments({
+          ...nextDocumentPage,
+          sourceId: nextDocumentSourceId,
+          documentType: nextDocumentType,
+          crawlJobId: nextDocumentCrawlJobId,
+          indexRunId: nextDocumentIndexRunId,
+        }),
         getAdminCrawlJobs({ ...nextJobPage, status: nextJobStatus, sourceId: nextJobSourceId, indexRunId: nextJobRunId }),
         getAdminIndexRuns({ ...nextRunPage, status: nextRunStatus }),
       ]);
-      setOverview(overviewData);
-      setSourcesPage(sourceData);
-      setDocumentsPage(documentData);
-      setJobsPage(jobData);
-      setRunsPage(runData);
+      if (refreshId.current === requestId) {
+        setOverview(overviewData);
+        setSourcesPage(sourceData);
+        setDocumentsPage(documentData);
+        setJobsPage(jobData);
+        setRunsPage(runData);
+        setError(null);
+      }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Admin data failed');
+      if (refreshId.current === requestId) {
+        setError(err instanceof Error ? err.message : 'Admin data failed');
+      }
     } finally {
-      setLoading(false);
+      if (refreshId.current === requestId) {
+        setLoading(false);
+      }
     }
   }
 
@@ -381,15 +499,17 @@ function AdminView() {
     const nextSourceId = value ? Number(value) : undefined;
     const nextPage = { ...documentPageState, offset: 0 };
     setDocumentSourceId(nextSourceId);
+    setDocumentCrawlJobId(undefined);
+    setDocumentIndexRunId(undefined);
     setDocumentPageState(nextPage);
-    refresh(status, query, nextSourceId, documentType, sourcePageState, nextPage);
+    refresh(status, query, nextSourceId, documentType, sourcePageState, nextPage, jobPageState, runPageState, jobStatus, jobSourceId, jobRunId, runStatus, undefined, undefined);
   }
 
   function updateDocumentType(nextType: string) {
     const nextPage = { ...documentPageState, offset: 0 };
     setDocumentType(nextType);
     setDocumentPageState(nextPage);
-    refresh(status, query, documentSourceId, nextType, sourcePageState, nextPage);
+    refresh(status, query, documentSourceId, nextType, sourcePageState, nextPage, jobPageState, runPageState, jobStatus, jobSourceId, jobRunId, runStatus, documentCrawlJobId, documentIndexRunId);
   }
 
   function pageSources(nextPage: PageState) {
@@ -442,31 +562,67 @@ function AdminView() {
     refresh(status, query, documentSourceId, documentType, sourcePageState, documentPageState, jobPageState, nextPage, jobStatus, jobSourceId, jobRunId, nextStatus);
   }
 
+  function showDocumentsForJob(job: AdminCrawlJob) {
+    const nextPage = { ...documentPageState, offset: 0 };
+    setActiveTable('documents');
+    setDocumentSourceId(job.source_id);
+    setDocumentCrawlJobId(job.id);
+    setDocumentIndexRunId(undefined);
+    setDocumentPageState(nextPage);
+    refresh(status, query, job.source_id, documentType, sourcePageState, nextPage, jobPageState, runPageState, jobStatus, jobSourceId, jobRunId, runStatus, job.id, undefined);
+  }
+
+  function showJobsForRun(run: AdminIndexRun) {
+    const nextPage = { ...jobPageState, offset: 0 };
+    setActiveTable('jobs');
+    setJobRunId(run.id);
+    setJobPageState(nextPage);
+    refresh(status, query, documentSourceId, documentType, sourcePageState, documentPageState, nextPage, runPageState, jobStatus, jobSourceId, run.id, runStatus);
+  }
+
+  function showDocumentsForRun(run: AdminIndexRun) {
+    const nextPage = { ...documentPageState, offset: 0 };
+    setActiveTable('documents');
+    setDocumentSourceId(undefined);
+    setDocumentCrawlJobId(undefined);
+    setDocumentIndexRunId(run.id);
+    setDocumentPageState(nextPage);
+    refresh(status, query, undefined, documentType, sourcePageState, nextPage, jobPageState, runPageState, jobStatus, jobSourceId, jobRunId, runStatus, undefined, run.id);
+  }
+
+  function clearDocumentScope() {
+    const nextPage = { ...documentPageState, offset: 0 };
+    setDocumentCrawlJobId(undefined);
+    setDocumentIndexRunId(undefined);
+    setDocumentPageState(nextPage);
+    refresh(status, query, documentSourceId, documentType, sourcePageState, nextPage, jobPageState, runPageState, jobStatus, jobSourceId, jobRunId, runStatus, undefined, undefined);
+  }
+
   const crawledSources = overview?.source_statuses.indexed ?? 0;
   const activeSources = overview?.source_statuses.crawling ?? 0;
 
   return (
     <section>
-      <div className="section-header">
+      <Flex className="section-header">
         <div>
-          <h2>Admin</h2>
-          <p>Read-only database view for ingestion, crawl runs, sources, and documents.</p>
+          <Heading as="h2" fontSize="2xl" fontWeight="650">Admin</Heading>
+          <Text color="iris.500" mt="1">Read-only database view for ingestion, crawl runs, sources, and documents.</Text>
         </div>
-        <button type="button" onClick={() => refresh()}>
+        <Button type="button" onClick={() => refresh()} variant="outline" borderRadius="0">
           Refresh
-        </button>
-      </div>
+        </Button>
+      </Flex>
 
       {error && <div className="error">{error}</div>}
 
-      <div className="metric-grid">
+      <SimpleGrid className="metric-grid" columns={{ base: 2, md: 3, xl: 6 }} gap="2.5">
         <Metric label="sources crawled" value={crawledSources} />
         <Metric label="active crawls" value={activeSources} />
         <Metric label="documents" value={overview?.totals.documents ?? 0} />
         <Metric label="essays" value={overview?.totals.essay_documents ?? 0} />
         <Metric label="links" value={overview?.totals.links ?? 0} />
         <Metric label="resolved links" value={overview?.totals.resolved_links ?? 0} />
-      </div>
+      </SimpleGrid>
 
       <div className="admin-controls">
         <div className="tab-strip">
@@ -496,22 +652,32 @@ function AdminView() {
           </form>
         )}
         {activeTable === 'documents' && (
-          <div className="admin-filter">
-            <select value={documentSourceId ?? ''} onChange={(event) => updateDocumentSource(event.target.value)}>
-              <option value="">all sources, newest first</option>
-              {sourcesPage.items
-                .filter((source) => source.document_count > 0)
-                .map((source) => (
-                  <option key={source.id} value={source.id}>
-                    {source.canonical_domain} ({source.document_count})
-                  </option>
-                ))}
-            </select>
-            <select value={documentType} onChange={(event) => updateDocumentType(event.target.value)}>
-              <option value="all">all document types</option>
-              <option value="essay">essays</option>
-              <option value="collection">collections</option>
-            </select>
+          <div className="admin-document-controls">
+            <div className="admin-filter">
+              <select value={documentSourceId ?? ''} onChange={(event) => updateDocumentSource(event.target.value)}>
+                <option value="">all sources, newest first</option>
+                {sourcesPage.items
+                  .filter((source) => source.document_count > 0)
+                  .map((source) => (
+                    <option key={source.id} value={source.id}>
+                      {source.canonical_domain} ({source.document_count})
+                    </option>
+                  ))}
+              </select>
+              <select value={documentType} onChange={(event) => updateDocumentType(event.target.value)}>
+                <option value="all">all document types</option>
+                <option value="essay">essays</option>
+                <option value="collection">collections</option>
+              </select>
+            </div>
+            {(documentCrawlJobId || documentIndexRunId) && (
+              <div className="admin-scope-banner">
+                <span>
+                  Showing documents inferred from {documentCrawlJobId ? `crawl job ${documentCrawlJobId}` : `index run ${documentIndexRunId}`}.
+                </span>
+                <button type="button" onClick={clearDocumentScope}>Clear scope</button>
+              </div>
+            )}
           </div>
         )}
         {activeTable === 'jobs' && (
@@ -565,6 +731,8 @@ function AdminView() {
             documents={documentsPage.items}
             page={documentsPage}
             sourceName={sourcesPage.items.find((source) => source.id === documentSourceId)?.canonical_domain}
+            crawlJobId={documentCrawlJobId}
+            indexRunId={documentIndexRunId}
           />
           <Pagination page={documentsPage} onChange={pageDocuments} />
         </>
@@ -572,14 +740,14 @@ function AdminView() {
       {!loading && activeTable === 'jobs' && (
         <>
           <Pagination page={jobsPage} onChange={pageJobs} />
-          <AdminJobsTable jobs={jobsPage.items} />
+          <AdminJobsTable jobs={jobsPage.items} onShowDocuments={showDocumentsForJob} />
           <Pagination page={jobsPage} onChange={pageJobs} />
         </>
       )}
       {!loading && activeTable === 'runs' && (
         <>
           <Pagination page={runsPage} onChange={pageRuns} />
-          <AdminRunsTable runs={runsPage.items} />
+          <AdminRunsTable runs={runsPage.items} onShowJobs={showJobsForRun} onShowDocuments={showDocumentsForRun} />
           <Pagination page={runsPage} onChange={pageRuns} />
         </>
       )}
@@ -589,10 +757,10 @@ function AdminView() {
 
 function Metric({ label, value }: { label: string; value: number }) {
   return (
-    <div className="metric">
-      <span>{label}</span>
-      <strong>{value.toLocaleString()}</strong>
-    </div>
+    <Box className="metric">
+      <Text as="span">{label}</Text>
+      <Text as="strong">{value.toLocaleString()}</Text>
+    </Box>
   );
 }
 
@@ -604,7 +772,7 @@ function AdminSourcesTable({ sources }: { sources: AdminSource[] }) {
           <tr>
             <th>Domain</th>
             <th>Status</th>
-            <th>Docs</th>
+            <th>Stored</th>
             <th>Essays</th>
             <th>Latest Crawl</th>
             <th>Why It Stopped</th>
@@ -633,12 +801,27 @@ function AdminSourcesTable({ sources }: { sources: AdminSource[] }) {
   );
 }
 
-function AdminDocumentsTable({ documents, page, sourceName }: { documents: Document[]; page: Page<Document>; sourceName?: string }) {
+function AdminDocumentsTable({
+  documents,
+  page,
+  sourceName,
+  crawlJobId,
+  indexRunId,
+}: {
+  documents: Document[];
+  page: Page<Document>;
+  sourceName?: string;
+  crawlJobId?: number;
+  indexRunId?: number;
+}) {
+  const scope = crawlJobId ? ` for crawl job ${crawlJobId}` : indexRunId ? ` for index run ${indexRunId}` : '';
+  const start = page.total === 0 ? 0 : page.offset + 1;
+  const end = Math.min(page.offset + page.items.length, page.total);
   return (
     <>
       <p className="admin-note">
-        Showing {page.offset + 1}-{Math.min(page.offset + page.items.length, page.total)} of {page.total} documents
-        {sourceName ? ` from ${sourceName}` : ' across all sources'}.
+        Showing {start}-{end} of {page.total} documents
+        {sourceName ? ` from ${sourceName}` : ' across all sources'}{scope}.
       </p>
       <div className="admin-table-wrap">
         <table className="admin-table">
@@ -653,7 +836,20 @@ function AdminDocumentsTable({ documents, page, sourceName }: { documents: Docum
         <tbody>
           {documents.map((document) => (
             <tr key={document.id}>
-              <td><a href={document.url}>{document.title || document.url}</a></td>
+              <td>
+                <div className="admin-document-cell">
+                  <a href={document.url}>{document.title || document.url}</a>
+                  <small className="admin-document-url">{document.url}</small>
+                  {document.summary && <p>{document.summary}</p>}
+                  {document.topics.length > 0 && (
+                    <div className="admin-document-topics">
+                      {document.topics.slice(0, 8).map((topic) => (
+                        <span key={topic}>{topic}</span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </td>
               <td>{document.source_domain}</td>
               <td>{document.document_type}</td>
               <td>{formatDate(document.published_at)}</td>
@@ -693,7 +889,7 @@ function Pagination<T>({ page, onChange }: { page: Page<T>; onChange: (next: Pag
   );
 }
 
-function AdminJobsTable({ jobs }: { jobs: AdminCrawlJob[] }) {
+function AdminJobsTable({ jobs, onShowDocuments }: { jobs: AdminCrawlJob[]; onShowDocuments: (job: AdminCrawlJob) => void }) {
   return (
     <div className="admin-table-wrap">
       <table className="admin-table">
@@ -708,6 +904,7 @@ function AdminJobsTable({ jobs }: { jobs: AdminCrawlJob[] }) {
             <th>Links</th>
             <th>Discovered</th>
             <th>Started</th>
+            <th>Inspect</th>
           </tr>
         </thead>
         <tbody>
@@ -721,10 +918,18 @@ function AdminJobsTable({ jobs }: { jobs: AdminCrawlJob[] }) {
               </td>
               <td>{job.outcome}</td>
               <td>{job.pages_fetched}</td>
-              <td>{job.documents_indexed}</td>
+              <td>
+                {job.current_document_count}
+                <small>{job.documents_indexed} essays accepted</small>
+              </td>
               <td>{job.links_seen}</td>
               <td>{job.sources_discovered}</td>
               <td>{formatDate(job.started_at)}</td>
+              <td>
+                <button className="admin-inline-action" type="button" onClick={() => onShowDocuments(job)}>
+                  View docs
+                </button>
+              </td>
             </tr>
           ))}
         </tbody>
@@ -745,7 +950,15 @@ function JobLabel({ job }: { job: { id: number; index_run_id: number | null; pag
   );
 }
 
-function AdminRunsTable({ runs }: { runs: AdminIndexRun[] }) {
+function AdminRunsTable({
+  runs,
+  onShowJobs,
+  onShowDocuments,
+}: {
+  runs: AdminIndexRun[];
+  onShowJobs: (run: AdminIndexRun) => void;
+  onShowDocuments: (run: AdminIndexRun) => void;
+}) {
   return (
     <div className="admin-table-wrap">
       <table className="admin-table">
@@ -756,9 +969,10 @@ function AdminRunsTable({ runs }: { runs: AdminIndexRun[] }) {
             <th>Plan</th>
             <th>Crawled</th>
             <th>Ignored</th>
-            <th>Docs</th>
+            <th>Stored</th>
             <th>Errors</th>
             <th>Stop</th>
+            <th>Inspect</th>
           </tr>
         </thead>
         <tbody>
@@ -769,9 +983,22 @@ function AdminRunsTable({ runs }: { runs: AdminIndexRun[] }) {
               <td>{run.attempted_sources}/{run.planned_sources}</td>
               <td>{run.crawled_sources}</td>
               <td>{run.ignored_sources}</td>
-              <td>{run.documents_indexed}</td>
+              <td>
+                {run.current_document_count}
+                <small>{run.documents_indexed} essays accepted</small>
+              </td>
               <td>{run.errors}</td>
               <td>{run.stop_reason ?? '-'}</td>
+              <td>
+                <div className="admin-inline-actions">
+                  <button className="admin-inline-action" type="button" onClick={() => onShowJobs(run)}>
+                    View jobs
+                  </button>
+                  <button className="admin-inline-action" type="button" onClick={() => onShowDocuments(run)}>
+                    View docs
+                  </button>
+                </div>
+              </td>
             </tr>
           ))}
         </tbody>
@@ -781,7 +1008,7 @@ function AdminRunsTable({ runs }: { runs: AdminIndexRun[] }) {
 }
 
 function StatusPill({ value }: { value: string }) {
-  return <span className={`status-pill status-${value}`}>{value}</span>;
+  return <Badge className={`status-pill status-${value}`} variant="outline" borderRadius="0">{value}</Badge>;
 }
 
 function formatDate(value: string | null | undefined) {
@@ -791,32 +1018,62 @@ function formatDate(value: string | null | undefined) {
 
 export default function App() {
   const [view, setView] = useState<View>('search');
+  const [profileTarget, setProfileTarget] = useState<ProfileTarget>(null);
+
+  function openProfile(sourceId: number, domain: string) {
+    setProfileTarget({ sourceId, domain });
+    setView('directory');
+  }
+
+  const navItems: Array<{ view: View; label: string; icon: ReactNode }> = [
+    { view: 'search', label: 'Search', icon: <Search size={15} /> },
+    { view: 'digest', label: 'Digest', icon: <BookOpen size={15} /> },
+    { view: 'explore', label: 'Explore', icon: <Orbit size={15} /> },
+    { view: 'graph', label: 'Graph', icon: <GitFork size={15} /> },
+    { view: 'directory', label: 'Directory', icon: <Users size={15} /> },
+    { view: 'admin', label: 'Admin', icon: <LayoutDashboard size={15} /> },
+  ];
+
   return (
-    <main>
-      <header className="app-header">
-        <div>
-          <h1>iris</h1>
-          <p>Agentic search and digest over a self-growing corpus of essays.</p>
-        </div>
-        <nav>
-          <button className={view === 'search' ? 'active' : ''} onClick={() => setView('search')}>
-            <Search size={16} /> Search
-          </button>
-          <button className={view === 'digest' ? 'active' : ''} onClick={() => setView('digest')}>
-            <BookOpen size={16} /> Digest
-          </button>
-          <button className={view === 'sources' ? 'active' : ''} onClick={() => setView('sources')}>
-            <Database size={16} /> Sources
-          </button>
-          <button className={view === 'admin' ? 'active' : ''} onClick={() => setView('admin')}>
-            <LayoutDashboard size={16} /> Admin
-          </button>
-        </nav>
-      </header>
-      {view === 'search' && <SearchView />}
-      {view === 'digest' && <DigestView />}
-      {view === 'sources' && <SourcesView />}
-      {view === 'admin' && <AdminView />}
-    </main>
+    <Box as="main" className="app-shell">
+      <Box as="aside" className="sidebar">
+        <Box className="sidebar-brand">
+          <span>iris</span>
+        </Box>
+        <Stack as="nav" className="sidebar-nav" gap="1">
+          {navItems.map((item) => (
+            <Button
+              key={item.view}
+              type="button"
+              onClick={() => setView(item.view)}
+              variant="ghost"
+              borderRadius="0"
+              justifyContent="flex-start"
+              data-active={view === item.view ? 'true' : undefined}
+              bg="transparent"
+              color={view === item.view ? 'iris.900' : 'iris.500'}
+              fontSize="14px"
+              fontWeight={view === item.view ? '600' : '500'}
+              lineHeight="1"
+              _hover={{
+                bg: 'transparent',
+                color: 'iris.900',
+              }}
+            >
+              {item.icon}
+              {item.label}
+            </Button>
+          ))}
+        </Stack>
+      </Box>
+      <Box className={view === 'explore' || view === 'graph' ? 'workspace workspace-fullscreen' : 'workspace'}>
+        {view === 'search' && <SearchView onOpenProfile={openProfile} />}
+        {view === 'digest' && <DigestView onOpenProfile={openProfile} />}
+        {view === 'directory' && <DirectoryView target={profileTarget} onOpenProfile={openProfile} />}
+        {view === 'explore' && <EmbeddingExplorer />}
+        {view === 'graph' && <GraphExplorer onOpenProfile={openProfile} />}
+        {view === 'admin' && <AdminView />}
+      </Box>
+    </Box>
   );
 }

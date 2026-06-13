@@ -3,24 +3,18 @@ from __future__ import annotations
 import json
 import logging
 import re
-from dataclasses import dataclass
+from collections.abc import Mapping
 
 import httpx
 from bs4 import BeautifulSoup
 
-from iris.models import SourceStatus
+from iris.schemas.enums import SourceStatus
+from iris.schemas.ingestion import SourceClassification, SourceClassifierResult
 from iris.services.common.config import SOURCE_CLASSIFIER_MODEL, SOURCE_CLASSIFIER_TIMEOUT_SECONDS, require_openai_api_key
 from iris.services.common.language import looks_non_english
 from iris.services.common.url_utils import domain_for_url, normalize_url
 
 logger = logging.getLogger("iris.source_classifier")
-
-
-@dataclass(frozen=True)
-class SourceClassification:
-    status: str
-    reason: str
-    confidence: float | None = None
 
 
 OBVIOUS_IGNORED_EXACT_DOMAINS: dict[str, str] = {
@@ -140,6 +134,15 @@ SPAM_GAMBLING_MARKERS: tuple[str, ...] = (
     "카지노",
 )
 
+WRITING_SECTION_MARKERS: tuple[str, ...] = (
+    "blog",
+    "essays",
+    "notes",
+    "posts",
+    "writing",
+    "writings",
+)
+
 
 def classify_source_url(url: str) -> SourceClassification:
     domain = domain_for_url(normalize_url(url))
@@ -164,7 +167,7 @@ def classify_source_url(url: str) -> SourceClassification:
 def classify_source_homepage(url: str, html: str) -> SourceClassification:
     domain = domain_for_url(normalize_url(url))
     if domain.endswith(".test"):
-        return SourceClassification(status=SourceStatus.QUEUED.value, reason="test fixture domain", confidence=None)
+        return SourceClassification(status=SourceStatus.QUEUED.value, reason="test fixture domain")
 
     obvious = classify_source_url(url)
     if obvious.status == SourceStatus.IGNORED.value:
@@ -177,22 +180,18 @@ def classify_source_homepage(url: str, html: str) -> SourceClassification:
         return SourceClassification(
             status=SourceStatus.IGNORED.value,
             reason="homepage appears to be primarily non-English text",
-            confidence=0.9,
         )
 
     if _looks_like_professional_service_site(homepage_context):
         return SourceClassification(
             status=SourceStatus.IGNORED.value,
             reason="professional service/clinic site, not a personal blog or essay archive",
-            confidence=0.9,
         )
     if _looks_like_gambling_spam_site(homepage_context):
         return SourceClassification(
             status=SourceStatus.IGNORED.value,
             reason="casino/betting spam or gambling SEO content, not personal essays",
-            confidence=0.95,
         )
-
     key = require_openai_api_key(f"source homepage classification ({url})")
 
     try:
@@ -225,6 +224,18 @@ def _homepage_context(html: str) -> str:
     return re.sub(r"\s+", " ", context)[:12000]
 
 
+def _has_writing_section_link(html: str) -> bool:
+    soup = BeautifulSoup(html, "html.parser")
+    for anchor in soup.find_all("a"):
+        text = anchor.get_text(" ", strip=True).lower()
+        href = str(anchor.get("href") or "").lower().strip("/")
+        if text in WRITING_SECTION_MARKERS or href in WRITING_SECTION_MARKERS:
+            return True
+        if any(href.startswith(f"{marker}/") for marker in WRITING_SECTION_MARKERS):
+            return True
+    return False
+
+
 def _looks_like_professional_service_site(homepage_context: str) -> bool:
     text = homepage_context.lower()
     marker_count = sum(1 for marker in PROFESSIONAL_SERVICE_MARKERS if marker in text)
@@ -243,7 +254,8 @@ def _looks_like_gambling_spam_site(homepage_context: str) -> bool:
     return spam_repetition >= 3
 
 
-def _classify_with_openai(api_key: str, url: str, homepage_context: str) -> dict:
+def _classify_with_openai(api_key: str, url: str, homepage_context: str) -> SourceClassifierResult:
+    """Classify a source homepage with structured LLM output."""
     payload = {
         "model": SOURCE_CLASSIFIER_MODEL,
         "instructions": (
@@ -251,13 +263,20 @@ def _classify_with_openai(api_key: str, url: str, homepage_context: str) -> dict
             "single-author or small-group essay archives, independent writing, newsletters, and substantive "
             "written thought. ACCEPT personal homepages/blogs even if they are messy, old-school, link-heavy, "
             "or casual, as long as they appear to contain authored posts/essays by an individual or small group. "
+            "ACCEPT individual creator newsletter subdomains on platforms like Substack when the homepage appears "
+            "to be an authored archive of posts/essays; do not reject those merely because they use a publishing "
+            "platform. Reject the platform root and corporate/product newsletters. "
             "Reject broad multi-user platforms, reference sites, video/social networks, commerce, docs, code hosts, "
-            "generic company/product sites, and mainstream publications unless the homepage is clearly an "
-            "individual author's essay archive. "
-            "Return JSON only with keys: should_crawl boolean, confidence number 0-1, reason string."
+            "corporate blogs, content marketing, customer stories, product pages, generic company/product sites, "
+            "and mainstream publications unless the homepage is clearly an individual author's essay archive. "
+            "A company having a blog, resources, writing, or news section is not enough; reject it unless the "
+            "source is primarily personal or independent authored thought. "
+            "Keep reason concise: one sentence, under 20 words. "
+            "Return the requested fields according to the provided schema."
         ),
         "input": f"URL: {url}\n\nHomepage text:\n{homepage_context}",
-        "max_output_tokens": 240,
+        "text": {"format": _source_classifier_response_format(), "verbosity": "low"},
+        "max_output_tokens": 2000,
         "store": False,
     }
     with httpx.Client(timeout=SOURCE_CLASSIFIER_TIMEOUT_SECONDS) as client:
@@ -268,41 +287,71 @@ def _classify_with_openai(api_key: str, url: str, homepage_context: str) -> dict
         )
         response.raise_for_status()
         data = response.json()
+    if data.get("status") == "incomplete":
+        reason = data.get("incomplete_details") or {}
+        raise RuntimeError(f"source classifier response incomplete: {reason}")
     text = data.get("output_text") or _response_output_text(data)
     if not text:
         raise ValueError("empty classifier response")
-    return json.loads(_extract_json_object(text))
+    return _parse_classifier_json(text)
 
 
-def _response_output_text(data: dict) -> str:
+def _source_classifier_response_format() -> dict[str, object]:
+    """Return the structured-output schema for source homepage classification."""
+    return {
+        "type": "json_schema",
+        "name": "source_classification",
+        "strict": True,
+        "schema": {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "should_crawl": {"type": "boolean"},
+                "reason": {"type": "string", "maxLength": 240},
+            },
+            "required": ["should_crawl", "reason"],
+        },
+    }
+
+
+def _parse_classifier_json(text: str) -> SourceClassifierResult:
+    payload = json.loads(text)
+    if not isinstance(payload, dict):
+        raise ValueError("classifier JSON was not an object")
+    return SourceClassifierResult(
+        should_crawl=bool(payload.get("should_crawl")),
+        reason=str(payload.get("reason") or "LLM source classification").strip()[:1000],
+    )
+
+
+def _response_output_text(data: Mapping[str, object]) -> str:
     chunks: list[str] = []
-    for item in data.get("output", []):
-        for content in item.get("content", []):
-            if content.get("type") == "output_text" and content.get("text"):
-                chunks.append(content["text"])
+    output = data.get("output")
+    if not isinstance(output, list):
+        return ""
+    for item in output:
+        if not isinstance(item, dict):
+            continue
+        content_items = item.get("content")
+        if not isinstance(content_items, list):
+            continue
+        for content in content_items:
+            if not isinstance(content, dict):
+                continue
+            text = content.get("text")
+            if content.get("type") == "output_text" and isinstance(text, str):
+                chunks.append(text)
     return "\n".join(chunks)
 
 
-def _extract_json_object(text: str) -> str:
-    text = text.strip()
-    if text.startswith("```"):
-        text = re.sub(r"^```(?:json)?", "", text).strip()
-        text = re.sub(r"```$", "", text).strip()
-    match = re.search(r"\{.*\}", text, flags=re.DOTALL)
-    if not match:
-        raise ValueError("classifier response did not contain JSON")
-    return match.group(0)
-
-
-def _normalize_llm_result(result: dict) -> SourceClassification:
-    should_crawl = bool(result.get("should_crawl"))
-    reason = str(result.get("reason") or "LLM source classification").strip()[:1000]
-    try:
-        confidence = float(result.get("confidence"))
-    except (TypeError, ValueError):
-        confidence = None
+def _normalize_llm_result(result: SourceClassifierResult | Mapping[str, object]) -> SourceClassification:
+    """Convert a raw or parsed LLM classification into source status."""
+    if isinstance(result, Mapping):
+        result = SourceClassifierResult(
+            should_crawl=bool(result.get("should_crawl")),
+            reason=str(result.get("reason") or "LLM source classification").strip()[:1000],
+        )
     return SourceClassification(
-        status=SourceStatus.QUEUED.value if should_crawl else SourceStatus.IGNORED.value,
-        reason=reason,
-        confidence=confidence,
+        status=SourceStatus.QUEUED.value if result.should_crawl else SourceStatus.IGNORED.value,
+        reason=result.reason,
     )

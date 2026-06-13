@@ -21,4 +21,5 @@ def session() -> Session:
     db.SessionLocal.configure(bind=engine)
     Base.metadata.create_all(engine)
     with Session(engine, future=True) as session:
-        yield session
+        with db.bind_session(session):
+            yield session

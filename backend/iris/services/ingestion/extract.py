@@ -1,33 +1,14 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
 from datetime import datetime
 from email.utils import parsedate_to_datetime
 from urllib.parse import urljoin
 
 from bs4 import BeautifulSoup
 
-from iris.services.ingestion.document_classifier import classify_document
-
-
-@dataclass(frozen=True)
-class ExtractedLink:
-    url: str
-    anchor_text: str
-    context: str
-
-
-@dataclass(frozen=True)
-class ExtractedPage:
-    title: str | None
-    author: str | None
-    published_at: datetime | None
-    text: str
-    summary: str
-    topics: list[str]
-    document_type: str
-    links: list[ExtractedLink]
+from iris.schemas.ingestion import ExtractedLink, ExtractedPage
+from iris.services.ingestion.document_classifier import analyze_document, analyze_document_async
 
 
 BOILERPLATE_SELECTORS = [
@@ -66,56 +47,56 @@ def _parse_date(value: str | None) -> datetime | None:
         return None
 
 
-def _summarize(text: str) -> str:
-    clean = re.sub(r"\s+", " ", text).strip()
-    sentences = re.split(r"(?<=[.!?])\s+", clean)
-    summary = " ".join(sentences[:3]).strip()
-    return summary[:700]
-
-
-def _topics(text: str, title: str | None) -> list[str]:
-    words = re.findall(r"[a-zA-Z][a-zA-Z\-]{3,}", f"{title or ''} {text}".lower())
-    stop = {
-        "about",
-        "after",
-        "also",
-        "because",
-        "before",
-        "being",
-        "between",
-        "could",
-        "first",
-        "from",
-        "have",
-        "into",
-        "more",
-        "other",
-        "people",
-        "some",
-        "than",
-        "that",
-        "their",
-        "there",
-        "these",
-        "they",
-        "this",
-        "what",
-        "when",
-        "where",
-        "which",
-        "with",
-        "would",
-        "your",
-    }
-    counts: dict[str, int] = {}
-    for word in words:
-        if word in stop:
-            continue
-        counts[word] = counts.get(word, 0) + 1
-    return [word for word, _ in sorted(counts.items(), key=lambda item: (-item[1], item[0]))[:8]]
-
-
 def extract_page(html: str, final_url: str) -> ExtractedPage:
+    """Extract page text, metadata, links, and sync LLM document analysis."""
+    parsed = _parse_html_page(html, final_url)
+    analysis = analyze_document(
+        url=final_url,
+        metadata_title=parsed["title"],
+        text=parsed["text"],
+        link_count=parsed["content_link_count"],
+        has_author=bool(parsed["author"]),
+        has_published_date=bool(parsed["published_at"]),
+    )
+    return ExtractedPage(
+        title=analysis.title,
+        author=parsed["author"],
+        published_at=parsed["published_at"],
+        text=parsed["text"],
+        summary=analysis.summary,
+        topics=analysis.topics,
+        document_type=analysis.document_type,
+        category_slug=analysis.category_slug,
+        links=parsed["links"],
+    )
+
+
+async def extract_page_async(html: str, final_url: str) -> ExtractedPage:
+    """Extract page text, metadata, links, and async LLM document analysis."""
+    parsed = _parse_html_page(html, final_url)
+    analysis = await analyze_document_async(
+        url=final_url,
+        metadata_title=parsed["title"],
+        text=parsed["text"],
+        link_count=parsed["content_link_count"],
+        has_author=bool(parsed["author"]),
+        has_published_date=bool(parsed["published_at"]),
+    )
+    return ExtractedPage(
+        title=analysis.title,
+        author=parsed["author"],
+        published_at=parsed["published_at"],
+        text=parsed["text"],
+        summary=analysis.summary,
+        topics=analysis.topics,
+        document_type=analysis.document_type,
+        category_slug=analysis.category_slug,
+        links=parsed["links"],
+    )
+
+
+def _parse_html_page(html: str, final_url: str) -> dict:
+    """Parse HTML into extracted metadata before document analysis."""
     soup = BeautifulSoup(html, "html.parser")
     title = _meta(soup, "og:title", "twitter:title")
     if not title and soup.title and soup.title.string:
@@ -141,23 +122,11 @@ def extract_page(html: str, final_url: str) -> ExtractedPage:
     text = article.get_text("\n", strip=True)
     text = re.sub(r"\n{3,}", "\n\n", text)
     text = re.sub(r"[ \t]{2,}", " ", text)
-    summary = _summarize(text)
-    topics = _topics(text, title)
-    classification = classify_document(
-        url=final_url,
-        title=title,
-        text=text,
-        link_count=content_link_count,
-        has_author=bool(author),
-        has_published_date=bool(published_at),
-    )
-    return ExtractedPage(
-        title=title,
-        author=author,
-        published_at=published_at,
-        text=text,
-        summary=summary,
-        topics=topics,
-        document_type=classification.document_type,
-        links=links,
-    )
+    return {
+        "title": title,
+        "author": author,
+        "published_at": published_at,
+        "text": text,
+        "content_link_count": content_link_count,
+        "links": links,
+    }

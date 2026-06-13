@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from iris.models import CrawlJob, DigestItem, Document, Source
-from iris.schemas.api import CrawlSchema, DigestItemSchema, DocumentSchema, SourceSchema
+from iris.models import CrawlJob, Document, Source
+from iris.schemas.api import CrawlSchema, DigestRecommendationSchema, DocumentSchema, SourceSchema
+from iris.schemas.retrieval import DigestRecommendation
 
 
 def dump_source(source: Source) -> SourceSchema:
@@ -24,6 +25,7 @@ def dump_document(document: Document) -> DocumentSchema:
         source_domain=document.source.canonical_domain,
         url=document.url,
         document_type=document.document_type,
+        category=document.category,
         title=document.title,
         author=document.author,
         published_at=document.published_at,
@@ -32,13 +34,11 @@ def dump_document(document: Document) -> DocumentSchema:
     )
 
 
-def dump_digest_item(item: DigestItem) -> DigestItemSchema:
-    return DigestItemSchema(
-        id=item.id,
-        document=dump_document(item.document),  # type: ignore[attr-defined]
+def dump_digest_recommendation(item: DigestRecommendation) -> DigestRecommendationSchema:
+    return DigestRecommendationSchema(
+        document=dump_document(item.document),
         score=item.score,
         reason=item.reason,
-        status=item.status,
     )
 
 

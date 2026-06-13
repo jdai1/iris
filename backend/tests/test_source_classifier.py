@@ -139,6 +139,58 @@ def test_classifier_requires_api_key_for_unclear_homepage(monkeypatch):
         classify_source_homepage("https://maybe-blog.com/", html)
 
 
+def test_classifier_sends_personal_homepage_with_writing_tab_to_llm(monkeypatch):
+    monkeypatch.setattr(source_classifier, "require_openai_api_key", lambda _feature: "test-key")
+    monkeypatch.setattr(
+        source_classifier,
+        "_classify_with_openai",
+        lambda _key, _url, _context: {
+            "should_crawl": True,
+            "reason": "Personal homepage with a writing section.",
+        },
+    )
+    html = """
+    <html><head><title>Jason Dai</title></head><body>
+      <nav><a href="/">Home</a><a href="/writing">Writing</a><a href="/projects">Projects</a></nav>
+      <main>
+        <h1>Jason Dai</h1>
+        <p>Software engineer. Contact, projects, and professional details.</p>
+      </main>
+    </body></html>
+    """
+
+    result = classify_source_homepage("https://jdai1.github.io/", html)
+
+    assert result.status == "queued"
+    assert "writing" in result.reason
+
+
+def test_classifier_rejects_corporate_blog_homepage_via_llm(monkeypatch):
+    monkeypatch.setattr(source_classifier, "require_openai_api_key", lambda _feature: "test-key")
+    monkeypatch.setattr(
+        source_classifier,
+        "_classify_with_openai",
+        lambda _key, _url, _context: {
+            "should_crawl": False,
+            "reason": "Corporate product site with content marketing, not a personal essay archive.",
+        },
+    )
+    html = """
+    <html><head><title>Ramp - Finance Automation Platform</title></head><body>
+      <nav><a href="/blog">Blog</a><a href="/resources">Resources</a><a href="/customers">Customers</a></nav>
+      <main>
+        <h1>Spend management and accounting automation</h1>
+        <p>Ramp helps companies automate expenses, procurement, bill pay, and finance workflows.</p>
+      </main>
+    </body></html>
+    """
+
+    result = classify_source_homepage("https://ramp.com/", html)
+
+    assert result.status == "ignored"
+    assert "Corporate product site" in result.reason
+
+
 def test_personal_platform_suffix_still_uses_homepage_llm(monkeypatch):
     monkeypatch.setattr(source_classifier, "require_openai_api_key", lambda _feature: "test-key")
     monkeypatch.setattr(
@@ -146,7 +198,6 @@ def test_personal_platform_suffix_still_uses_homepage_llm(monkeypatch):
         "_classify_with_openai",
         lambda _key, _url, _context: {
             "should_crawl": False,
-            "confidence": 0.88,
             "reason": "This is a product site, not an essay archive.",
         },
     )
@@ -160,3 +211,67 @@ def test_personal_platform_suffix_still_uses_homepage_llm(monkeypatch):
 
     assert result.status == "ignored"
     assert "product site" in result.reason
+
+
+def test_classifier_accepts_personal_substack_newsletter_via_llm(monkeypatch):
+    monkeypatch.setattr(source_classifier, "require_openai_api_key", lambda _feature: "test-key")
+    monkeypatch.setattr(
+        source_classifier,
+        "_classify_with_openai",
+        lambda _key, _url, _context: {
+            "should_crawl": True,
+            "reason": "Individual Substack newsletter with authored essays and posts.",
+        },
+    )
+    html = """
+    <html><head><title>Goran's Newsletter</title></head><body><main>
+      <h1>Goran's Newsletter</h1>
+      <p>Essays, notes, and posts by Goran about software, institutions, and culture.</p>
+      <article><h2>Recent essay</h2><p>A long personal post.</p></article>
+    </main></body></html>
+    """
+
+    result = classify_source_homepage("https://goranshbharal.substack.com/", html)
+
+    assert result.status == "queued"
+    assert "Substack newsletter" in result.reason
+
+
+def test_source_classifier_payload_uses_strict_structured_output(monkeypatch):
+    captured_payload = {}
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"output_text": '{"should_crawl": true, "reason": "Personal essays."}'}
+
+    class FakeClient:
+        def __init__(self, timeout):
+            self.timeout = timeout
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def post(self, _url, *, headers, json):
+            captured_payload.update(json)
+            return FakeResponse()
+
+    monkeypatch.setattr(source_classifier.httpx, "Client", FakeClient)
+
+    result = source_classifier._classify_with_openai("test-key", "https://example.com/", "Essays and notes.")
+
+    assert result.should_crawl is True
+    assert captured_payload["text"]["format"]["strict"] is True
+    assert captured_payload["text"]["format"]["name"] == "source_classification"
+    assert captured_payload["max_output_tokens"] == 2000
+    assert captured_payload["text"]["format"]["schema"]["properties"]["reason"]["maxLength"] == 240
+
+
+def test_source_classifier_parser_requires_direct_structured_json():
+    with pytest.raises(ValueError):
+        source_classifier._parse_classifier_json('Here is JSON: {"should_crawl": true, "reason": "Blog."}')
