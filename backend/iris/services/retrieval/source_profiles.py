@@ -41,7 +41,6 @@ class ProfileInput:
     fingerprint: str
     scraped_facts: dict
     documents: list[dict]
-    evidence_document_ids: list[int]
 
 
 def generate_source_profile(source: Source, *, force: bool = False) -> SourceProfileAnalysis:
@@ -61,7 +60,6 @@ def generate_source_profile(source: Source, *, force: bool = False) -> SourcePro
             display_name=payload.get("display_name"),
             payload=payload,
             scraped_facts=profile_input.scraped_facts,
-            evidence_document_ids=profile_input.evidence_document_ids,
             unavailable_sections=payload.get("unavailable_sections", list(UNAVAILABLE_SECTIONS)),
             model=None,
             input_fingerprint=profile_input.fingerprint,
@@ -77,7 +75,6 @@ def generate_source_profile(source: Source, *, force: bool = False) -> SourcePro
             display_name=payload.get("display_name"),
             payload=payload,
             scraped_facts=profile_input.scraped_facts,
-            evidence_document_ids=profile_input.evidence_document_ids,
             unavailable_sections=payload.get("unavailable_sections", []),
             model=SOURCE_PROFILE_MODEL,
             input_fingerprint=profile_input.fingerprint,
@@ -91,7 +88,6 @@ def generate_source_profile(source: Source, *, force: bool = False) -> SourcePro
             display_name=payload.get("display_name"),
             payload=payload,
             scraped_facts=profile_input.scraped_facts,
-            evidence_document_ids=profile_input.evidence_document_ids,
             unavailable_sections=payload.get("unavailable_sections", list(UNAVAILABLE_SECTIONS)),
             model=SOURCE_PROFILE_MODEL,
             input_fingerprint=profile_input.fingerprint,
@@ -131,7 +127,6 @@ def build_profile_input(source: Source, documents: list[Document]) -> ProfileInp
         fingerprint=hashlib.sha256(raw.encode("utf-8")).hexdigest(),
         scraped_facts=facts,
         documents=doc_payloads,
-        evidence_document_ids=[doc.id for doc in selected],
     )
 
 
@@ -253,7 +248,7 @@ def analyze_profile_with_openai(api_key: str, profile_input: ProfileInput) -> di
             "Do not invent identity, credentials, contact info, or claims not supported by the provided documents. "
             "If the person/name is unclear, set display_name to 'Identity unclear'. "
             "Use unavailable_sections for missing bio/themes/writing_style/strong_takes/public_contact/public_links. "
-            "Every strong take must include evidence_document_ids from the input. Return JSON matching the schema."
+            "Strong takes should be concise claims supported by the input documents. Return JSON matching the schema."
         ),
         "input": json.dumps(
             {
@@ -303,9 +298,8 @@ def profile_response_format() -> dict[str, object]:
                         "additionalProperties": False,
                         "properties": {
                             "take": {"type": "string"},
-                            "evidence_document_ids": {"type": "array", "items": {"type": "integer"}},
                         },
-                        "required": ["take", "evidence_document_ids"],
+                        "required": ["take"],
                     },
                 },
                 "public_links": {"type": "array", "items": link_schema()},

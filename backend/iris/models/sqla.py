@@ -84,7 +84,6 @@ class SourceProfileAnalysis(Base):
     display_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     payload: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     scraped_facts: Mapped[dict | None] = mapped_column(JSON, nullable=True)
-    evidence_document_ids: Mapped[list[int] | None] = mapped_column(JSON, nullable=True)
     unavailable_sections: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
 
     source: Mapped[Source] = relationship(back_populates="profile_analysis")

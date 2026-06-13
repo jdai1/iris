@@ -45,7 +45,6 @@ def upsert_analysis(
     display_name: str | None,
     payload: dict | None,
     scraped_facts: dict | None,
-    evidence_document_ids: list[int],
     unavailable_sections: list[str],
     model: str | None,
     input_fingerprint: str | None,
@@ -57,7 +56,6 @@ def upsert_analysis(
     analysis.display_name = display_name
     analysis.payload = payload
     analysis.scraped_facts = scraped_facts
-    analysis.evidence_document_ids = evidence_document_ids
     analysis.unavailable_sections = unavailable_sections
     analysis.model = model
     analysis.input_fingerprint = input_fingerprint

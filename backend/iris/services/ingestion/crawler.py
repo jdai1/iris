@@ -23,6 +23,7 @@ from iris.models import CrawlJob, Document, Source
 from iris.schemas.enums import CrawlJobStatus, CrawlStatus, DocumentType, LinkType, SourceStatus
 from iris.schemas.ingestion import ExtractedPage, FetchResult
 from iris.services.ingestion.source_classifier import classify_source_homepage
+from iris.services.retrieval.source_profiles import generate_source_profile
 from iris.services.common.url_utils import content_hash, is_probably_static, is_valid_http_url, normalize_url, same_domain
 
 
@@ -193,6 +194,11 @@ class Crawler:
             if self.async_client:
                 await self.async_client.aclose()
                 self.async_client = None
+        if job.status == CrawlJobStatus.SUCCEEDED.value and source.status == SourceStatus.INDEXED.value:
+            try:
+                generate_source_profile(source)
+            except Exception as exc:
+                logger.warning("Source profile generation failed for %s: %s", source.canonical_domain, exc)
         return job
 
     def _fetch(self, url: str) -> FetchResult:

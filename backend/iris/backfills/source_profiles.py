@@ -43,7 +43,7 @@ def backfill_source_profiles(*, limit: int | None = None, force: bool = False) -
             failed += 1
         log(
             f"{idx}/{len(sources)} source={source.canonical_domain} status={analysis.status} "
-            f"display_name={analysis.display_name or 'none'} evidence={len(analysis.evidence_document_ids or [])}"
+            f"display_name={analysis.display_name or 'none'}"
         )
         if analysis.error:
             log(f"  error={analysis.error[:300]}")

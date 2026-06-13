@@ -239,7 +239,6 @@ class SourceProfileAnalysisSchema(BaseModel):
     input_fingerprint: str | None
     payload: dict | None
     scraped_facts: dict | None
-    evidence_document_ids: list[int]
     unavailable_sections: list[str]
     error: str | None
 

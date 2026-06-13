@@ -46,7 +46,6 @@ def dump_source_profile_analysis(analysis: SourceProfileAnalysis) -> SourceProfi
         input_fingerprint=analysis.input_fingerprint,
         payload=analysis.payload,
         scraped_facts=analysis.scraped_facts,
-        evidence_document_ids=analysis.evidence_document_ids or [],
         unavailable_sections=analysis.unavailable_sections or [],
         error=analysis.error,
     )

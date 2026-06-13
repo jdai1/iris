@@ -561,7 +561,7 @@ def cmd_generate_source_profile(args: argparse.Namespace) -> None:
         analysis = generate_source_profile(source, force=args.force)
         print(
             f"profile source={source.canonical_domain} status={analysis.status} "
-            f"display_name={analysis.display_name or 'none'} evidence={len(analysis.evidence_document_ids or [])}"
+            f"display_name={analysis.display_name or 'none'}"
         )
         if analysis.error:
             print(f"error={analysis.error}")
