@@ -4,14 +4,13 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-from dataclasses import dataclass
 
 from iris.dao import db
 from iris.dao.categories import assign_category, get_or_create_category
 from iris.dao import documents as documents_dao
 from iris.dao import maintenance as maintenance_dao
 from iris.dao import reporting as reporting_dao
-from iris.schemas.ingestion import DocumentAnalysis
+from iris.schemas.backfills import BackfillDocumentInput, BackfillDocumentOutput, MetadataEmbeddingBackfillResult
 from iris.services.ingestion.document_classifier import analyze_document_async
 from iris.services.ingestion.embedding import document_embedding_text, dumps_embedding, embed_text_async
 
@@ -21,55 +20,13 @@ def log(message: str) -> None:
     print(message, flush=True)
 
 
-@dataclass(frozen=True)
-class MetadataEmbeddingBackfillResult:
-    """Summary counters for a metadata/embedding backfill run."""
-
-    checked: int
-    changed: int
-    embedded: int
-    failed: int
-    dry_run: bool
-    suspicious_only: bool
-
-
-@dataclass(frozen=True)
-class BackfillDocumentInput:
-    """Detached document fields needed by one concurrent worker."""
-
-    index: int
-    total: int
-    document_id: int
-    url: str
-    title: str | None
-    document_type: str
-    summary: str | None
-    topics: list[str]
-    category_slug: str | None
-    extracted_text: str | None
-    author: str | None
-    has_published_date: bool
-    link_count: int
-
-
-@dataclass(frozen=True)
-class BackfillDocumentOutput:
-    """Result of one document metadata/embedding worker."""
-
-    item: BackfillDocumentInput
-    analysis: DocumentAnalysis | None
-    embedding: str | None
-    changed: bool
-    failed: bool
-    error: str | None
-
-
 def backfill_metadata_and_embeddings(
     *,
     source_domain: str | None = None,
     limit: int | None = 50,
     suspicious_only: bool = True,
     dry_run: bool = False,
+    embed: bool = True,
     openai_embeddings: bool | None = True,
     max_attempts: int = 2,
     active_documents: int = 4,
@@ -100,12 +57,13 @@ def backfill_metadata_and_embeddings(
     ]
     log(
         f"backfill selected={len(items)} active_documents={max(1, active_documents)} "
-        f"dry_run={dry_run} embed={not dry_run} suspicious_only={suspicious_only}"
+        f"dry_run={dry_run} embed={embed and not dry_run} suspicious_only={suspicious_only}"
     )
     outputs = asyncio.run(
         _run_document_workers(
             items,
             dry_run=dry_run,
+            embed=embed,
             openai_embeddings=openai_embeddings,
             max_attempts=max_attempts,
             active_documents=active_documents,
@@ -137,8 +95,9 @@ def backfill_metadata_and_embeddings(
             documents_dao.update_document_analysis(document, analysis)
         if analysis.category_slug:
             assign_category(document, get_or_create_category(analysis.category_slug), assigned_by="llm")
-        documents_dao.update_document_embedding(document, output.embedding)
-        embedded += 1
+        if output.embedding is not None:
+            documents_dao.update_document_embedding(document, output.embedding)
+            embedded += 1
         if processed % 10 == 0:
             db.flush()
             log(f"progress checked={processed}/{len(documents)} changed={changed} embedded={embedded} failed={failed}")
@@ -157,6 +116,7 @@ async def _run_document_workers(
     items: list[BackfillDocumentInput],
     *,
     dry_run: bool,
+    embed: bool,
     openai_embeddings: bool | None,
     max_attempts: int,
     active_documents: int,
@@ -169,6 +129,7 @@ async def _run_document_workers(
                 item,
                 semaphore=semaphore,
                 dry_run=dry_run,
+                embed=embed,
                 openai_embeddings=openai_embeddings,
                 max_attempts=max_attempts,
             )
@@ -190,6 +151,7 @@ async def _process_document(
     *,
     semaphore: asyncio.Semaphore,
     dry_run: bool,
+    embed: bool,
     openai_embeddings: bool | None,
     max_attempts: int,
 ) -> BackfillDocumentOutput:
@@ -229,7 +191,7 @@ async def _process_document(
             or item.category_slug != analysis.category_slug
         )
         embedding = None
-        if not dry_run:
+        if embed and not dry_run:
             text = document_embedding_text(
                 title=analysis.title,
                 summary=analysis.summary,
@@ -258,6 +220,7 @@ def main() -> int:
     parser.add_argument("--limit", type=int, default=50)
     parser.add_argument("--all", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--skip-embeddings", action="store_true")
     parser.add_argument("--local-embeddings", action="store_true")
     parser.add_argument("--max-attempts", type=int, default=2)
     parser.add_argument("--active-documents", type=int, default=4)
@@ -269,6 +232,7 @@ def main() -> int:
             limit=args.limit,
             suspicious_only=not args.all,
             dry_run=args.dry_run,
+            embed=not args.skip_embeddings,
             openai_embeddings=False if args.local_embeddings else True,
             max_attempts=args.max_attempts,
             active_documents=args.active_documents,

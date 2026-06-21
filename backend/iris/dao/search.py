@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from sqlalchemy import select
+from sqlalchemy import inspect, select, text
 
 from iris.dao import db
 from iris.dao.user_state import get_or_create_local_user
@@ -63,3 +63,38 @@ def get_outgoing_links(document: Document) -> list[Link]:
 def get_document(document_id: int) -> Document | None:
     """Fetch a document by id."""
     return db.current_session().get(Document, document_id)
+
+
+def vector_search_documents(query_vector: list[float], *, limit: int) -> list[tuple[Document, float]]:
+    """Return nearest documents using pgvector when the optional mirror column exists."""
+    session = db.current_session()
+    if session.bind is None or session.bind.dialect.name != "postgresql":
+        return []
+    columns = {column["name"] for column in inspect(session.connection()).get_columns("documents")}
+    if "embedding_vector" not in columns:
+        return []
+    vector_literal = "[" + ",".join(f"{value:.8f}" for value in query_vector) + "]"
+    rows = session.execute(
+        text(
+            "select id, 1 - (embedding_vector <=> cast(:query_vector as vector)) as similarity "
+            "from documents "
+            "where document_type = :document_type "
+            "and crawl_status = :crawl_status "
+            "and embedding_vector is not null "
+            "order by embedding_vector <=> cast(:query_vector as vector) "
+            "limit :limit"
+        ),
+        {
+            "query_vector": vector_literal,
+            "document_type": DocumentType.ESSAY.value,
+            "crawl_status": CrawlStatus.FETCHED.value,
+            "limit": max(1, min(limit, 500)),
+        },
+    ).all()
+
+    document_ids = [int(row.id) for row in rows]
+    if not document_ids:
+        return []
+    documents = session.execute(select(Document).where(Document.id.in_(document_ids))).scalars().all()
+    by_id = {document.id: document for document in documents}
+    return [(by_id[int(row.id)], float(row.similarity)) for row in rows if int(row.id) in by_id]

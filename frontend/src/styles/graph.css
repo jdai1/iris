@@ -87,12 +87,25 @@
 .graph-loading {
   position: absolute;
   left: 50%;
-  top: 50%;
-  z-index: 2;
-  border: 1px solid #e5e5e5;
-  background: rgba(255, 255, 255, 0.94);
-  padding: 10px 12px;
+  top: calc(50% - 28px);
+  z-index: 5;
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  padding: 9px 12px;
+  border: 1px solid rgba(17, 17, 17, 0.08);
+  background: rgba(255, 255, 255, 0.88);
+  color: #333333;
+  font-size: 12px;
+  font-weight: 560;
+  box-shadow: 0 16px 42px rgba(0, 0, 0, 0.08);
+  backdrop-filter: blur(14px);
   transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
+.graph-loading svg {
+  animation: iris-spin 0.9s linear infinite;
 }
 
 .graph-edge {
@@ -304,4 +317,3 @@
 .graph-matches small {
   color: #666666;
 }
-

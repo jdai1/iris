@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import xml.etree.ElementTree as ET
-from dataclasses import dataclass
 from urllib.parse import urljoin, urlparse
 from urllib.parse import urlunparse
 
@@ -21,25 +20,13 @@ from iris.services.ingestion.embedding import document_embedding_text, dumps_emb
 from iris.services.ingestion.extract import extract_page_async
 from iris.models import CrawlJob, Document, Source
 from iris.schemas.enums import CrawlJobStatus, CrawlStatus, DocumentType, LinkType, SourceStatus
-from iris.schemas.ingestion import ExtractedPage, FetchResult
+from iris.schemas.ingestion import ExtractedPage, FetchResult, PagePipelineResult
 from iris.services.ingestion.source_classifier import classify_source_homepage
 from iris.services.retrieval.source_profiles import generate_source_profile
 from iris.services.common.url_utils import content_hash, is_probably_static, is_valid_http_url, normalize_url, same_domain
 
 
 logger = logging.getLogger("iris.crawler")
-
-
-@dataclass(frozen=True)
-class PagePipelineResult:
-    """Detached result from the async fetch/extract/embed pipeline."""
-
-    requested_url: str
-    fetched: FetchResult | None
-    extracted: ExtractedPage | None
-    content_hash: str | None
-    embedding: str | None
-    error: str | None = None
 
 
 class Crawler:

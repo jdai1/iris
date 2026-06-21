@@ -2,25 +2,8 @@ from __future__ import annotations
 
 import math
 import warnings
-from dataclasses import dataclass
 
-
-@dataclass(frozen=True)
-class ProjectedEmbedding:
-    """A document embedding projected into viewer space."""
-
-    x: float
-    y: float
-    z: float
-    cluster_id: int | None
-
-
-@dataclass(frozen=True)
-class EmbeddingProjection:
-    """Projection output plus the method used to generate it."""
-
-    points: list[ProjectedEmbedding]
-    method: str
+from iris.schemas.retrieval import EmbeddingProjection, ProjectedEmbedding
 
 
 def project_embeddings(vectors: list[list[float]], *, radius: float = 42.0) -> EmbeddingProjection:

@@ -21,8 +21,10 @@ class User(Base):
     updated_at: Mapped[datetime] = mapped_column(default=utcnow, onupdate=utcnow)
 
     slug: Mapped[str] = mapped_column(String(120), unique=True, index=True)
+    firebase_uid: Mapped[str | None] = mapped_column(String(128), unique=True, nullable=True, index=True)
     email: Mapped[str | None] = mapped_column(String(255), nullable=True)
     display_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    photo_url: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     document_mappings: Mapped[list["UserDocumentMapping"]] = relationship(
         back_populates="user", cascade="all, delete-orphan"

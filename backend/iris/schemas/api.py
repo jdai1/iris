@@ -3,9 +3,9 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Generic, TypeVar
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
-from iris.schemas.enums import AgentMessageRole, AgentStepKind
+from iris.schemas.enums import AgentMessageRole, AgentStepKind, SourceProfileAnalysisStatus, SourceProfileLinkKind
 
 T = TypeVar("T")
 
@@ -28,6 +28,15 @@ class HealthSchema(BaseModel):
 class HealthCountsSchema(BaseModel):
     sources: int
     documents: int
+
+
+class UserSchema(BaseModel):
+    id: int
+    slug: str
+    firebase_uid: str | None = None
+    email: str | None = None
+    display_name: str | None = None
+    photo_url: str | None = None
 
 
 class SourceCreateSchema(BaseModel):
@@ -89,16 +98,9 @@ class SearchResultSchema(BaseModel):
     reason: str
 
 
-class SearchToolTraceSchema(BaseModel):
-    tool: str
-    query: str
-    hits: int
-    top_titles: list[str]
-
-
 class AgentChatRequestSchema(BaseModel):
     message: str
-    limit: int = 12
+    limit: int | None = None
     conversation_id: int | None = None
 
 
@@ -115,7 +117,6 @@ class SearchSchema(BaseModel):
     query: str
     answer: str
     results: list[SearchResultSchema]
-    tools: list[SearchToolTraceSchema] = []
 
 
 class AgentChatSchema(BaseModel):
@@ -228,18 +229,58 @@ class AdminSourceSchema(BaseModel):
     latest_job: AdminLatestJobSchema | None
 
 
+class SourceProfileLinkSchema(BaseModel):
+    label: str
+    url: str
+    kind: SourceProfileLinkKind
+
+
+class SourceProfileTakeSchema(BaseModel):
+    take: str
+
+
+class SourceProfileTopicSchema(BaseModel):
+    topic: str
+    count: int
+
+
+class SourceProfilePageSchema(BaseModel):
+    id: int
+    title: str | None
+    url: str
+    summary: str | None
+
+
+class SourceProfileFactsSchema(BaseModel):
+    domain: str | None = None
+    homepage: str | None = None
+    rss_url: str | None = None
+    sitemap_url: str | None = None
+    author_candidates: list[str] = Field(default_factory=list)
+    top_topics: list[SourceProfileTopicSchema] = Field(default_factory=list)
+    profile_pages: list[SourceProfilePageSchema] = Field(default_factory=list)
+    public_links: list[SourceProfileLinkSchema] = Field(default_factory=list)
+    public_contact: list[SourceProfileLinkSchema] = Field(default_factory=list)
+    document_counts: dict[str, int] = Field(default_factory=dict)
+
+
 class SourceProfileAnalysisSchema(BaseModel):
     id: int
     source_id: int
     source_domain: str
-    status: str
+    status: SourceProfileAnalysisStatus
     display_name: str | None
     generated_at: datetime | None
     model: str | None
     input_fingerprint: str | None
-    payload: dict | None
-    scraped_facts: dict | None
-    unavailable_sections: list[str]
+    bio: str | None
+    themes: list[str] | None
+    writing_style: list[str] | None
+    strong_takes: list[SourceProfileTakeSchema] | None
+    public_links: list[SourceProfileLinkSchema] | None
+    public_contact: list[SourceProfileLinkSchema] | None
+    caveats: list[str] | None
+    scraped_facts: SourceProfileFactsSchema | None
     error: str | None
 
 

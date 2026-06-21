@@ -9,6 +9,7 @@ from sqlalchemy import select
 
 from iris.dao import db
 from iris.models import Document, DocumentCategory, DocumentTag, Tag, TagScope, User, UserDocumentMapping
+from iris.services.auth import FirebaseIdentity
 
 
 LOCAL_USER_SLUG = "local"
@@ -40,6 +41,40 @@ def get_or_create_local_user() -> User:
     session.add(user)
     session.flush()
     return user
+
+
+def get_or_create_firebase_user(identity: FirebaseIdentity) -> User:
+    """Return the Iris user mapped to a Firebase user, creating it when needed."""
+    session = db.current_session()
+    user = session.execute(
+        select(User).where(User.firebase_uid == identity.uid)
+    ).scalar_one_or_none()
+    if user is None:
+        slug = _unique_user_slug(_base_slug(identity))
+        user = User(slug=slug, firebase_uid=identity.uid)
+        session.add(user)
+    user.email = identity.email
+    user.display_name = identity.display_name or identity.email
+    user.photo_url = identity.photo_url
+    session.flush()
+    return user
+
+
+def _base_slug(identity: FirebaseIdentity) -> str:
+    label = identity.email.split("@", 1)[0] if identity.email else identity.uid
+    slug = re.sub(r"[^a-z0-9]+", "-", label.strip().lower()).strip("-")
+    return slug or f"firebase-{identity.uid[:12].lower()}"
+
+
+def _unique_user_slug(base_slug: str) -> str:
+    session = db.current_session()
+    candidate = base_slug[:120]
+    suffix = 1
+    while session.execute(select(User.id).where(User.slug == candidate)).scalar_one_or_none():
+        suffix += 1
+        tail = f"-{suffix}"
+        candidate = f"{base_slug[:120 - len(tail)]}{tail}"
+    return candidate
 
 
 def get_or_create_user_document_mapping(user: User, document: Document) -> UserDocumentMapping:

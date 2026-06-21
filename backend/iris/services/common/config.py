@@ -5,6 +5,8 @@ from pathlib import Path
 
 from dotenv import dotenv_values, load_dotenv
 
+from iris.schemas.enums import LLMProvider
+
 
 BACKEND_DIR = Path(__file__).resolve().parents[3]
 ROOT_DIR = BACKEND_DIR.parent
@@ -32,16 +34,30 @@ DOCUMENT_CLASSIFIER_TIMEOUT_SECONDS = float(os.getenv("IRIS_DOCUMENT_CLASSIFIER_
 EMBEDDING_MODEL = os.getenv("IRIS_EMBEDDING_MODEL", "text-embedding-3-small")
 USE_OPENAI_EMBEDDINGS = os.getenv("IRIS_USE_OPENAI_EMBEDDINGS", "0").lower() in {"1", "true", "yes"}
 EMBEDDING_TIMEOUT_SECONDS = float(os.getenv("IRIS_EMBEDDING_TIMEOUT_SECONDS", "20"))
+USE_PGVECTOR_SEARCH = os.getenv("IRIS_USE_PGVECTOR_SEARCH", "0").lower() in {"1", "true", "yes"}
 SEARCH_RERANK_MODEL = os.getenv("IRIS_SEARCH_RERANK_MODEL", "gpt-5-nano-2025-08-07")
 USE_LLM_RERANKER = os.getenv("IRIS_USE_LLM_RERANKER", "0").lower() in {"1", "true", "yes"}
 SEARCH_RERANK_TIMEOUT_SECONDS = float(os.getenv("IRIS_SEARCH_RERANK_TIMEOUT_SECONDS", "25"))
 AGENT_SEARCH_MODEL = os.getenv("IRIS_AGENT_SEARCH_MODEL", "gpt-5.4-mini")
 AGENT_SEARCH_MAX_TURNS = int(os.getenv("IRIS_AGENT_SEARCH_MAX_TURNS", "8"))
 SOURCE_PROFILE_MODEL = os.getenv("IRIS_SOURCE_PROFILE_MODEL", "gpt-5.4-mini")
+SOURCE_PROFILE_PROVIDER = LLMProvider(os.getenv("IRIS_SOURCE_PROFILE_PROVIDER", LLMProvider.OPENAI.value).lower())
 SOURCE_PROFILE_TIMEOUT_SECONDS = float(os.getenv("IRIS_SOURCE_PROFILE_TIMEOUT_SECONDS", "45"))
+DEEPSEEK_API_BASE = os.getenv("DEEPSEEK_API_BASE", "https://api.deepseek.com")
+FIREBASE_PROJECT_ID = os.getenv("FIREBASE_PROJECT_ID") or os.getenv("GOOGLE_CLOUD_PROJECT")
+FIREBASE_SERVICE_ACCOUNT_FILE = os.getenv("FIREBASE_SERVICE_ACCOUNT_FILE") or os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+FIREBASE_SERVICE_ACCOUNT_JSON = os.getenv("FIREBASE_SERVICE_ACCOUNT_JSON")
+
+
+def firebase_auth_enabled() -> bool:
+    return bool(FIREBASE_PROJECT_ID or FIREBASE_SERVICE_ACCOUNT_FILE or FIREBASE_SERVICE_ACCOUNT_JSON)
 
 
 class MissingOpenAIKeyError(RuntimeError):
+    pass
+
+
+class MissingDeepSeekKeyError(RuntimeError):
     pass
 
 
@@ -78,3 +94,14 @@ def require_openai_api_key(feature: str) -> str:
         f"OpenAI API key is required for {feature}. Set OPENAI_API_KEY, "
         "PERSONAL_OPENAI_API_KEY, OPENAI_PERSONAL_API_KEY, or IRIS_OPENAI_ENV_FILE."
     )
+
+
+def deepseek_api_key() -> str | None:
+    return os.getenv("DEEPSEEK_API_KEY")
+
+
+def require_deepseek_api_key(feature: str) -> str:
+    key = deepseek_api_key()
+    if key:
+        return key
+    raise MissingDeepSeekKeyError(f"DeepSeek API key is required for {feature}. Set DEEPSEEK_API_KEY.")

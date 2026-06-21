@@ -9,6 +9,15 @@ export interface Source {
   last_checked_at: string | null;
 }
 
+export interface User {
+  id: number;
+  slug: string;
+  firebase_uid: string | null;
+  email: string | null;
+  display_name: string | null;
+  photo_url: string | null;
+}
+
 export interface Document {
   id: number;
   source_id: number;
@@ -29,18 +38,6 @@ export interface SearchResult {
   reason: string;
 }
 
-export interface SearchResponse {
-  query: string;
-  answer: string;
-  results: SearchResult[];
-  tools: Array<{
-    tool: string;
-    query: string;
-    hits: number;
-    top_titles: string[];
-  }>;
-}
-
 export interface AgentStep {
   kind: string;
   title: string;
@@ -59,6 +56,52 @@ export interface AgentChatResponse {
   results: SearchResult[];
   steps: AgentStep[];
 }
+
+export type AgentStreamEvent =
+  | {
+      event: 'conversation';
+      data: {
+        conversation_id: number;
+        user_message_id: number;
+        message: string;
+      };
+    }
+  | {
+      event: 'step';
+      data: {
+        step: AgentStep;
+      };
+    }
+  | {
+      event: 'tool_result';
+      data: {
+        step: AgentStep;
+        hits: Array<{
+          document_id: number;
+          title: string;
+          source_domain: string;
+          score: number;
+          reason: string;
+        }>;
+      };
+    }
+  | {
+      event: 'final';
+      data: AgentChatResponse;
+    }
+  | {
+      event: 'done';
+      data: {
+        conversation_id: number;
+      };
+    }
+  | {
+      event: 'error';
+      data: {
+        message: string;
+        type: string;
+      };
+    };
 
 export interface AgentConversationSummary {
   id: number;
@@ -134,34 +177,33 @@ export interface GraphResponse {
   edges: GraphEdge[];
 }
 
+export type SourceProfileAnalysisStatus = 'pending' | 'succeeded' | 'failed';
+export type SourceProfileLinkKind = 'homepage' | 'profile' | 'visible_link' | 'email';
+export type SourceProfileLink = { label: string; url: string; kind: SourceProfileLinkKind };
+
 export interface SourceProfileAnalysis {
   id: number;
   source_id: number;
   source_domain: string;
-  status: string;
+  status: SourceProfileAnalysisStatus;
   display_name: string | null;
   generated_at: string | null;
   model: string | null;
   input_fingerprint: string | null;
-  payload: {
-    display_name?: string;
-    bio?: string;
-    themes?: string[];
-    writing_style?: string[];
-    strong_takes?: Array<{ take: string }>;
-    public_links?: Array<{ label?: string; url?: string; kind?: string }>;
-    public_contact?: Array<{ label?: string; url?: string; kind?: string }>;
-    caveats?: string[];
-    unavailable_sections?: string[];
-  } | null;
+  bio: string | null;
+  themes: string[] | null;
+  writing_style: string[] | null;
+  strong_takes: Array<{ take: string }> | null;
+  public_links: SourceProfileLink[] | null;
+  public_contact: SourceProfileLink[] | null;
+  caveats: string[] | null;
   scraped_facts: {
     top_topics?: Array<{ topic: string; count: number }>;
-    public_links?: Array<{ label?: string; url?: string; kind?: string }>;
-    public_contact?: Array<{ label?: string; url?: string; kind?: string }>;
+    public_links?: SourceProfileLink[];
+    public_contact?: SourceProfileLink[];
     profile_pages?: Array<{ id: number; title: string | null; url: string; summary: string | null }>;
     document_counts?: Record<string, number>;
   } | null;
-  unavailable_sections: string[];
   error: string | null;
 }
 

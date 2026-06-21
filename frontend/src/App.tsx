@@ -1,4 +1,6 @@
 import { FormEvent, ReactNode, useEffect, useRef, useState } from 'react';
+import type { User as FirebaseUser } from 'firebase/auth';
+import { onAuthStateChanged, signInWithPopup, signOut } from 'firebase/auth';
 import {
   Box,
   Button,
@@ -8,17 +10,22 @@ import {
   Stack,
   Text,
 } from '@chakra-ui/react';
-import { ArrowUpRight, BookOpen, GitFork, LayoutDashboard, Orbit, Search, Sparkles, Users } from 'lucide-react';
+import { ArrowUpRight, BookOpen, ChevronDown, GitFork, History, LayoutDashboard, LogOut, Orbit, PenLine, Search, Settings, UserCircle, Users } from 'lucide-react';
 import {
+  getAgentConversation,
+  getAgentConversations,
   getAdminCrawlJobs,
   getAdminDocuments,
   getAdminIndexRuns,
   getAdminOverview,
   getAdminSources,
   getDigest,
+  getMe,
   getSourceProfileAnalysis,
-  searchCorpus,
+  setAuthTokenProvider,
+  streamChatSearch,
 } from './api';
+import { auth, firebaseEnabled, googleProvider } from './firebase';
 import { EmbeddingExplorer } from './EmbeddingExplorer';
 import { GraphExplorer } from './GraphExplorer';
 import { CorpusSearchForm } from './CorpusSearchForm';
@@ -26,10 +33,18 @@ import { DocumentCard } from './components/DocumentCard';
 import { Pagination, ProfilePagination, type PageState } from './components/Pagination';
 import { ProfileAnalysisCard } from './components/ProfileAnalysisCard';
 import { StatusPill } from './components/StatusPill';
-import type { AdminCrawlJob, AdminIndexRun, AdminOverview, AdminSource, DigestRecommendation, Page, SearchResponse, Document, SourceProfileAnalysis } from './types';
+import type { AdminCrawlJob, AdminIndexRun, AdminOverview, AdminSource, AgentConversation, AgentConversationSummary, AgentStep, DigestRecommendation, Page, SearchResult, Document, SourceProfileAnalysis, User as IrisUser } from './types';
 
 type View = 'search' | 'digest' | 'directory' | 'explore' | 'graph' | 'admin';
 type ProfileTarget = { sourceId: number; domain: string } | null;
+type ChatMessage = {
+  id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  results?: SearchResult[];
+  steps?: AgentStep[];
+  pending?: boolean;
+};
 
 const emptyPage = <T,>(): Page<T> => ({
   items: [],
@@ -40,75 +55,476 @@ const emptyPage = <T,>(): Page<T> => ({
   has_previous: false,
 });
 
+const VIEW_STORAGE_KEY = 'iris.activeView';
+const views: View[] = ['search', 'digest', 'directory', 'explore', 'graph', 'admin'];
+
+function initialView(): View {
+  if (typeof window === 'undefined') return 'search';
+  const saved = window.localStorage.getItem(VIEW_STORAGE_KEY);
+  return views.includes(saved as View) ? (saved as View) : 'search';
+}
+
+function defaultArtifactWidth() {
+  if (typeof window === 'undefined') return 560;
+  const available = window.innerWidth - 208 - 24 - 32;
+  return Math.min(900, Math.max(360, Math.round(available / 2)));
+}
+
 function SearchView({ onOpenProfile }: { onOpenProfile: (sourceId: number, domain: string) => void }) {
   const [query, setQuery] = useState('');
-  const [response, setResponse] = useState<SearchResponse | null>(null);
+  const [conversationId, setConversationId] = useState<number | undefined>();
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [history, setHistory] = useState<AgentConversationSummary[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [startedNewChat, setStartedNewChat] = useState(false);
+  const [selectedResultMessageId, setSelectedResultMessageId] = useState<string | null>(null);
+  const [searchesOpen, setSearchesOpen] = useState(false);
+  const [artifactWidth, setArtifactWidth] = useState(defaultArtifactWidth);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const transcriptRef = useRef<HTMLDivElement | null>(null);
+  const didLoadInitialConversation = useRef(false);
+
+  useEffect(() => {
+    loadInitialHistory();
+  }, []);
+
+  useEffect(() => {
+    transcriptRef.current?.scrollTo({ top: transcriptRef.current.scrollHeight, behavior: 'smooth' });
+  }, [messages]);
+
+  const resultTurns = messages
+    .map((message, index) => {
+      if (message.role !== 'assistant' || !message.results?.length) return null;
+      const userMessage = [...messages.slice(0, index)].reverse().find((item) => item.role === 'user');
+      return {
+        id: message.id,
+        query: userMessage?.content ?? 'Previous search',
+        results: message.results,
+      };
+    })
+    .filter((item): item is { id: string; query: string; results: SearchResult[] } => Boolean(item));
+  const selectedResultTurn =
+    resultTurns.find((turn) => turn.id === selectedResultMessageId) ?? resultTurns[resultTurns.length - 1] ?? null;
+
+  useEffect(() => {
+    const latest = resultTurns[resultTurns.length - 1];
+    if (!latest) {
+      setSelectedResultMessageId(null);
+      return;
+    }
+    if (!selectedResultMessageId || !resultTurns.some((turn) => turn.id === selectedResultMessageId)) {
+      setSelectedResultMessageId(latest.id);
+    }
+  }, [resultTurns.length, selectedResultMessageId]);
+
+  async function refreshHistory() {
+    setHistoryLoading(true);
+    try {
+      const items = await getAgentConversations();
+      setHistory(items);
+    } catch {
+      // History is secondary; leave the chat surface usable if it fails.
+    } finally {
+      setHistoryLoading(false);
+    }
+  }
+
+  async function loadInitialHistory() {
+    if (didLoadInitialConversation.current) return;
+    didLoadInitialConversation.current = true;
+    setHistoryLoading(true);
+    try {
+      const items = await getAgentConversations();
+      setHistory(items);
+      if (items[0]) {
+        const conversation = await getAgentConversation(items[0].id);
+        setConversationId(conversation.id);
+        setMessages(messagesFromConversation(conversation));
+      }
+    } catch {
+      // History is secondary; start on a clean chat if it fails.
+    } finally {
+      setHistoryLoading(false);
+    }
+  }
+
+  async function loadConversation(id: number) {
+    if (loading) return;
+    setError(null);
+    try {
+      const conversation = await getAgentConversation(id);
+      setConversationId(conversation.id);
+      setStartedNewChat(false);
+      setMessages(messagesFromConversation(conversation));
+      setHistoryOpen(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not load chat');
+    }
+  }
+
+  function startNewChat() {
+    if (loading) return;
+    setStartedNewChat(true);
+    setConversationId(undefined);
+    setMessages([]);
+    setSelectedResultMessageId(null);
+    setError(null);
+    setHistoryOpen(false);
+  }
 
   async function submit(event: FormEvent) {
     event.preventDefault();
-    if (!query.trim()) return;
+    const message = query.trim();
+    if (!message || loading) return;
+    const turnId = Date.now().toString();
+    const assistantId = `assistant-${turnId}`;
+    setMessages((current) => [
+      ...current,
+      { id: `user-${turnId}`, role: 'user', content: message },
+      { id: assistantId, role: 'assistant', content: '', steps: [], pending: true },
+    ]);
+    setQuery('');
     setLoading(true);
     setError(null);
     try {
-      setResponse(await searchCorpus(query.trim()));
+      await streamChatSearch(message, conversationId, (event) => {
+        if (event.event === 'conversation') {
+          setConversationId(event.data.conversation_id);
+          return;
+        }
+        if (event.event === 'step') {
+          appendAssistantStep(assistantId, event.data.step);
+          return;
+        }
+        if (event.event === 'tool_result') {
+          replaceOrAppendAssistantStep(assistantId, event.data.step);
+          return;
+        }
+        if (event.event === 'final') {
+          setMessages((current) =>
+            current.map((item) =>
+              item.id === assistantId
+                ? {
+                    ...item,
+                    content: event.data.answer,
+                    results: event.data.results,
+                    pending: false,
+                  }
+                : item,
+            ),
+          );
+          refreshHistory();
+        }
+        if (event.event === 'error') {
+          throw new Error(event.data.message);
+        }
+      });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Search failed');
+      setMessages((current) =>
+        current.map((item) =>
+          item.id === assistantId ? { ...item, content: 'Search failed before the agent could finish.', pending: false } : item,
+        ),
+      );
     } finally {
       setLoading(false);
     }
   }
 
+  function appendAssistantStep(assistantId: string, step: AgentStep) {
+    if (isSyntheticStep(step)) return;
+    setMessages((current) =>
+      current.map((item) =>
+        item.id === assistantId ? { ...item, steps: [...(item.steps ?? []), step] } : item,
+      ),
+    );
+  }
+
+  function replaceOrAppendAssistantStep(assistantId: string, step: AgentStep) {
+    if (isSyntheticStep(step)) return;
+    setMessages((current) =>
+      current.map((item) => {
+        if (item.id !== assistantId) return item;
+        const steps = item.steps ?? [];
+        const last = steps[steps.length - 1];
+        if (last?.kind === 'tool' && last.tool === step.tool && last.hits === null) {
+          return { ...item, steps: [...steps.slice(0, -1), step] };
+        }
+        return { ...item, steps: [...steps, step] };
+      }),
+    );
+  }
+
+  function startResizeArtifact(event: React.PointerEvent<HTMLButtonElement>) {
+    event.preventDefault();
+    const startX = event.clientX;
+    const startWidth = artifactWidth;
+    function handleMove(moveEvent: PointerEvent) {
+      const nextWidth = startWidth - (moveEvent.clientX - startX);
+      setArtifactWidth(Math.min(900, Math.max(320, nextWidth)));
+    }
+    function handleUp() {
+      window.removeEventListener('pointermove', handleMove);
+      window.removeEventListener('pointerup', handleUp);
+    }
+    window.addEventListener('pointermove', handleMove);
+    window.addEventListener('pointerup', handleUp);
+  }
+
   return (
     <Box as="section" className="search-view">
-      <CorpusSearchForm
-        className="search-box"
-        value={query}
-        onChange={setQuery}
-        onSubmit={submit}
-        placeholder={loading ? 'Searching...' : 'Ask anything across the corpus...'}
-        disabled={loading || !query.trim()}
-        autoFocus
-      />
+      <div className="chat-topbar">
+        <div className="chat-topbar-spacer" />
+        <div className="chat-history">
+          <div className="chat-history-actions">
+            <button
+              className="chat-history-toggle"
+              type="button"
+              onClick={() => {
+                setHistoryOpen((value) => !value);
+                if (!historyOpen) refreshHistory();
+              }}
+              aria-expanded={historyOpen}
+            >
+              <History size={14} />
+              Chats
+              <ChevronDown size={14} className={historyOpen ? 'history-chevron history-chevron-open' : 'history-chevron'} />
+            </button>
+            {(messages.length > 0 || conversationId) && (
+              <button className="chat-new-button" type="button" onClick={startNewChat} aria-label="New chat" title="New chat">
+                <PenLine size={16} />
+              </button>
+            )}
+          </div>
+          {historyOpen && (
+            <div className="chat-history-panel">
+              {historyLoading && <div className="chat-history-empty">Loading chats...</div>}
+              {!historyLoading && history.length === 0 && <div className="chat-history-empty">No saved chats yet.</div>}
+              {!historyLoading &&
+                history.slice(0, 8).map((item) => (
+                  <button
+                    key={item.id}
+                    className={item.id === conversationId ? 'chat-history-item chat-history-item-active' : 'chat-history-item'}
+                    type="button"
+                    onClick={() => loadConversation(item.id)}
+                  >
+                    <span>{item.title || 'Untitled search'}</span>
+                    <small>{item.message_count} messages · {formatDate(item.updated_at)}</small>
+                  </button>
+                ))}
+            </div>
+          )}
+        </div>
+      </div>
 
       {error && <div className="error">{error}</div>}
 
-      {response && (
-        <Box className="results-layout">
-          <Box as="aside" className="answer-panel">
-            <div className="panel-heading">
-              <Sparkles size={18} />
-              Synthesis
-            </div>
-            <p>{response.answer}</p>
-            {response.tools.length > 0 && (
-              <div className="tool-trace">
-                {response.tools.map((tool) => (
-                  <div key={tool.tool}>
-                    <strong>{tool.tool}</strong>
-                    <span>{tool.hits} hits</span>
-                    <small>{tool.top_titles.slice(0, 2).join(' · ') || tool.query}</small>
-                  </div>
-                ))}
+      {messages.length === 0 && (
+        <div className="chat-composer chat-composer-start">
+          <CorpusSearchForm
+            className="search-box chat-input"
+            value={query}
+            onChange={setQuery}
+            onSubmit={submit}
+            placeholder={loading ? 'Iris is working...' : 'Message Iris...'}
+            disabled={loading || !query.trim()}
+            autoFocus
+          />
+        </div>
+      )}
+
+      <Box
+        className={selectedResultTurn ? 'chat-shell chat-shell-with-artifact' : 'chat-shell'}
+        style={selectedResultTurn ? { '--artifact-width': `${artifactWidth}px` } as React.CSSProperties : undefined}
+      >
+        <Box className="chat-layout">
+          <div className="chat-transcript" ref={transcriptRef}>
+            {messages.map((message) => (
+              <div key={message.id} className={`chat-message chat-message-${message.role}`}>
+                <div className="chat-role">{message.role === 'user' ? 'You' : 'Iris'}</div>
+                {message.pending && !message.content ? (
+                  <ThinkingState />
+                ) : (
+                  <MessageContent content={message.content} />
+                )}
+                {message.steps && message.steps.length > 0 && (
+                  <details className="chat-activity">
+                    <summary>Activity</summary>
+                    <div className="chat-activity-body">
+                      {message.steps.map((step, index) => (
+                        <div key={`${step.kind}-${step.title}-${index}`} className="activity-row">
+                          <span className="activity-dot" />
+                          <div>
+                            <strong>{step.title}</strong>
+                            <small>
+                              {typeof step.hits === 'number' ? `${step.hits} hits` : step.detail}
+                              {typeof step.hits === 'number' && step.detail ? ` · ${step.detail}` : ''}
+                            </small>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </details>
+                )}
               </div>
-            )}
-          </Box>
-          <div className="results-list">
-            {response.results.map((result) => (
-              <DocumentCard
-                key={result.document.id}
-                document={result.document}
-                reason={result.reason}
-                score={result.score}
-                onOpenProfile={onOpenProfile}
-              />
             ))}
           </div>
         </Box>
-      )}
+
+        {selectedResultTurn && (
+          <aside className="chat-artifact" aria-label="Search results">
+            <button className="chat-artifact-resize" type="button" aria-label="Resize links panel" onPointerDown={startResizeArtifact} />
+            <div className="chat-artifact-header">
+              <span>Links</span>
+              <small>{selectedResultTurn.results.length} result{selectedResultTurn.results.length === 1 ? '' : 's'}</small>
+            </div>
+            {resultTurns.length > 1 && (
+              <div className="chat-artifact-tabs">
+                <button
+                  className="chat-artifact-tabs-toggle"
+                  type="button"
+                  onClick={() => setSearchesOpen((value) => !value)}
+                  aria-expanded={searchesOpen}
+                >
+                  <span>Searches · {resultTurns.length}</span>
+                  <ChevronDown size={14} className={searchesOpen ? 'history-chevron history-chevron-open' : 'history-chevron'} />
+                </button>
+                <button
+                  className="chat-artifact-tab chat-artifact-tab-active"
+                  type="button"
+                  onClick={() => setSearchesOpen((value) => !value)}
+                >
+                  <span>{resultTurns.findIndex((turn) => turn.id === selectedResultTurn.id) + 1}</span>
+                  <small>{selectedResultTurn.query}</small>
+                </button>
+                {searchesOpen && (
+                  <div className="chat-artifact-tabs-menu">
+                    {resultTurns.map((turn, index) => (
+                      <button
+                        key={turn.id}
+                        className={turn.id === selectedResultTurn.id ? 'chat-artifact-tab chat-artifact-tab-active' : 'chat-artifact-tab'}
+                        type="button"
+                        onClick={() => {
+                          setSelectedResultMessageId(turn.id);
+                          setSearchesOpen(false);
+                        }}
+                      >
+                        <span>{index + 1}</span>
+                        <small>{turn.query}</small>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+            <div className="chat-artifact-list">
+              {selectedResultTurn.results.map((result) => (
+                <DocumentCard
+                  key={result.document.id}
+                  document={result.document}
+                  reason={result.reason}
+                  score={result.score}
+                  onOpenProfile={onOpenProfile}
+                  compact
+                />
+              ))}
+            </div>
+          </aside>
+        )}
+        {messages.length > 0 && (
+          <div className="chat-composer chat-composer-bottom">
+            <CorpusSearchForm
+              className="search-box chat-input"
+              value={query}
+              onChange={setQuery}
+              onSubmit={submit}
+              placeholder={loading ? 'Iris is working...' : conversationId ? 'Follow up...' : 'Message Iris...'}
+              disabled={loading || !query.trim()}
+              autoFocus
+            />
+          </div>
+        )}
+      </Box>
     </Box>
   );
+}
+
+function ThinkingState() {
+  return (
+    <p className="chat-pending" aria-live="polite">
+      <span>Thinking</span>
+      <span className="thinking-word" aria-hidden="true">
+        <span>quietly</span>
+        <span>through it</span>
+        <span>with context</span>
+        <span>ahead</span>
+      </span>
+    </p>
+  );
+}
+
+function messagesFromConversation(conversation: AgentConversation): ChatMessage[] {
+  return conversation.messages
+    .filter((message) => !isLegacySyntheticAssistantMessage(message))
+    .map((message) => ({
+      id: `saved-${message.id}`,
+      role: message.role === 'user' ? 'user' : 'assistant',
+      content: message.content,
+      steps: message.steps?.filter((step) => !isSyntheticStep(step)),
+      results: message.results,
+      pending: false,
+    }));
+}
+
+function MessageContent({ content }: { content: string }) {
+  const blocks = content.split(/\n{2,}/).map((block) => block.trim()).filter(Boolean);
+  if (blocks.length === 0) return null;
+  return (
+    <div className="message-content">
+      {blocks.map((block, blockIndex) => {
+        const lines = block.split('\n').map((line) => line.trim()).filter(Boolean);
+        const bulletLines = lines.filter((line) => line.startsWith('- '));
+        if (bulletLines.length === lines.length) {
+          return (
+            <ul key={`${block}-${blockIndex}`}>
+              {bulletLines.map((line, lineIndex) => (
+                <li key={`${line}-${lineIndex}`}>{renderInlineMarkdown(line.slice(2))}</li>
+              ))}
+            </ul>
+          );
+        }
+        return <p key={`${block}-${blockIndex}`}>{renderInlineMarkdown(block)}</p>;
+      })}
+    </div>
+  );
+}
+
+function renderInlineMarkdown(text: string): ReactNode[] {
+  return text.split(/(\*\*[^*]+\*\*)/g).map((part, index) => {
+    if (part.startsWith('**') && part.endsWith('**')) {
+      return <strong key={`${part}-${index}`}>{part.slice(2, -2)}</strong>;
+    }
+    return part;
+  });
+}
+
+function isSyntheticStep(step: AgentStep): boolean {
+  if (step.kind !== 'tool') return true;
+  if (step.title === 'Waiting for a corpus query') return true;
+  if (step.title === 'Run OpenAI agent loop') return true;
+  if (step.title === 'Agent final answer') return true;
+  if (step.title === 'Persist selected citations') return true;
+  return false;
+}
+
+function isLegacySyntheticAssistantMessage(message: AgentConversation['messages'][number]): boolean {
+  if (message.role !== 'assistant') return false;
+  if (message.results.length > 0) return false;
+  const steps = message.steps ?? [];
+  const onlySyntheticSteps = steps.length > 0 && steps.every(isSyntheticStep);
+  return onlySyntheticSteps && message.content.includes('Tell me what you want to find in the corpus');
 }
 
 function DigestView({ onOpenProfile }: { onOpenProfile: (sourceId: number, domain: string) => void }) {
@@ -919,9 +1335,14 @@ function formatDate(value: string | null | undefined) {
   return new Date(value).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 }
 
-export default function App() {
-  const [view, setView] = useState<View>('search');
+function IrisApp({ currentUser, onSignOut }: { currentUser: IrisUser | null; onSignOut: () => void }) {
+  const [view, setView] = useState<View>(initialView);
   const [profileTarget, setProfileTarget] = useState<ProfileTarget>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+
+  useEffect(() => {
+    window.localStorage.setItem(VIEW_STORAGE_KEY, view);
+  }, [view]);
 
   function openProfile(sourceId: number, domain: string) {
     setProfileTarget({ sourceId, domain });
@@ -968,8 +1389,45 @@ export default function App() {
             </Button>
           ))}
         </Stack>
+        {currentUser && (
+          <div className="sidebar-settings">
+            {settingsOpen && (
+              <div className="settings-menu">
+                <div className="settings-menu-row settings-menu-muted">
+                  <UserCircle size={16} />
+                  <span>{currentUser.email || currentUser.display_name || currentUser.slug}</span>
+                </div>
+                <div className="settings-menu-row settings-menu-muted">
+                  <Settings size={16} />
+                  <span>Personal account</span>
+                </div>
+                <div className="settings-menu-divider" />
+                <button className="settings-menu-row" type="button">
+                  <Settings size={16} />
+                  <span>Settings</span>
+                </button>
+                <button className="settings-menu-row" type="button" onClick={onSignOut}>
+                  <LogOut size={16} />
+                  <span>Log out</span>
+                </button>
+              </div>
+            )}
+            <button
+              className="sidebar-settings-toggle"
+              type="button"
+              onClick={() => setSettingsOpen((value) => !value)}
+              aria-expanded={settingsOpen}
+            >
+              <Settings size={17} />
+              <span>Settings</span>
+            </button>
+            <div className="sidebar-settings-meta">
+              {currentUser.display_name || currentUser.email || currentUser.slug}
+            </div>
+          </div>
+        )}
       </Box>
-      <Box className={view === 'explore' || view === 'graph' ? 'workspace workspace-fullscreen' : 'workspace'}>
+      <Box className={view === 'explore' || view === 'graph' ? 'workspace workspace-fullscreen' : view === 'search' ? 'workspace workspace-search' : 'workspace'}>
         {view === 'search' && <SearchView onOpenProfile={openProfile} />}
         {view === 'digest' && <DigestView onOpenProfile={openProfile} />}
         {view === 'directory' && <DirectoryView target={profileTarget} onOpenProfile={openProfile} />}
@@ -978,5 +1436,95 @@ export default function App() {
         {view === 'admin' && <AdminView />}
       </Box>
     </Box>
+  );
+}
+
+export default function App() {
+  const [firebaseUser, setFirebaseUser] = useState<FirebaseUser | null>(null);
+  const [currentUser, setCurrentUser] = useState<IrisUser | null>(null);
+  const [authReady, setAuthReady] = useState(!firebaseEnabled);
+  const [authError, setAuthError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!auth) {
+      setAuthTokenProvider(null);
+      return;
+    }
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      setFirebaseUser(user);
+      setCurrentUser(null);
+      setAuthError(null);
+      setAuthReady(true);
+      setAuthTokenProvider(user ? () => user.getIdToken() : null);
+    });
+    return () => {
+      unsubscribe();
+      setAuthTokenProvider(null);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!firebaseEnabled || !firebaseUser) return;
+    let cancelled = false;
+    getMe()
+      .then((user) => {
+        if (!cancelled) setCurrentUser(user);
+      })
+      .catch((err) => {
+        if (!cancelled) setAuthError(err instanceof Error ? err.message : 'Could not load user');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [firebaseUser]);
+
+  async function signIn() {
+    if (!auth) return;
+    setAuthError(null);
+    try {
+      await signInWithPopup(auth, googleProvider);
+    } catch (err) {
+      setAuthError(err instanceof Error ? err.message : 'Sign-in failed');
+    }
+  }
+
+  async function handleSignOut() {
+    if (!auth) return;
+    await signOut(auth);
+  }
+
+  if (!firebaseEnabled) return <IrisApp currentUser={null} onSignOut={() => {}} />;
+  if (!authReady) return <div className="auth-shell">Loading...</div>;
+  if (!firebaseUser) return <AuthScreen error={authError} onSignIn={signIn} />;
+  if (!currentUser && !authError) return <div className="auth-shell">Loading account...</div>;
+  if (authError) return <AuthScreen error={authError} onSignIn={signIn} />;
+  return <IrisApp currentUser={currentUser} onSignOut={handleSignOut} />;
+}
+
+function AuthScreen({ error, onSignIn }: { error: string | null; onSignIn: () => void }) {
+  return (
+    <main className="auth-shell">
+      <section className="auth-landing">
+        <div className="auth-content">
+          <div className="auth-brand">
+            <span>iris</span>
+          </div>
+          <div className="auth-copy">
+            <h1>
+              <span>The good web is still out there.</span>
+              <span>Iris helps you find it.</span>
+            </h1>
+            <p>
+              Start with writers and essays you trust. Iris builds a searchable corpus around them,
+              follows their links, and helps you discover what is worth reading next.
+            </p>
+          </div>
+          {error && <div className="error">{error}</div>}
+          <button type="button" onClick={onSignIn}>
+            Continue <span aria-hidden="true">→</span>
+          </button>
+        </div>
+      </section>
+    </main>
   );
 }

@@ -64,3 +64,13 @@ def _comparison_time(value: datetime) -> datetime:
     if value.tzinfo is None:
         return value
     return value.astimezone(timezone.utc).replace(tzinfo=None)
+
+
+def main() -> int:
+    with db.session_scope():
+        print(f"backfilled={migrate_document_crawl_job_fk()}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

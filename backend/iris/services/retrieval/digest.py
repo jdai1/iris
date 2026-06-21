@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 from iris.dao import digest as digest_dao
+from iris.models import User
 from iris.services.ingestion.embedding import cosine, embed_text, loads_embedding
 from iris.schemas.retrieval import DigestRecommendation
 
 
-def _interest_vector() -> list[float]:
-    liked = digest_dao.get_liked_documents_for_interest()
+def _interest_vector(user: User | None = None) -> list[float]:
+    liked = digest_dao.get_liked_documents_for_interest(user=user)
     if not liked:
         topic_rows = digest_dao.get_all_document_topics()
         topics = " ".join(topic for row in topic_rows for topic in (row or []))
@@ -18,9 +19,9 @@ def _interest_vector() -> list[float]:
     return embed_text(text)
 
 
-def compute_digest(limit: int = 30) -> list[DigestRecommendation]:
-    excluded = digest_dao.get_dismissed_or_read_document_ids()
-    interest = _interest_vector()
+def compute_digest(limit: int = 30, *, user: User | None = None) -> list[DigestRecommendation]:
+    excluded = digest_dao.get_dismissed_or_read_document_ids(user=user)
+    interest = _interest_vector(user=user)
     documents = digest_dao.get_digest_candidate_documents()
     candidates: list[DigestRecommendation] = []
     for doc in documents:
@@ -41,5 +42,5 @@ def compute_digest(limit: int = 30) -> list[DigestRecommendation]:
     return candidates[:limit]
 
 
-def get_digest(limit: int = 20) -> list[DigestRecommendation]:
-    return compute_digest(limit=limit)
+def get_digest(limit: int = 20, *, user: User | None = None) -> list[DigestRecommendation]:
+    return compute_digest(limit=limit, user=user)

@@ -4,21 +4,35 @@ from sqlalchemy import desc, select
 
 from iris.dao import db
 from iris.dao.user_state import get_or_create_local_user
-from iris.models import AgentConversation, AgentMessage, AgentMessageRole, AgentSearchResult
-from iris.services.retrieval.search import AgentChatResult, agentic_chat
+from iris.models import AgentConversation, AgentMessage, AgentMessageRole, AgentSearchResult, User
+from iris.schemas.retrieval import AgentChatResult
+from iris.services.retrieval.search import agentic_chat
 
 
 def create_agent_chat(
     message: str,
     *,
-    limit: int = 12,
+    user: User | None = None,
+    limit: int | None = None,
     conversation_id: int | None = None,
 ) -> tuple[AgentConversation, AgentMessage, AgentMessage, AgentChatResult]:
     """Persist one user turn, one assistant turn, and the assistant's citations."""
-    session = db.current_session()
-    user = get_or_create_local_user()
-    conversation = _get_or_create_conversation(user.id, message, conversation_id)
+    conversation, user_message = start_agent_chat(message, user=user, conversation_id=conversation_id)
+    result = agentic_chat(message, limit=limit)
+    assistant_message = finish_agent_chat(conversation, result)
+    return conversation, user_message, assistant_message, result
 
+
+def start_agent_chat(
+    message: str,
+    *,
+    user: User | None = None,
+    conversation_id: int | None = None,
+) -> tuple[AgentConversation, AgentMessage]:
+    """Persist the user side of an agent chat turn."""
+    session = db.current_session()
+    user = user or get_or_create_local_user()
+    conversation = _get_or_create_conversation(user.id, message, conversation_id)
     user_message = AgentMessage(
         conversation_id=conversation.id,
         role=AgentMessageRole.USER,
@@ -26,18 +40,22 @@ def create_agent_chat(
     )
     session.add(user_message)
     session.flush()
+    return conversation, user_message
 
-    result = agentic_chat(message, limit=limit)
+
+def finish_agent_chat(conversation: AgentConversation, result: AgentChatResult) -> AgentMessage:
+    """Persist the assistant side of an agent chat turn and its citations."""
+    session = db.current_session()
     assistant_message = AgentMessage(
         conversation_id=conversation.id,
         role=AgentMessageRole.ASSISTANT,
         content=result.answer,
         steps=[
             {
-                "kind": step.kind.value,
+                "kind": _enum_value(step.kind),
                 "title": step.title,
                 "detail": step.detail,
-                "tool": step.tool,
+                "tool": _enum_value(step.tool),
                 "query": step.query,
                 "hits": step.hits,
             }
@@ -60,25 +78,26 @@ def create_agent_chat(
 
     conversation.updated_at = assistant_message.created_at
     session.flush()
-    return conversation, user_message, assistant_message, result
+    return assistant_message
 
 
-def list_agent_conversations(limit: int = 30) -> list[AgentConversation]:
+def list_agent_conversations(limit: int = 30, *, user: User | None = None) -> list[AgentConversation]:
     session = db.current_session()
-    user = get_or_create_local_user()
-    return list(
+    user = user or get_or_create_local_user()
+    conversations = list(
         session.execute(
             select(AgentConversation)
             .where(AgentConversation.user_id == user.id)
             .order_by(desc(AgentConversation.updated_at), desc(AgentConversation.id))
-            .limit(max(1, min(limit, 100)))
+            .limit(max(10, min(limit * 3, 100)))
         ).scalars()
     )
+    return [conversation for conversation in conversations if _is_useful_conversation(conversation)][: max(1, min(limit, 100))]
 
 
-def get_agent_conversation(conversation_id: int) -> AgentConversation | None:
+def get_agent_conversation(conversation_id: int, *, user: User | None = None) -> AgentConversation | None:
     session = db.current_session()
-    user = get_or_create_local_user()
+    user = user or get_or_create_local_user()
     return session.execute(
         select(AgentConversation).where(
             AgentConversation.id == conversation_id,
@@ -104,3 +123,20 @@ def _get_or_create_conversation(user_id: int, message: str, conversation_id: int
     session.add(conversation)
     session.flush()
     return conversation
+
+
+def _is_useful_conversation(conversation: AgentConversation) -> bool:
+    user_messages = [message for message in conversation.messages if message.role == AgentMessageRole.USER]
+    assistant_messages = [message for message in conversation.messages if message.role == AgentMessageRole.ASSISTANT]
+    if not user_messages:
+        return False
+    if len(user_messages) > 1:
+        return True
+    normalized = " ".join(user_messages[0].content.lower().strip().split())
+    if normalized in {"hi", "hello", "hey", "yo", "sup", "thanks", "thank you", "ok", "okay"}:
+        return False
+    return any(message.results for message in assistant_messages) or len(normalized.split()) >= 3
+
+
+def _enum_value(value):
+    return value.value if hasattr(value, "value") else value

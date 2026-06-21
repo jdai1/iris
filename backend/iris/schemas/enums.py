@@ -106,3 +106,30 @@ class AgentStepKind(StringEnum):
     TOOL = "tool"
     OBSERVE = "observe"
     ANSWER = "answer"
+
+
+class AgentToolName(StringEnum):
+    KEYWORD = "keyword"
+    SEMANTIC = "semantic"
+    TAGS = "tags"
+    CATEGORIES = "categories"
+    DOCUMENT_METADATA = "document_metadata"
+    SOURCE_METADATA = "source_metadata"
+
+
+class LLMProvider(StringEnum):
+    OPENAI = "openai"
+    DEEPSEEK = "deepseek"
+
+
+class SourceProfileAnalysisStatus(StringEnum):
+    PENDING = "pending"
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+
+
+class SourceProfileLinkKind(StringEnum):
+    HOMEPAGE = "homepage"
+    PROFILE = "profile"
+    VISIBLE_LINK = "visible_link"
+    EMAIL = "email"

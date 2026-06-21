@@ -6,29 +6,13 @@ import hashlib
 import json
 import re
 from collections import Counter
-from dataclasses import dataclass
-
-import httpx
 
 from iris.dao import source_profiles as profile_dao
 from iris.models import Document, Source, SourceProfileAnalysis
-from iris.schemas.enums import DocumentType
-from iris.services.common.config import SOURCE_PROFILE_MODEL, SOURCE_PROFILE_TIMEOUT_SECONDS, openai_api_key
-
-
-UNAVAILABLE_SECTIONS = ("bio", "themes", "writing_style", "strong_takes", "public_contact", "public_links")
-
-
-@dataclass(frozen=True)
-class ProfileInput:
-    """Compressed source material for profile analysis."""
-
-    source_id: int
-    domain: str
-    url: str
-    fingerprint: str
-    scraped_facts: dict
-    documents: list[dict]
+from iris.schemas.enums import DocumentType, SourceProfileAnalysisStatus, SourceProfileLinkKind
+from iris.schemas.source_profiles import ProfileInput
+from iris.services.common.config import SOURCE_PROFILE_MODEL, SOURCE_PROFILE_PROVIDER, SOURCE_PROFILE_TIMEOUT_SECONDS
+from iris.services.llm.client import generate_json
 
 
 def generate_source_profile(source: Source, *, force: bool = False) -> SourceProfileAnalysis:
@@ -36,48 +20,42 @@ def generate_source_profile(source: Source, *, force: bool = False) -> SourcePro
     documents = profile_dao.get_documents_for_profile(source.id)
     profile_input = build_profile_input(source, documents)
     existing = profile_dao.get_analysis(source.id)
-    if existing and not force and existing.input_fingerprint == profile_input.fingerprint and existing.status == "succeeded":
+    if existing and not force and existing.input_fingerprint == profile_input.fingerprint and existing.status == SourceProfileAnalysisStatus.SUCCEEDED:
         return existing
 
-    key = openai_api_key()
-    if not key:
-        payload = fallback_profile_payload(profile_input)
-        return profile_dao.upsert_analysis(
-            source,
-            status="missing_key",
-            display_name=payload.get("display_name"),
-            payload=payload,
-            scraped_facts=profile_input.scraped_facts,
-            unavailable_sections=payload.get("unavailable_sections", list(UNAVAILABLE_SECTIONS)),
-            model=None,
-            input_fingerprint=profile_input.fingerprint,
-            error="missing OpenAI API key",
-        )
-
     try:
-        payload = analyze_profile_with_openai(key, profile_input)
+        payload = analyze_profile(profile_input)
         payload = normalize_profile_payload(payload, profile_input)
         return profile_dao.upsert_analysis(
             source,
-            status="succeeded",
+            status=SourceProfileAnalysisStatus.SUCCEEDED,
             display_name=payload.get("display_name"),
-            payload=payload,
+            bio=payload.get("bio"),
+            themes=payload.get("themes"),
+            writing_style=payload.get("writing_style"),
+            strong_takes=payload.get("strong_takes"),
+            public_links=payload.get("public_links"),
+            public_contact=payload.get("public_contact"),
+            caveats=payload.get("caveats"),
             scraped_facts=profile_input.scraped_facts,
-            unavailable_sections=payload.get("unavailable_sections", []),
-            model=SOURCE_PROFILE_MODEL,
+            model=source_profile_model_label(),
             input_fingerprint=profile_input.fingerprint,
             error=None,
         )
     except Exception as exc:
-        payload = fallback_profile_payload(profile_input)
         return profile_dao.upsert_analysis(
             source,
-            status="failed",
-            display_name=payload.get("display_name"),
-            payload=payload,
+            status=SourceProfileAnalysisStatus.FAILED,
+            display_name=None,
+            bio=None,
+            themes=None,
+            writing_style=None,
+            strong_takes=None,
+            public_links=None,
+            public_contact=None,
+            caveats=None,
             scraped_facts=profile_input.scraped_facts,
-            unavailable_sections=payload.get("unavailable_sections", list(UNAVAILABLE_SECTIONS)),
-            model=SOURCE_PROFILE_MODEL,
+            model=source_profile_model_label(),
             input_fingerprint=profile_input.fingerprint,
             error=str(exc),
         )
@@ -86,16 +64,14 @@ def generate_source_profile(source: Source, *, force: bool = False) -> SourcePro
 def build_profile_input(source: Source, documents: list[Document]) -> ProfileInput:
     """Compress source documents into a bounded profile-analysis input bundle."""
     profile_docs = [doc for doc in documents if doc.document_type == DocumentType.PROFILE.value]
+    profile_context_docs = dedupe_documents([*profile_docs, *[doc for doc in documents if same_url(doc.url, source.url)]])
     essay_docs = [doc for doc in documents if doc.document_type == DocumentType.ESSAY.value]
     collection_docs = [doc for doc in documents if doc.document_type == DocumentType.COLLECTION.value]
-    selected = select_context_documents(profile_docs, essay_docs, collection_docs)
-    facts = scraped_facts(source, documents, profile_docs)
-    doc_payloads = [document_profile_payload(doc, include_excerpt=doc in selected) for doc in selected]
-    # Include metadata for every essay so the model sees the long-tail topic distribution without full text.
-    selected_ids = {doc.id for doc in selected}
-    for doc in essay_docs:
-        if doc.id in selected_ids:
-            continue
+    facts = scraped_facts(source, documents, profile_context_docs)
+    doc_payloads = [document_profile_payload(doc, include_excerpt=True, excerpt_chars=6500) for doc in profile_context_docs]
+    for doc in select_summary_documents(essay_docs, limit=50):
+        doc_payloads.append(document_profile_payload(doc, include_excerpt=True, excerpt_chars=5000))
+    for doc in collection_docs[:3]:
         doc_payloads.append(document_profile_payload(doc, include_excerpt=False))
     raw = json.dumps(
         {
@@ -118,23 +94,18 @@ def build_profile_input(source: Source, documents: list[Document]) -> ProfileInp
     )
 
 
-def select_context_documents(profile_docs: list[Document], essay_docs: list[Document], collection_docs: list[Document]) -> list[Document]:
-    """Pick profile pages plus a compact essay sample for full-text context."""
-    selected: list[Document] = []
-    selected.extend(profile_docs)
+def select_summary_documents(essay_docs: list[Document], *, limit: int) -> list[Document]:
+    """Pick a broad essay sample for summary plus capped text context."""
     recent = sorted(essay_docs, key=lambda doc: (doc.published_at is not None, doc.published_at, doc.id), reverse=True)
-    selected.extend(recent[:8])
+    selected = recent[: min(20, limit)]
     topic_seen: set[str] = set()
     for doc in essay_docs:
+        if len(selected) >= limit:
+            break
         topics = {topic.lower() for topic in (doc.topics or [])}
         if topics and not topics <= topic_seen:
             selected.append(doc)
             topic_seen |= topics
-        if len(selected) >= len(profile_docs) + 20:
-            break
-    longform = sorted(essay_docs, key=lambda doc: len(doc.extracted_text or ""), reverse=True)[:4]
-    selected.extend(longform)
-    selected.extend(collection_docs[:3])
     deduped: list[Document] = []
     seen: set[int] = set()
     for doc in selected:
@@ -142,8 +113,19 @@ def select_context_documents(profile_docs: list[Document], essay_docs: list[Docu
             continue
         seen.add(doc.id)
         deduped.append(doc)
-        if len(deduped) >= 40:
+        if len(deduped) >= limit:
             break
+    return deduped
+
+
+def dedupe_documents(documents: list[Document]) -> list[Document]:
+    deduped: list[Document] = []
+    seen: set[int] = set()
+    for doc in documents:
+        if doc.id in seen:
+            continue
+        seen.add(doc.id)
+        deduped.append(doc)
     return deduped
 
 
@@ -172,26 +154,36 @@ def scraped_facts(source: Source, documents: list[Document], profile_docs: list[
 
 def public_links(source: Source, profile_docs: list[Document]) -> dict[str, list[dict]]:
     """Extract public link and contact hints from indexed profile pages."""
-    links: list[dict] = [{"label": "homepage", "url": source.url, "kind": "homepage"}]
+    links: list[dict] = [{"label": "homepage", "url": source.url, "kind": SourceProfileLinkKind.HOMEPAGE.value}]
     contact: list[dict] = []
     seen = {source.url}
     for doc in profile_docs:
         url = doc.url
         if url not in seen:
-            links.append({"label": doc.title or url, "url": url, "kind": "profile"})
+            links.append({"label": doc.title or url, "url": url, "kind": SourceProfileLinkKind.PROFILE.value})
             seen.add(url)
+        for link in doc.outgoing_links:
+            candidate = link.target_url
+            if not candidate or candidate in seen:
+                continue
+            links.append({"label": link.anchor_text or candidate, "url": candidate, "kind": SourceProfileLinkKind.VISIBLE_LINK.value})
+            seen.add(candidate)
         for match in re.finditer(r"https?://[^\s)>\"]+", doc.extracted_text or ""):
             candidate = match.group(0).rstrip(".,;")
             if candidate in seen:
                 continue
-            links.append({"label": candidate, "url": candidate, "kind": "visible_link"})
+            links.append({"label": candidate, "url": candidate, "kind": SourceProfileLinkKind.VISIBLE_LINK.value})
             seen.add(candidate)
         for email in re.findall(r"[\w.+-]+@[\w.-]+\.[a-zA-Z]{2,}", doc.extracted_text or ""):
-            contact.append({"label": email, "url": f"mailto:{email}", "kind": "email", "source_document_id": doc.id})
+            contact.append({"label": email, "url": f"mailto:{email}", "kind": SourceProfileLinkKind.EMAIL.value, "source_document_id": doc.id})
     return {"links": links[:30], "contact": contact[:10]}
 
 
-def document_profile_payload(document: Document, *, include_excerpt: bool) -> dict:
+def same_url(left: str, right: str) -> bool:
+    return left.rstrip("/") == right.rstrip("/")
+
+
+def document_profile_payload(document: Document, *, include_excerpt: bool, excerpt_chars: int = 5000) -> dict:
     """Serialize a document for profile analysis."""
     payload = {
         "id": document.id,
@@ -205,7 +197,7 @@ def document_profile_payload(document: Document, *, include_excerpt: bool) -> di
         "topics": document.topics or [],
     }
     if include_excerpt:
-        payload["excerpt"] = compress_text(document.extracted_text or "", max_chars=6500)
+        payload["excerpt"] = compress_text(document.extracted_text or "", max_chars=excerpt_chars)
     return payload
 
 
@@ -219,46 +211,50 @@ def compress_text(text: str, *, max_chars: int) -> str:
     sentences = re.split(r"(?<=[.!?])\s+", clean)
     signal = [sentence for sentence in sentences if any(marker in sentence.lower() for marker in ("i think", "i believe", "should", "because", "the point", "lesson", "mistake", "argue"))]
     middle = " ".join(signal[:12])[: max_chars // 4]
-    return f"{head}\n\n[compressed high-signal middle]\n{middle}\n\n[ending]\n{tail}"
+    return f"{head}\n\n[compressed high-signal middle]\n{middle}\n\n[ending]\n{tail}"[:max_chars]
 
 
-def analyze_profile_with_openai(api_key: str, profile_input: ProfileInput) -> dict:
-    """Call the model for structured source profile analysis."""
-    payload = {
-        "model": SOURCE_PROFILE_MODEL,
-        "instructions": (
-            "Create a profile analysis for an indexed personal writing source. "
-            "Be playful but precise. Capture the writer's online presence, recurring interests, style, and strong takes. "
-            "Do not invent identity, credentials, contact info, or claims not supported by the provided documents. "
-            "If the person/name is unclear, set display_name to 'Identity unclear'. "
-            "Use unavailable_sections for missing bio/themes/writing_style/strong_takes/public_contact/public_links. "
-            "Strong takes should be concise claims supported by the input documents. Return JSON matching the schema."
-        ),
-        "input": json.dumps(
-            {
-                "source": {"id": profile_input.source_id, "domain": profile_input.domain, "url": profile_input.url},
-                "scraped_facts": profile_input.scraped_facts,
-                "documents": profile_input.documents,
-            },
-            ensure_ascii=False,
-        ),
-        "text": {"format": profile_response_format(), "verbosity": "low"},
-        "reasoning": {"effort": "minimal"},
-        "max_output_tokens": 3500,
-        "store": False,
+def analyze_profile(profile_input: ProfileInput) -> dict:
+    """Call the configured provider for source profile analysis."""
+    return generate_json(
+        provider=SOURCE_PROFILE_PROVIDER,
+        model=SOURCE_PROFILE_MODEL,
+        instructions=profile_prompt_instructions(),
+        input_payload=profile_input_payload(profile_input),
+        schema=profile_response_format(),
+        timeout_seconds=SOURCE_PROFILE_TIMEOUT_SECONDS,
+        max_tokens=3500,
+    )
+
+
+def source_profile_model_label() -> str:
+    return f"{SOURCE_PROFILE_PROVIDER.value}:{SOURCE_PROFILE_MODEL}"
+
+
+def profile_prompt_instructions() -> str:
+    return (
+        "Create a profile analysis for an indexed personal writing source. "
+        "Be playful but precise. Capture the writer's online presence, recurring interests, style, and strong takes. "
+        "The bio should foreground concrete identity anchors supported by the input, including employers, schools, roles, locations, and major projects. "
+        "Do not bury repeated school or employer evidence in themes or caveats when it is useful for identifying the person. "
+        "Do not invent identity, credentials, contact info, or claims not supported by the provided documents. "
+        "If the person/name is unclear, set display_name to null. "
+        "Set missing fields to null instead of inventing information. "
+        "Strong takes should be concise claims supported by the input documents. Return JSON matching the schema."
+    )
+
+
+def profile_input_payload(profile_input: ProfileInput) -> dict:
+    profile_documents = [doc for doc in profile_input.documents if doc.get("document_type") == DocumentType.PROFILE.value]
+    essay_documents = [doc for doc in profile_input.documents if doc.get("document_type") == DocumentType.ESSAY.value]
+    collection_documents = [doc for doc in profile_input.documents if doc.get("document_type") == DocumentType.COLLECTION.value]
+    return {
+        "source": {"id": profile_input.source_id, "domain": profile_input.domain, "url": profile_input.url},
+        "scraped_facts": profile_input.scraped_facts,
+        "profile_documents": profile_documents,
+        "essay_documents": essay_documents,
+        "collection_documents": collection_documents,
     }
-    with httpx.Client(timeout=SOURCE_PROFILE_TIMEOUT_SECONDS) as client:
-        response = client.post(
-            "https://api.openai.com/v1/responses",
-            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-            json=payload,
-        )
-        response.raise_for_status()
-        data = response.json()
-    text = data.get("output_text") or response_output_text(data)
-    if not text:
-        raise ValueError("empty source profile response")
-    return json.loads(text)
 
 
 def profile_response_format() -> dict[str, object]:
@@ -271,27 +267,31 @@ def profile_response_format() -> dict[str, object]:
             "type": "object",
             "additionalProperties": False,
             "properties": {
-                "display_name": {"type": "string"},
-                "bio": {"type": "string"},
-                "themes": {"type": "array", "items": {"type": "string"}},
-                "writing_style": {"type": "array", "items": {"type": "string"}},
+                "display_name": nullable_schema({"type": "string"}),
+                "bio": nullable_schema({"type": "string"}),
+                "themes": nullable_schema({"type": "array", "items": {"type": "string"}}),
+                "writing_style": nullable_schema({"type": "array", "items": {"type": "string"}}),
                 "strong_takes": {
-                    "type": "array",
-                    "items": {
-                        "type": "object",
-                        "additionalProperties": False,
-                        "properties": {
-                            "take": {"type": "string"},
+                    "anyOf": [
+                        {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "additionalProperties": False,
+                                "properties": {
+                                    "take": {"type": "string"},
+                                },
+                                "required": ["take"],
+                            },
                         },
-                        "required": ["take"],
-                    },
+                        {"type": "null"},
+                    ],
                 },
-                "public_links": {"type": "array", "items": link_schema()},
-                "public_contact": {"type": "array", "items": link_schema()},
-                "caveats": {"type": "array", "items": {"type": "string"}},
-                "unavailable_sections": {"type": "array", "items": {"type": "string"}},
+                "public_links": nullable_schema({"type": "array", "items": link_schema()}),
+                "public_contact": nullable_schema({"type": "array", "items": link_schema()}),
+                "caveats": nullable_schema({"type": "array", "items": {"type": "string"}}),
             },
-            "required": ["display_name", "bio", "themes", "writing_style", "strong_takes", "public_links", "public_contact", "caveats", "unavailable_sections"],
+            "required": ["display_name", "bio", "themes", "writing_style", "strong_takes", "public_links", "public_contact", "caveats"],
         },
     }
 
@@ -304,7 +304,7 @@ def link_schema() -> dict[str, object]:
         "properties": {
             "label": {"type": "string"},
             "url": {"type": "string"},
-            "kind": {"type": "string"},
+            "kind": enum_schema(SourceProfileLinkKind),
         },
         "required": ["label", "url", "kind"],
     }
@@ -313,50 +313,16 @@ def link_schema() -> dict[str, object]:
 def normalize_profile_payload(payload: dict, profile_input: ProfileInput) -> dict:
     """Normalize model output and merge deterministic public facts."""
     normalized = dict(payload)
-    if not normalized.get("display_name"):
-        normalized["display_name"] = "Identity unclear"
-    normalized["public_links"] = profile_input.scraped_facts.get("public_links", normalized.get("public_links", []))
-    normalized["public_contact"] = profile_input.scraped_facts.get("public_contact", normalized.get("public_contact", []))
-    unavailable = set(normalized.get("unavailable_sections") or [])
-    for section in UNAVAILABLE_SECTIONS:
-        value = normalized.get(section)
-        if value in (None, "", []) and section not in unavailable:
-            unavailable.add(section)
-    normalized["unavailable_sections"] = sorted(unavailable)
+    if profile_input.scraped_facts.get("public_links"):
+        normalized["public_links"] = profile_input.scraped_facts["public_links"]
+    if profile_input.scraped_facts.get("public_contact"):
+        normalized["public_contact"] = profile_input.scraped_facts["public_contact"]
     return normalized
 
 
-def fallback_profile_payload(profile_input: ProfileInput) -> dict:
-    """Return a deterministic sparse profile payload when generation is unavailable."""
-    facts = profile_input.scraped_facts
-    themes = [item["topic"] for item in facts.get("top_topics", [])[:12]]
-    unavailable = {"bio", "writing_style", "strong_takes"}
-    if not facts.get("public_links"):
-        unavailable.add("public_links")
-    if not facts.get("public_contact"):
-        unavailable.add("public_contact")
-    if not themes:
-        unavailable.add("themes")
-    return {
-        "display_name": "Identity unclear",
-        "bio": "",
-        "themes": themes,
-        "writing_style": [],
-        "strong_takes": [],
-        "public_links": facts.get("public_links", []),
-        "public_contact": facts.get("public_contact", []),
-        "caveats": ["Generated analysis unavailable; showing scraped facts and topic aggregates only."],
-        "unavailable_sections": sorted(unavailable),
-    }
+def enum_schema(enum_class: type[SourceProfileLinkKind]) -> dict[str, object]:
+    return {"type": "string", "enum": sorted(enum_class.values())}
 
 
-def response_output_text(data: dict) -> str:
-    """Extract Responses API output text."""
-    chunks: list[str] = []
-    for item in data.get("output") or []:
-        if not isinstance(item, dict):
-            continue
-        for content in item.get("content") or []:
-            if isinstance(content, dict) and content.get("type") == "output_text" and isinstance(content.get("text"), str):
-                chunks.append(content["text"])
-    return "\n".join(chunks)
+def nullable_schema(schema: dict[str, object]) -> dict[str, object]:
+    return {"anyOf": [schema, {"type": "null"}]}

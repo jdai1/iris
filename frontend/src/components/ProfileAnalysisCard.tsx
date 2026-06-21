@@ -1,12 +1,10 @@
-import type { SourceProfileAnalysis } from '../types';
+import type { SourceProfileAnalysis, SourceProfileLink } from '../types';
 
 export function ProfileAnalysisCard({ analysis }: { analysis: SourceProfileAnalysis | null }) {
-  const payload = analysis?.payload;
   const facts = analysis?.scraped_facts;
-  const themes = payload?.themes?.length ? payload.themes : facts?.top_topics?.slice(0, 12).map((item) => item.topic) ?? [];
-  const links = payload?.public_links?.length ? payload.public_links : facts?.public_links ?? [];
-  const contact = payload?.public_contact?.length ? payload.public_contact : facts?.public_contact ?? [];
-  const unavailable = new Set(analysis?.unavailable_sections ?? payload?.unavailable_sections ?? []);
+  const themes = analysis?.themes?.length ? analysis.themes : facts?.top_topics?.slice(0, 12).map((item) => item.topic) ?? [];
+  const links = analysis?.public_links?.length ? analysis.public_links : facts?.public_links ?? [];
+  const contact = analysis?.public_contact?.length ? analysis.public_contact : facts?.public_contact ?? [];
 
   if (!analysis) {
     return (
@@ -18,23 +16,23 @@ export function ProfileAnalysisCard({ analysis }: { analysis: SourceProfileAnaly
 
   return (
     <div className="profile-analysis-card">
-      {payload?.bio ? <p className="profile-bio">{payload.bio}</p> : <ProfileUnavailable labels={['bio']} />}
-      <ProfileChipSection title="Writes about" items={themes} unavailable={unavailable.has('themes')} />
-      <ProfileChipSection title="Style" items={payload?.writing_style ?? []} unavailable={unavailable.has('writing_style')} />
-      <ProfileTakeSection takes={payload?.strong_takes ?? []} unavailable={unavailable.has('strong_takes')} />
-      <ProfileLinkSection title="Links" links={links} unavailable={unavailable.has('public_links')} />
-      <ProfileLinkSection title="Contact" links={contact} unavailable={unavailable.has('public_contact')} />
-      {payload?.caveats && payload.caveats.length > 0 && (
+      {analysis.bio ? <p className="profile-bio">{analysis.bio}</p> : <ProfileUnavailable labels={['bio']} />}
+      <ProfileChipSection title="Writes about" items={themes} />
+      <ProfileChipSection title="Style" items={analysis.writing_style ?? []} />
+      <ProfileTakeSection takes={analysis.strong_takes ?? []} />
+      <ProfileLinkSection title="Links" links={links} />
+      <ProfileLinkSection title="Contact" links={contact} />
+      {analysis.caveats && analysis.caveats.length > 0 && (
         <div className="profile-caveats">
-          {payload.caveats.map((caveat) => <span key={caveat}>{caveat}</span>)}
+          {analysis.caveats.map((caveat) => <span key={caveat}>{caveat}</span>)}
         </div>
       )}
     </div>
   );
 }
 
-function ProfileChipSection({ title, items, unavailable }: { title: string; items: string[]; unavailable: boolean }) {
-  if (!items.length) return unavailable ? <ProfileUnavailable labels={[title.toLowerCase()]} /> : null;
+function ProfileChipSection({ title, items }: { title: string; items: string[] }) {
+  if (!items.length) return <ProfileUnavailable labels={[title.toLowerCase()]} />;
   return (
     <div className="profile-analysis-section">
       <h4>{title}</h4>
@@ -45,8 +43,8 @@ function ProfileChipSection({ title, items, unavailable }: { title: string; item
   );
 }
 
-function ProfileTakeSection({ takes, unavailable }: { takes: Array<{ take: string }>; unavailable: boolean }) {
-  if (!takes.length) return unavailable ? <ProfileUnavailable labels={['strong takes']} /> : null;
+function ProfileTakeSection({ takes }: { takes: Array<{ take: string }> }) {
+  if (!takes.length) return <ProfileUnavailable labels={['strong takes']} />;
   return (
     <div className="profile-analysis-section">
       <h4>Strong takes</h4>
@@ -57,9 +55,9 @@ function ProfileTakeSection({ takes, unavailable }: { takes: Array<{ take: strin
   );
 }
 
-function ProfileLinkSection({ title, links, unavailable }: { title: string; links: Array<{ label?: string; url?: string; kind?: string }>; unavailable: boolean }) {
+function ProfileLinkSection({ title, links }: { title: string; links: SourceProfileLink[] }) {
   const usable = links.filter((link) => link.url);
-  if (!usable.length) return unavailable ? <ProfileUnavailable labels={[title.toLowerCase()]} /> : null;
+  if (!usable.length) return <ProfileUnavailable labels={[title.toLowerCase()]} />;
   return (
     <div className="profile-analysis-section">
       <h4>{title}</h4>

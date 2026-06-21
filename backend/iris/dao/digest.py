@@ -6,14 +6,14 @@ from sqlalchemy import func, select
 
 from iris.dao import db
 from iris.dao.user_state import get_or_create_local_user
-from iris.models import Document, Link, UserDocumentMapping
+from iris.models import Document, Link, User, UserDocumentMapping
 from iris.schemas.enums import CrawlStatus, DocumentType
 
 
-def get_liked_documents_for_interest() -> list[Document]:
-    """Return documents favorited or read by the local user."""
+def get_liked_documents_for_interest(user: User | None = None) -> list[Document]:
+    """Return documents favorited or read by the current user."""
     session = db.current_session()
-    user = get_or_create_local_user()
+    user = user or get_or_create_local_user()
     return (
         session.execute(
             select(Document)
@@ -36,10 +36,10 @@ def get_all_document_topics() -> list[list[str]]:
     return list(session.execute(select(Document.topics).where(Document.topics.is_not(None))).scalars().all())
 
 
-def get_dismissed_or_read_document_ids() -> set[int]:
-    """Return local-user document ids that should not be recommended by default."""
+def get_dismissed_or_read_document_ids(user: User | None = None) -> set[int]:
+    """Return current-user document ids that should not be recommended by default."""
     session = db.current_session()
-    user = get_or_create_local_user()
+    user = user or get_or_create_local_user()
     return set(
         session.execute(
             select(UserDocumentMapping.document_id)

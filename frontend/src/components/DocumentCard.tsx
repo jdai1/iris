@@ -38,6 +38,11 @@ export function DocumentCard({
           </Link>
         )}
       </div>
+      {compact && (
+        <button className="document-compact-domain" type="button" onClick={() => onOpenProfile?.(document.source_id, document.source_domain)}>
+          {document.source_domain}
+        </button>
+      )}
       {document.summary && <Text color="iris.700" lineHeight="1.6" mb="3">{document.summary}</Text>}
       {!compact && <Text color="iris.500" fontSize="sm" lineHeight="1.55" mb="4">{reason}</Text>}
       <HStack className="topics" gap="1.5" flexWrap="wrap" mb="4">

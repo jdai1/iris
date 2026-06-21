@@ -1,21 +1,39 @@
-import type { AdminCrawlJob, AdminIndexRun, AdminOverview, AdminSource, AgentChatResponse, AgentConversation, AgentConversationSummary, DigestRecommendation, Document, EmbeddingMap, EmbeddingNeighbor, GraphResponse, Page, SearchResponse, SourceProfileAnalysis } from './types';
+import type { AdminCrawlJob, AdminIndexRun, AdminOverview, AdminSource, AgentChatResponse, AgentConversation, AgentConversationSummary, AgentStreamEvent, DigestRecommendation, Document, EmbeddingMap, EmbeddingNeighbor, GraphResponse, Page, SourceProfileAnalysis, User } from './types';
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? 'http://127.0.0.1:8001';
 
+const apiCache = new Map<string, Promise<unknown>>();
+let authTokenProvider: (() => Promise<string | null>) | null = null;
+
+export function setAuthTokenProvider(provider: (() => Promise<string | null>) | null) {
+  authTokenProvider = provider;
+  apiCache.clear();
+}
+
+async function requestHeaders(headers?: HeadersInit): Promise<HeadersInit> {
+  const token = authTokenProvider ? await authTokenProvider() : null;
+  return {
+    'Content-Type': 'application/json',
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    ...(headers ?? {}),
+  };
+}
+
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const url = `${API_BASE}${path}`;
+  const headers = await requestHeaders(options?.headers);
   let response: Response;
   try {
     response = await fetch(url, {
-      headers: { 'Content-Type': 'application/json', ...(options?.headers ?? {}) },
       ...options,
+      headers,
     });
   } catch (err) {
     await new Promise((resolve) => setTimeout(resolve, 150));
     try {
       response = await fetch(url, {
-        headers: { 'Content-Type': 'application/json', ...(options?.headers ?? {}) },
         ...options,
+        headers,
       });
     } catch (retryErr) {
       const message = retryErr instanceof Error ? retryErr.message : 'request failed';
@@ -29,15 +47,73 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   return response.json() as Promise<T>;
 }
 
-export function searchCorpus(query: string): Promise<SearchResponse> {
-  return request<SearchResponse>(`/api/agentic-search?q=${encodeURIComponent(query)}`);
+export function getMe(): Promise<User> {
+  return request<User>('/api/me');
+}
+
+function cachedRequest<T>(key: string, path: string): Promise<T> {
+  const existing = apiCache.get(key);
+  if (existing) return existing as Promise<T>;
+  const promise = request<T>(path).catch((err) => {
+    apiCache.delete(key);
+    throw err;
+  });
+  apiCache.set(key, promise);
+  return promise;
 }
 
 export function chatSearch(message: string, conversationId?: number): Promise<AgentChatResponse> {
   return request<AgentChatResponse>('/api/agent-chat', {
     method: 'POST',
-    body: JSON.stringify({ message, limit: 12, conversation_id: conversationId }),
+    body: JSON.stringify({ message, conversation_id: conversationId }),
   });
+}
+
+export async function streamChatSearch(
+  message: string,
+  conversationId: number | undefined,
+  onEvent: (event: AgentStreamEvent) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  const response = await fetch(`${API_BASE}/api/agent-chat/stream`, {
+    method: 'POST',
+    headers: await requestHeaders(),
+    body: JSON.stringify({ message, conversation_id: conversationId }),
+    signal,
+  });
+  if (!response.ok || !response.body) {
+    const detail = await response.text();
+    throw new Error(detail || `Request failed: ${response.status}`);
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  while (true) {
+    const { value, done } = await reader.read();
+    buffer += decoder.decode(value ?? new Uint8Array(), { stream: !done });
+    const chunks = buffer.split('\n\n');
+    buffer = chunks.pop() ?? '';
+    for (const chunk of chunks) {
+      const parsed = parseSseChunk(chunk);
+      if (parsed) onEvent(parsed);
+    }
+    if (done) break;
+  }
+
+  const parsed = parseSseChunk(buffer);
+  if (parsed) onEvent(parsed);
+}
+
+function parseSseChunk(chunk: string): AgentStreamEvent | null {
+  const lines = chunk.split('\n');
+  const eventLine = lines.find((line) => line.startsWith('event:'));
+  const dataLines = lines.filter((line) => line.startsWith('data:'));
+  if (!eventLine || dataLines.length === 0) return null;
+  const event = eventLine.slice('event:'.length).trim();
+  const data = JSON.parse(dataLines.map((line) => line.slice('data:'.length).trim()).join('\n'));
+  return { event, data } as AgentStreamEvent;
 }
 
 export function getAgentConversations(): Promise<AgentConversationSummary[]> {
@@ -53,7 +129,10 @@ export function getDigest(): Promise<DigestRecommendation[]> {
 }
 
 export function getEmbeddingMap(limit = 3000): Promise<EmbeddingMap> {
-  return request<EmbeddingMap>(`/api/embedding-map?limit=${limit}&document_type=essay`);
+  return cachedRequest<EmbeddingMap>(
+    `embedding-map:${limit}:essay`,
+    `/api/embedding-map?limit=${limit}&document_type=essay`,
+  );
 }
 
 export function getEmbeddingNeighbors(documentId: number, limit = 5): Promise<EmbeddingNeighbor[]> {
@@ -67,7 +146,8 @@ export function getGraph(params: { mode?: 'sources' | 'documents'; limit?: numbe
   if (params.domain) search.set('domain', params.domain);
   if (params.sourceId) search.set('source_id', String(params.sourceId));
   if (params.documentId) search.set('document_id', String(params.documentId));
-  return request<GraphResponse>(`/api/graph?${search.toString()}`);
+  const path = `/api/graph?${search.toString()}`;
+  return cachedRequest<GraphResponse>(`graph:${search.toString()}`, path);
 }
 
 export function getAdminOverview(): Promise<AdminOverview> {

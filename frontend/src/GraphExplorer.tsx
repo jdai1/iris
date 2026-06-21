@@ -1,6 +1,6 @@
 import { FormEvent, PointerEvent, useEffect, useMemo, useRef, useState } from 'react';
 import * as d3 from 'd3-force';
-import { ArrowUpRight, FileText, LocateFixed, Users } from 'lucide-react';
+import { ArrowUpRight, FileText, Loader2, LocateFixed, Users } from 'lucide-react';
 import { getGraph } from './api';
 import { CorpusSearchForm } from './CorpusSearchForm';
 import type { GraphEdge, GraphNode, GraphResponse } from './types';
@@ -243,7 +243,12 @@ export function GraphExplorer({ onOpenProfile }: { onOpenProfile?: (sourceId: nu
       {error && <div className="error">{error}</div>}
       <div className="graph-layout">
         <div className="graph-canvas-wrap">
-          {loading && <div className="graph-loading">Loading graph...</div>}
+          {loading && (
+            <div className="graph-loading" aria-live="polite">
+              <Loader2 size={22} />
+              <span>Loading graph</span>
+            </div>
+          )}
           {!loading && graph.nodes.length === 0 && <div className="graph-loading">No graph neighbors found.</div>}
           <svg
             className="graph-canvas"

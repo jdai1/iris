@@ -3,22 +3,12 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
 
 from sqlalchemy import select, update
 
 from iris.dao import db
 from iris.models import Category, Document, DocumentCategoryAssignment
-
-
-@dataclass(frozen=True)
-class SeedCategory:
-    """Definition for one default system category."""
-
-    slug: str
-    name: str
-    description: str
-    color: str
+from iris.schemas.categories import SeedCategory
 
 
 DEFAULT_CATEGORIES: tuple[SeedCategory, ...] = (

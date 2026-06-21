@@ -4,6 +4,7 @@ from fastapi.testclient import TestClient
 
 from iris.models import CrawlJob, IndexRun
 from iris.routes import app
+from iris.services.auth import FirebaseIdentity
 from iris.services.ingestion.embedding import dumps_embedding, embed_text
 from iris.dao.sources import get_or_create_source
 from iris.dao.documents import upsert_document
@@ -37,19 +38,38 @@ def test_health_and_search_api(session):
     body = search.json()
     assert body["results"][0]["document"]["title"] == "Small teams"
 
-    agentic = client.get("/api/agentic-search", params={"q": "small teams coordination"})
-    assert agentic.status_code == 200
-    agentic_body = agentic.json()
-    assert agentic_body["results"][0]["document"]["title"] == "Small teams"
-    assert {tool["tool"] for tool in agentic_body["tools"]} == {"keyword", "semantic", "tags", "categories"}
+
+def test_me_maps_firebase_identity_to_user(session, monkeypatch):
+    from iris.routes import api as api_routes
+
+    monkeypatch.setattr(
+        api_routes,
+        "verify_firebase_token",
+        lambda token: FirebaseIdentity(
+            uid="firebase-user-1",
+            email="jane@example.com",
+            display_name="Jane Example",
+            photo_url="https://example.com/jane.png",
+        ),
+    )
+
+    client = TestClient(app)
+    response = client.get("/api/me", headers={"Authorization": "Bearer test-token"})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["firebase_uid"] == "firebase-user-1"
+    assert body["email"] == "jane@example.com"
+    assert body["display_name"] == "Jane Example"
 
 
 def test_agent_chat_persists_conversation_and_results(session, monkeypatch):
-    from iris.services.retrieval import search as search_service
+    from iris.dao import agent as agent_dao
+    from iris.schemas.enums import AgentStepKind
+    from iris.schemas.retrieval import AgentChatResult, AgentStep, RankedDocument
 
-    monkeypatch.setattr(search_service, "openai_api_key", lambda: None)
     source = get_or_create_source("https://agent.test", status="indexed")
-    upsert_document(
+    document = upsert_document(
         source=source,
         url="https://agent.test/career",
         document_type="essay",
@@ -64,6 +84,19 @@ def test_agent_chat_persists_conversation_and_results(session, monkeypatch):
         content_hash="agent-career",
     )
     session.commit()
+
+    def fake_agentic_chat(message: str, limit: int = 12) -> AgentChatResult:
+        return AgentChatResult(
+            answer="Use the cited result.",
+            results=[RankedDocument(document=document, score=1.0, reason="test sdk result")],
+            steps=[
+                AgentStep(kind=AgentStepKind.PLAN, title="Run OpenAI agent loop", detail="test"),
+                AgentStep(kind=AgentStepKind.TOOL, title="Run semantic", detail="test", tool="semantic", query=message, hits=1),
+                AgentStep(kind=AgentStepKind.ANSWER, title="Agent final answer", detail="test"),
+            ],
+        )
+
+    monkeypatch.setattr(agent_dao, "agentic_chat", fake_agentic_chat)
 
     client = TestClient(app)
     first = client.post(
@@ -98,6 +131,65 @@ def test_agent_chat_persists_conversation_and_results(session, monkeypatch):
     replay_body = replay.json()
     assert [message["role"] for message in replay_body["messages"]] == ["user", "assistant", "user", "assistant"]
     assert replay_body["messages"][1]["results"][0]["document"]["title"] == "Choosing a company"
+
+
+def test_agent_conversations_are_scoped_to_firebase_user(session, monkeypatch):
+    from iris.dao import agent as agent_dao
+    from iris.routes import api as api_routes
+    from iris.schemas.enums import AgentStepKind
+    from iris.schemas.retrieval import AgentChatResult, AgentStep, RankedDocument
+
+    source = get_or_create_source("https://scoped.test", status="indexed")
+    document = upsert_document(
+        source=source,
+        url="https://scoped.test/doc",
+        document_type="essay",
+        crawl_status="fetched",
+        title="Scoped result",
+        author=None,
+        published_at=None,
+        extracted_text="scoped auth result",
+        summary="Scoped auth result.",
+        topics=["auth"],
+        embedding=dumps_embedding(embed_text("scoped auth result")),
+        content_hash="scoped-auth-result",
+    )
+    session.commit()
+
+    def fake_verify(token: str) -> FirebaseIdentity:
+        return FirebaseIdentity(uid=token, email=f"{token}@example.com", display_name=token)
+
+    def fake_agentic_chat(message: str, limit: int = 12) -> AgentChatResult:
+        return AgentChatResult(
+            answer="Scoped answer.",
+            results=[RankedDocument(document=document, score=1.0, reason="scoped")],
+            steps=[AgentStep(kind=AgentStepKind.TOOL, title="Run semantic", detail="test", tool="semantic", query=message, hits=1)],
+        )
+
+    monkeypatch.setattr(api_routes, "verify_firebase_token", fake_verify)
+    monkeypatch.setattr(agent_dao, "agentic_chat", fake_agentic_chat)
+
+    client = TestClient(app)
+    first = client.post(
+        "/api/agent-chat",
+        json={"message": "first user question"},
+        headers={"Authorization": "Bearer user-one"},
+    )
+    assert first.status_code == 200
+
+    second = client.get(
+        "/api/agent-conversations",
+        headers={"Authorization": "Bearer user-two"},
+    )
+    assert second.status_code == 200
+    assert second.json() == []
+
+    first_history = client.get(
+        "/api/agent-conversations",
+        headers={"Authorization": "Bearer user-one"},
+    )
+    assert first_history.status_code == 200
+    assert first_history.json()[0]["id"] == first.json()["conversation_id"]
 
 
 def test_embedding_map_api_projects_embedded_documents(session):

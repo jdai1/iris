@@ -57,3 +57,15 @@ class FetchResult:
     final_url: str
     content_type: str
     text: str
+
+
+@dataclass(frozen=True)
+class PagePipelineResult:
+    """Detached result from the async fetch/extract/embed pipeline."""
+
+    requested_url: str
+    fetched: FetchResult | None
+    extracted: ExtractedPage | None
+    content_hash: str | None
+    embedding: str | None
+    error: str | None = None

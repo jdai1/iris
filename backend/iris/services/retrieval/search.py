@@ -4,10 +4,8 @@ import json
 import os
 import re
 from collections.abc import Mapping
-from dataclasses import dataclass
 
 import httpx
-from pydantic import BaseModel, Field
 from sqlalchemy import select
 
 from iris.dao import db
@@ -18,59 +16,15 @@ from iris.services.common.config import (
     SEARCH_RERANK_MODEL,
     SEARCH_RERANK_TIMEOUT_SECONDS,
     USE_LLM_RERANKER,
+    USE_PGVECTOR_SEARCH,
     openai_api_key,
 )
 from iris.services.ingestion.embedding import cosine, embed_text, loads_embedding
-from iris.models import Category, Document, DocumentCategoryAssignment, DocumentTag, Tag
-from iris.schemas.enums import AgentStepKind, DocumentType
-from iris.schemas.retrieval import RankedDocument
+from iris.models import Category, Document, DocumentCategoryAssignment, DocumentTag, Source, Tag
+from iris.schemas.enums import AgentStepKind, AgentToolName, DocumentType
+from iris.schemas.retrieval import AgentChatResult, AgentChatStreamEvent, AgentSearchOutput, AgentStep, AgentToolRun, RankedDocument
 
-
-@dataclass(frozen=True)
-class SearchToolTrace:
-    tool: str
-    query: str
-    hits: int
-    top_titles: list[str]
-
-
-@dataclass(frozen=True)
-class AgenticSearchResult:
-    answer: str
-    results: list[RankedDocument]
-    tools: list[SearchToolTrace]
-
-
-@dataclass(frozen=True)
-class AgentStep:
-    kind: AgentStepKind
-    title: str
-    detail: str
-    tool: str | None = None
-    query: str | None = None
-    hits: int | None = None
-
-
-@dataclass(frozen=True)
-class AgentChatResult:
-    answer: str
-    results: list[RankedDocument]
-    steps: list[AgentStep]
-
-
-@dataclass(frozen=True)
-class AgentToolRun:
-    tool: str
-    query: str
-    rows: list[RankedDocument]
-
-
-class AgentSearchOutput(BaseModel):
-    answer: str = Field(description="A concise answer grounded in the retrieved Iris documents.")
-    document_ids: list[int] = Field(
-        default_factory=list,
-        description="Document ids from tool results that best support the answer, in ranked order.",
-    )
+AGENT_RESULT_SAFETY_CAP = 20
 
 
 def _terms(text: str) -> set[str]:
@@ -129,141 +83,175 @@ def search_documents(query: str, limit: int = 12, persist: bool = True) -> tuple
     return None, ranked[:limit]
 
 
-def agentic_search(query: str, limit: int = 12) -> AgenticSearchResult:
-    """Run explicit retrieval tools, merge their candidates, and synthesize a result."""
+def agentic_chat(message: str, limit: int | None = None, conversation_context: str | None = None) -> AgentChatResult:
+    """Run the OpenAI Agents SDK retrieval loop."""
+    if not openai_api_key():
+        raise RuntimeError("OpenAI API key is required for agentic chat")
+    return _openai_agentic_chat(message, limit=limit or AGENT_RESULT_SAFETY_CAP, conversation_context=conversation_context)
+
+
+async def stream_openai_agentic_chat(message: str, limit: int | None = None, conversation_context: str | None = None):
+    """Stream an OpenAI Agents SDK-controlled retrieval loop."""
+    from agents import Agent, ModelSettings, Runner, function_tool
+
+    max_result_cards = limit or AGENT_RESULT_SAFETY_CAP
+    key = openai_api_key()
+    if key:
+        os.environ.setdefault("OPENAI_API_KEY", key)
+
     documents = search_dao.get_searchable_documents()
-    query_terms = _terms(query)
-    tag_terms = _tag_query_terms(query_terms, documents)
-    category_terms = _category_query_terms(query_terms)
-    tool_outputs = [
-        ("keyword", query, _keyword_search(query_terms, documents, limit=max(limit * 3, 24))),
-        ("semantic", query, _semantic_search(query, documents, limit=max(limit * 3, 24))),
-        ("tags", ", ".join(sorted(tag_terms)) or query, _tag_search(tag_terms, documents, limit=max(limit * 2, 16))),
-        ("categories", ", ".join(sorted(category_terms)) or query, _category_search(category_terms, documents, limit=max(limit * 2, 16))),
-    ]
+    documents_by_id = {document.id: document for document in documents}
+    tool_runs: list[AgentToolRun] = []
+    steps: list[AgentStep] = []
 
-    merged: dict[int, RankedDocument] = {}
-    tool_weights = {"keyword": 1.0, "semantic": 0.95, "tags": 0.35, "categories": 0.4}
-    for tool_name, _tool_query, rows in tool_outputs:
-        tool_weight = tool_weights.get(tool_name, 0.5)
-        for rank, row in enumerate(rows):
-            score = max(0.0, row.score) * tool_weight + max(0.0, (len(rows) - rank) / max(1, len(rows))) * 0.04 * tool_weight
-            reason = f"{tool_name}: {row.reason}"
-            existing = merged.get(row.document.id)
-            if existing is None or score > existing.score:
-                merged[row.document.id] = RankedDocument(document=row.document, score=score, reason=reason)
-            elif existing:
-                merged[row.document.id] = RankedDocument(
-                    document=existing.document,
-                    score=existing.score + min(0.08, score * 0.18),
-                    reason=f"{existing.reason}; {reason}",
-                )
-
-    saved_ids = search_dao.get_favorited_document_ids()
-    dismissed_ids = search_dao.get_dismissed_document_ids()
-    adjusted = [
-        RankedDocument(
-            document=row.document,
-            score=row.score + (0.08 if row.document.id in saved_ids else 0.0) - (0.18 if row.document.id in dismissed_ids else 0.0),
-            reason=row.reason,
+    def serialize_rows(rows: list[RankedDocument]) -> str:
+        return json.dumps(
+            [
+                {
+                    "document_id": row.document.id,
+                    "title": row.document.title,
+                    "source": row.document.source.canonical_domain,
+                    "url": row.document.url,
+                    "category": str(row.document.category.value if hasattr(row.document.category, "value") else row.document.category),
+                    "summary": row.document.summary,
+                    "topics": row.document.topics or [],
+                    "score": round(row.score, 4),
+                    "reason": row.reason,
+                }
+                for row in rows
+            ],
+            ensure_ascii=False,
         )
-        for row in merged.values()
-        if row.score > 0.02
-    ]
-    adjusted.sort(key=lambda item: item.score, reverse=True)
-    candidate_pool = _rerank_candidates(query, adjusted[: max(limit * 3, 24)])
-    ranked = _expand_with_graph_neighbors(candidate_pool[:limit], limit)[:limit]
-    traces = [
-        SearchToolTrace(
-            tool=tool_name,
-            query=tool_query,
-            hits=len(rows),
-            top_titles=[row.document.title or row.document.url for row in rows[:4]],
+
+    @function_tool
+    def keyword_search(query: str, max_results: int = 12) -> str:
+        """Search Iris documents by lexical overlap using a standalone resolved query that preserves the user's specific subject and constraints."""
+        rows = _keyword_search(_terms(query), documents, limit=max(1, min(max_results, 30)))
+        tool_runs.append(AgentToolRun(tool=AgentToolName.KEYWORD, query=query, rows=rows))
+        return serialize_rows(rows)
+
+    @function_tool
+    def semantic_search(query: str, max_results: int = 12) -> str:
+        """Search Iris documents by semantic similarity using a standalone resolved query that preserves the user's specific subject and constraints."""
+        rows = _semantic_search(query, documents, limit=max(1, min(max_results, 30)))
+        tool_runs.append(AgentToolRun(tool=AgentToolName.SEMANTIC, query=query, rows=rows))
+        return serialize_rows(rows)
+
+    @function_tool
+    def tag_search(terms: str, max_results: int = 12) -> str:
+        """Search Iris documents by comma-separated topic or tag terms."""
+        normalized = {term.strip().lower() for term in terms.split(",") if term.strip()}
+        rows = _tag_search(normalized, documents, limit=max(1, min(max_results, 30)))
+        tool_runs.append(AgentToolRun(tool=AgentToolName.TAGS, query=terms, rows=rows))
+        return serialize_rows(rows)
+
+    @function_tool
+    def category_search(categories: str, max_results: int = 12) -> str:
+        """Search Iris documents by comma-separated high-level categories like startups, software, culture, or personal."""
+        normalized = {term.strip().lower() for term in categories.split(",") if term.strip()}
+        rows = _category_search(normalized, documents, limit=max(1, min(max_results, 30)))
+        tool_runs.append(AgentToolRun(tool=AgentToolName.CATEGORIES, query=categories, rows=rows))
+        return serialize_rows(rows)
+
+    @function_tool
+    def get_document_metadata(document_id: int) -> str:
+        """Fetch metadata and a short excerpt for one Iris document by document_id."""
+        document = documents_by_id.get(document_id)
+        if document is None:
+            tool_runs.append(AgentToolRun(tool=AgentToolName.DOCUMENT_METADATA, query=str(document_id), rows=[]))
+            return json.dumps({"error": "document not found", "document_id": document_id})
+        tool_runs.append(
+            AgentToolRun(
+                tool=AgentToolName.DOCUMENT_METADATA,
+                query=str(document_id),
+                rows=[RankedDocument(document=document, score=1.0, reason="document metadata lookup")],
+            )
         )
-        for tool_name, tool_query, rows in tool_outputs
-    ]
-    return AgenticSearchResult(answer=synthesize_answer(query, ranked), results=ranked, tools=traces)
+        return _serialize_document_metadata(document)
 
+    @function_tool
+    def get_source_metadata(domain: str) -> str:
+        """Fetch metadata about a source/blog by canonical domain."""
+        normalized = domain.strip().lower()
+        source = db.current_session().scalar(select(Source).where(Source.canonical_domain == normalized))
+        tool_runs.append(AgentToolRun(tool=AgentToolName.SOURCE_METADATA, query=normalized, rows=[]))
+        if source is None:
+            return json.dumps({"error": "source not found", "domain": normalized})
+        return _serialize_source_metadata(source)
 
-def agentic_chat(message: str, limit: int = 12) -> AgentChatResult:
-    """Run the OpenAI Agents SDK retrieval loop when configured, with an offline fallback."""
-    if openai_api_key():
-        try:
-            return _openai_agentic_chat(message, limit=limit)
-        except ImportError:
-            pass
-    return _deterministic_agentic_chat(message, limit=limit)
-
-
-def _deterministic_agentic_chat(message: str, limit: int = 12) -> AgentChatResult:
-    """Run a small retrieval-agent loop over the local corpus."""
-    documents = search_dao.get_searchable_documents()
-    query_terms = _terms(message)
-    steps = [
-        AgentStep(
-            kind=AgentStepKind.PLAN,
-            title="Plan retrieval",
-            detail="Use keyword and semantic search first, inspect the candidate set, then call tag/category tools when they can sharpen recall.",
-        )
-    ]
-
-    keyword_rows = _keyword_search(query_terms, documents, limit=max(limit * 3, 24))
-    steps.append(_tool_step("keyword", message, keyword_rows))
-    semantic_rows = _semantic_search(message, documents, limit=max(limit * 3, 24))
-    steps.append(_tool_step("semantic", message, semantic_rows))
-
-    inspected = _top_unique_documents([keyword_rows, semantic_rows], limit=10)
-    topic_terms = _tag_query_terms(query_terms, documents)
-    if not topic_terms:
-        topic_terms = _candidate_topic_terms(inspected, max_terms=4)
-    category_terms = _category_query_terms(query_terms)
-    if not category_terms:
-        category_terms = _candidate_category_terms(inspected, max_terms=2)
-    steps.append(
-        AgentStep(
-            kind=AgentStepKind.OBSERVE,
-            title="Inspect candidates",
-            detail=(
-                f"Candidate topics: {', '.join(sorted(topic_terms)) or 'none'}; "
-                f"categories: {', '.join(sorted(category_terms)) or 'none'}."
-            ),
-        )
-    )
-
-    tag_rows = _tag_search(topic_terms, documents, limit=max(limit * 2, 16))
-    steps.append(_tool_step("tags", ", ".join(sorted(topic_terms)) or message, tag_rows))
-    category_rows = _category_search(category_terms, documents, limit=max(limit * 2, 16))
-    steps.append(_tool_step("categories", ", ".join(sorted(category_terms)) or message, category_rows))
-
-    ranked = _merge_tool_outputs(
-        [
-            ("keyword", keyword_rows),
-            ("semantic", semantic_rows),
-            ("tags", tag_rows),
-            ("categories", category_rows),
+    agent = Agent(
+        name="Iris corpus search agent",
+        model=AGENT_SEARCH_MODEL,
+        output_type=AgentSearchOutput,
+        instructions=(
+            "You answer in English over a personal corpus of indexed blogs and essays. "
+            "You have retrieval tools plus metadata tools: keyword_search, semantic_search, tag_search, category_search, "
+            "get_document_metadata, and get_source_metadata. "
+            "Do not call retrieval tools for greetings, small talk, vague fragments, or messages where the user's search intent is unclear. "
+            "In those cases, answer conversationally and ask one concise clarifying question. "
+            "Use the supplied conversation context to resolve follow-ups, references like 'that post', and requests about links you already recommended. "
+            "When the current message is a follow-up or instruction to proceed, infer the intended search from the conversation transcript. "
+            "Before calling a retrieval tool, rewrite the user's request into a standalone search query in your head. "
+            "The tool query must preserve the user's specific subject, domain, and constraints from prior turns. "
+            "Do not broaden a specific subject into generic software, technical writing, productivity, or engineering unless the user asks for that broadening. "
+            "Use the resolved standalone intent as the tool query, not necessarily the literal latest message. "
+            "Ask a clarifying question only when the full conversation still does not contain a workable search intent. "
+            "If the user asks about a previously recommended document, use its document_id from context and call get_document_metadata before answering. "
+            "Use get_source_metadata when the user asks about a blog/source rather than one post. "
+            "When the user gives a clear corpus search request, call at least one retrieval tool before answering. "
+            "Use more than one tool when it improves recall or disambiguation. "
+            "Only cite documents returned by tools. Return document_ids only for documents that are clearly relevant enough to show as link cards. "
+            "Choose the number of document_ids based on relevance; return none when no retrieved document is relevant enough."
+        ),
+        model_settings=ModelSettings(tool_choice="auto"),
+        tools=[
+            keyword_search,
+            semantic_search,
+            tag_search,
+            category_search,
+            get_document_metadata,
+            get_source_metadata,
         ],
-        message,
-        limit,
     )
-    steps.append(
-        AgentStep(
-            kind=AgentStepKind.ANSWER,
-            title="Merge and answer",
-            detail=f"Merged {sum(len(rows) for rows in [keyword_rows, semantic_rows, tag_rows, category_rows])} tool hits into {len(ranked)} cited results.",
-        )
-    )
-    return AgentChatResult(answer=synthesize_answer(message, ranked), results=ranked, steps=steps)
+    run = Runner.run_streamed(agent, _agent_input(message, conversation_context), max_turns=AGENT_SEARCH_MAX_TURNS)
+    emitted_tool_runs = 0
+    async for sdk_event in run.stream_events():
+        event_name = getattr(sdk_event, "name", "")
+        if event_name in {"tool_output", "tool_search_output_created"} and len(tool_runs) > emitted_tool_runs:
+            for run_item in tool_runs[emitted_tool_runs:]:
+                step = _tool_step(run_item.tool, run_item.query, run_item.rows)
+                steps.append(step)
+                yield AgentChatStreamEvent(event="tool_result", step=step, rows=run_item.rows)
+            emitted_tool_runs = len(tool_runs)
+
+    if len(tool_runs) > emitted_tool_runs:
+        for run_item in tool_runs[emitted_tool_runs:]:
+            step = _tool_step(run_item.tool, run_item.query, run_item.rows)
+            steps.append(step)
+            yield AgentChatStreamEvent(event="tool_result", step=step, rows=run_item.rows)
+
+    output = run.final_output
+    if isinstance(output, AgentSearchOutput):
+        answer = output.answer
+        chosen_ids = output.document_ids
+    else:
+        answer = str(output or "")
+        chosen_ids = []
+
+    ranked = _rank_agent_documents(tool_runs, chosen_ids, message, max_result_cards)
+    yield AgentChatStreamEvent(event="final", result=AgentChatResult(answer=answer, results=ranked, steps=steps))
 
 
-def _openai_agentic_chat(message: str, limit: int = 12) -> AgentChatResult:
+def _openai_agentic_chat(message: str, limit: int = AGENT_RESULT_SAFETY_CAP, conversation_context: str | None = None) -> AgentChatResult:
     """Let the OpenAI Agents SDK choose retrieval tools and synthesize a grounded answer."""
-    from agents import Agent, Runner, function_tool
+    from agents import Agent, ModelSettings, Runner, function_tool
 
     key = openai_api_key()
     if key:
         os.environ.setdefault("OPENAI_API_KEY", key)
 
     documents = search_dao.get_searchable_documents()
+    documents_by_id = {document.id: document for document in documents}
     tool_runs: list[AgentToolRun] = []
 
     def serialize_rows(rows: list[RankedDocument]) -> str:
@@ -287,16 +275,16 @@ def _openai_agentic_chat(message: str, limit: int = 12) -> AgentChatResult:
 
     @function_tool
     def keyword_search(query: str, max_results: int = 12) -> str:
-        """Search Iris documents by lexical overlap in title, summary, topics, text, and source metadata."""
+        """Search Iris documents by lexical overlap using a standalone resolved query that preserves the user's specific subject and constraints."""
         rows = _keyword_search(_terms(query), documents, limit=max(1, min(max_results, 30)))
-        tool_runs.append(AgentToolRun(tool="keyword", query=query, rows=rows))
+        tool_runs.append(AgentToolRun(tool=AgentToolName.KEYWORD, query=query, rows=rows))
         return serialize_rows(rows)
 
     @function_tool
     def semantic_search(query: str, max_results: int = 12) -> str:
-        """Search Iris documents by semantic similarity against stored embeddings."""
+        """Search Iris documents by semantic similarity using a standalone resolved query that preserves the user's specific subject and constraints."""
         rows = _semantic_search(query, documents, limit=max(1, min(max_results, 30)))
-        tool_runs.append(AgentToolRun(tool="semantic", query=query, rows=rows))
+        tool_runs.append(AgentToolRun(tool=AgentToolName.SEMANTIC, query=query, rows=rows))
         return serialize_rows(rows)
 
     @function_tool
@@ -304,7 +292,7 @@ def _openai_agentic_chat(message: str, limit: int = 12) -> AgentChatResult:
         """Search Iris documents by comma-separated topic or tag terms."""
         normalized = {term.strip().lower() for term in terms.split(",") if term.strip()}
         rows = _tag_search(normalized, documents, limit=max(1, min(max_results, 30)))
-        tool_runs.append(AgentToolRun(tool="tags", query=terms, rows=rows))
+        tool_runs.append(AgentToolRun(tool=AgentToolName.TAGS, query=terms, rows=rows))
         return serialize_rows(rows)
 
     @function_tool
@@ -312,23 +300,70 @@ def _openai_agentic_chat(message: str, limit: int = 12) -> AgentChatResult:
         """Search Iris documents by comma-separated high-level categories like startups, software, culture, or personal."""
         normalized = {term.strip().lower() for term in categories.split(",") if term.strip()}
         rows = _category_search(normalized, documents, limit=max(1, min(max_results, 30)))
-        tool_runs.append(AgentToolRun(tool="categories", query=categories, rows=rows))
+        tool_runs.append(AgentToolRun(tool=AgentToolName.CATEGORIES, query=categories, rows=rows))
         return serialize_rows(rows)
+
+    @function_tool
+    def get_document_metadata(document_id: int) -> str:
+        """Fetch metadata and a short excerpt for one Iris document by document_id."""
+        document = documents_by_id.get(document_id)
+        if document is None:
+            tool_runs.append(AgentToolRun(tool=AgentToolName.DOCUMENT_METADATA, query=str(document_id), rows=[]))
+            return json.dumps({"error": "document not found", "document_id": document_id})
+        tool_runs.append(
+            AgentToolRun(
+                tool=AgentToolName.DOCUMENT_METADATA,
+                query=str(document_id),
+                rows=[RankedDocument(document=document, score=1.0, reason="document metadata lookup")],
+            )
+        )
+        return _serialize_document_metadata(document)
+
+    @function_tool
+    def get_source_metadata(domain: str) -> str:
+        """Fetch metadata about a source/blog by canonical domain."""
+        normalized = domain.strip().lower()
+        source = db.current_session().scalar(select(Source).where(Source.canonical_domain == normalized))
+        tool_runs.append(AgentToolRun(tool=AgentToolName.SOURCE_METADATA, query=normalized, rows=[]))
+        if source is None:
+            return json.dumps({"error": "source not found", "domain": normalized})
+        return _serialize_source_metadata(source)
 
     agent = Agent(
         name="Iris corpus search agent",
         model=AGENT_SEARCH_MODEL,
         output_type=AgentSearchOutput,
         instructions=(
-            "You answer questions over a personal corpus of indexed blogs and essays. "
-            "You have four retrieval tools: keyword_search, semantic_search, tag_search, and category_search. "
-            "Choose tools based on the user's question. Use more than one tool when it improves recall or disambiguation. "
-            "Only cite documents returned by tools. Return document_ids for the best supporting documents. "
-            "If the corpus has weak matches, say that directly and still return the nearest useful documents."
+            "You answer in English over a personal corpus of indexed blogs and essays. "
+            "You have retrieval tools plus metadata tools: keyword_search, semantic_search, tag_search, category_search, "
+            "get_document_metadata, and get_source_metadata. "
+            "Do not call retrieval tools for greetings, small talk, vague fragments, or messages where the user's search intent is unclear. "
+            "In those cases, answer conversationally and ask one concise clarifying question. "
+            "Use the supplied conversation context to resolve follow-ups, references like 'that post', and requests about links you already recommended. "
+            "When the current message is a follow-up or instruction to proceed, infer the intended search from the conversation transcript. "
+            "Before calling a retrieval tool, rewrite the user's request into a standalone search query in your head. "
+            "The tool query must preserve the user's specific subject, domain, and constraints from prior turns. "
+            "Do not broaden a specific subject into generic software, technical writing, productivity, or engineering unless the user asks for that broadening. "
+            "Use the resolved standalone intent as the tool query, not necessarily the literal latest message. "
+            "Ask a clarifying question only when the full conversation still does not contain a workable search intent. "
+            "If the user asks about a previously recommended document, use its document_id from context and call get_document_metadata before answering. "
+            "Use get_source_metadata when the user asks about a blog/source rather than one post. "
+            "When the user gives a clear corpus search request, call at least one retrieval tool before answering. "
+            "Use more than one tool when it improves recall or disambiguation. "
+            "Only cite documents returned by tools. Return document_ids only for documents that are clearly relevant enough to show as link cards. "
+            "Choose the number of document_ids based on relevance; return none when no retrieved document is relevant enough."
         ),
-        tools=[keyword_search, semantic_search, tag_search, category_search],
+        model_settings=ModelSettings(tool_choice="auto"),
+        tools=[
+            keyword_search,
+            semantic_search,
+            tag_search,
+            category_search,
+            get_document_metadata,
+            get_source_metadata,
+        ],
     )
-    result = Runner.run_sync(agent, message, max_turns=AGENT_SEARCH_MAX_TURNS)
+    result = Runner.run_sync(agent, _agent_input(message, conversation_context), max_turns=AGENT_SEARCH_MAX_TURNS)
     output = result.final_output
     if isinstance(output, AgentSearchOutput):
         answer = output.answer
@@ -338,17 +373,78 @@ def _openai_agentic_chat(message: str, limit: int = 12) -> AgentChatResult:
         chosen_ids = []
 
     ranked = _rank_agent_documents(tool_runs, chosen_ids, message, limit)
-    if not ranked and tool_runs:
-        ranked = _merge_tool_outputs([(run.tool, run.rows) for run in tool_runs], message, limit)
     steps = _agent_sdk_steps(tool_runs, ranked)
-    steps.append(
-        AgentStep(
-            kind=AgentStepKind.ANSWER,
-            title="Agent final answer",
-            detail=f"OpenAI Agents SDK completed with {len(tool_runs)} tool call(s) and {len(ranked)} persisted citation(s).",
-        )
+    return AgentChatResult(answer=answer, results=ranked, steps=steps)
+
+
+def _agent_input(message: str, conversation_context: str | None) -> str:
+    if not conversation_context:
+        return message
+    return (
+        "Use this full conversation transcript to interpret the current user message. "
+        "The current message may be elliptical and may depend on earlier user constraints.\n\n"
+        "Conversation transcript before the current message:\n"
+        f"{conversation_context}\n\n"
+        "Current user message:\n"
+        f"{message}"
     )
-    return AgentChatResult(answer=answer or synthesize_answer(message, ranked), results=ranked, steps=steps)
+
+
+def _serialize_document_metadata(document: Document) -> str:
+    text = " ".join((document.extracted_text or "").split())
+    excerpt = text[:1800] if text else None
+    return json.dumps(
+        {
+            "document_id": document.id,
+            "title": document.title,
+            "url": document.url,
+            "source": document.source.canonical_domain,
+            "author": document.author,
+            "published_at": document.published_at.isoformat() if document.published_at else None,
+            "document_type": str(document.document_type.value if hasattr(document.document_type, "value") else document.document_type),
+            "category": str(document.category.value if hasattr(document.category, "value") else document.category),
+            "summary": document.summary,
+            "topics": document.topics or [],
+            "excerpt": excerpt,
+        },
+        ensure_ascii=False,
+    )
+
+
+def _serialize_source_metadata(source: Source) -> str:
+    profile = source.profile_analysis
+    recent_documents = sorted(source.documents, key=lambda document: document.published_at or document.first_seen_at, reverse=True)[:10]
+    return json.dumps(
+        {
+            "source_id": source.id,
+            "domain": source.canonical_domain,
+            "url": source.url,
+            "name": source.name,
+            "description": source.description,
+            "status": str(source.status.value if hasattr(source.status, "value") else source.status),
+            "rss_url": source.rss_url,
+            "profile": None
+            if profile is None
+            else {
+                "display_name": profile.display_name,
+                "bio": profile.bio,
+                "themes": profile.themes or [],
+                "writing_style": profile.writing_style or [],
+                "caveats": profile.caveats or [],
+            },
+            "recent_documents": [
+                {
+                    "document_id": document.id,
+                    "title": document.title,
+                    "url": document.url,
+                    "summary": document.summary,
+                    "topics": document.topics or [],
+                }
+                for document in recent_documents
+            ],
+        },
+        ensure_ascii=False,
+    )
 
 
 def _rank_agent_documents(tool_runs: list[AgentToolRun], chosen_ids: list[int], query: str, limit: int) -> list[RankedDocument]:
@@ -356,7 +452,7 @@ def _rank_agent_documents(tool_runs: list[AgentToolRun], chosen_ids: list[int], 
     for run in tool_runs:
         for row in run.rows:
             existing = rows_by_id.get(row.document.id)
-            reason = f"{run.tool}: {row.reason}"
+            reason = f"{run.tool.value}: {row.reason}"
             if existing is None or row.score > existing.score:
                 rows_by_id[row.document.id] = RankedDocument(document=row.document, score=row.score, reason=reason)
             else:
@@ -381,43 +477,29 @@ def _rank_agent_documents(tool_runs: list[AgentToolRun], chosen_ids: list[int], 
         )
         seen.add(document_id)
 
-    if len(ranked) < limit:
-        fallback = _merge_tool_outputs([(run.tool, run.rows) for run in tool_runs], query, limit)
-        ranked.extend(row for row in fallback if row.document.id not in seen)
     return ranked[:limit]
 
 
 def _agent_sdk_steps(tool_runs: list[AgentToolRun], ranked: list[RankedDocument]) -> list[AgentStep]:
-    steps = [
-        AgentStep(
-            kind=AgentStepKind.PLAN,
-            title="Run OpenAI agent loop",
-            detail=(
-                "The model controlled the loop through the OpenAI Agents SDK, choosing retrieval tools and receiving "
-                "their outputs before producing a final structured answer."
-            ),
-        )
-    ]
+    steps = []
     for run in tool_runs:
         steps.append(_tool_step(run.tool, run.query, run.rows))
-    steps.append(
-        AgentStep(
-            kind=AgentStepKind.OBSERVE,
-            title="Persist selected citations",
-            detail=f"Stored the top {len(ranked)} document citation(s) from the agent's chosen tool results.",
-        )
-    )
     return steps
 
 
 def _merge_tool_outputs(tool_outputs: list[tuple[str, list[RankedDocument]]], query: str, limit: int) -> list[RankedDocument]:
     merged: dict[int, RankedDocument] = {}
-    tool_weights = {"keyword": 1.0, "semantic": 0.95, "tags": 0.35, "categories": 0.4}
+    tool_weights = {
+        AgentToolName.KEYWORD: 1.0,
+        AgentToolName.SEMANTIC: 0.95,
+        AgentToolName.TAGS: 0.35,
+        AgentToolName.CATEGORIES: 0.4,
+    }
     for tool_name, rows in tool_outputs:
         tool_weight = tool_weights.get(tool_name, 0.5)
         for rank, row in enumerate(rows):
             score = max(0.0, row.score) * tool_weight + max(0.0, (len(rows) - rank) / max(1, len(rows))) * 0.04 * tool_weight
-            reason = f"{tool_name}: {row.reason}"
+            reason = f"{tool_name.value}: {row.reason}"
             existing = merged.get(row.document.id)
             if existing is None or score > existing.score:
                 merged[row.document.id] = RankedDocument(document=row.document, score=score, reason=reason)
@@ -454,6 +536,14 @@ def _keyword_search(query_terms: set[str], documents: list[Document], *, limit: 
 
 def _semantic_search(query: str, documents: list[Document], *, limit: int) -> list[RankedDocument]:
     query_vector = embed_text(query)
+    if USE_PGVECTOR_SEARCH:
+        vector_rows = search_dao.vector_search_documents(query_vector, limit=limit)
+        if vector_rows:
+            return [
+                RankedDocument(document=document, score=similarity, reason=f"pgvector cosine {similarity:.2f}")
+                for document, similarity in vector_rows
+                if similarity > 0.04
+            ]
     rows: list[RankedDocument] = []
     for document in documents:
         if not document.embedding:
@@ -543,11 +633,29 @@ def _category_query_terms(query_terms: set[str]) -> set[str]:
     return {aliases[term] for term in query_terms if term in aliases}
 
 
-def _tool_step(tool: str, query: str, rows: list[RankedDocument]) -> AgentStep:
+def _tool_step(tool: AgentToolName, query: str, rows: list[RankedDocument]) -> AgentStep:
+    if tool == AgentToolName.DOCUMENT_METADATA:
+        return AgentStep(
+            kind=AgentStepKind.TOOL,
+            title="Inspect document",
+            detail=f"document_id={query}",
+            tool=tool,
+            query=query,
+            hits=None,
+        )
+    if tool == AgentToolName.SOURCE_METADATA:
+        return AgentStep(
+            kind=AgentStepKind.TOOL,
+            title="Inspect source",
+            detail=query,
+            tool=tool,
+            query=query,
+            hits=None,
+        )
     titles = [row.document.title or row.document.url for row in rows[:3]]
     return AgentStep(
         kind=AgentStepKind.TOOL,
-        title=f"Run {tool}",
+        title=f"Run {tool.value}",
         detail=f"Top hits: {', '.join(titles) if titles else 'none'}",
         tool=tool,
         query=query,
@@ -707,7 +815,7 @@ def _expand_with_graph_neighbors(ranked: list[RankedDocument], limit: int) -> li
 
 def synthesize_answer(query: str, results: list[RankedDocument]) -> str:
     if not results:
-        return "No strong matches found in the indexed corpus yet."
+        return ""
     lines = [f"For `{query}`, the strongest matches in the corpus point to:"]
     for item in results[:4]:
         title = item.document.title or item.document.url

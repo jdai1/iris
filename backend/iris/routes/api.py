@@ -1,18 +1,22 @@
 from __future__ import annotations
 
+import json
 from typing import TypeVar
 
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 
 from iris.dao import admin
 from iris.dao import agent as agent_dao
 from iris.dao import db
 from iris.dao import source_profiles as profile_dao
+from iris.dao.user_state import get_or_create_firebase_user, get_or_create_local_user
+from iris.models import User
 from iris.services.ingestion.crawler import Crawler
 from iris.dao.db import init_db
 from iris.services.retrieval.digest import get_digest
-from iris.schemas.enums import CrawlJobStatus, SourceStatus
+from iris.schemas.enums import AgentMessageRole, CrawlJobStatus, SourceStatus
 from iris.dao.sources import get_or_create_source
 from iris.schemas.api import (
     AdminCrawlJobSchema,
@@ -40,12 +44,14 @@ from iris.schemas.api import (
     PageSchema,
     SearchResultSchema,
     SearchSchema,
-    SearchToolTraceSchema,
     SourceCreateSchema,
     SourceProfileAnalysisSchema,
     SourceSchema,
+    UserSchema,
 )
-from iris.services.retrieval.search import agentic_search, search_documents, synthesize_answer
+from iris.services.auth import verify_firebase_token
+from iris.services.common.config import firebase_auth_enabled, openai_api_key
+from iris.services.retrieval.search import search_documents, stream_openai_agentic_chat, synthesize_answer
 from iris.services.retrieval.source_profiles import generate_source_profile
 from iris.routes.dumps import dump_crawl_job, dump_digest_recommendation, dump_document, dump_source, dump_source_profile_analysis
 from iris.services.ingestion.source_classifier import classify_source_url
@@ -70,10 +76,44 @@ def get_session():
         yield
 
 
+def _bearer_token(authorization: str | None) -> str | None:
+    if not authorization:
+        return None
+    scheme, _, token = authorization.partition(" ")
+    if scheme.lower() != "bearer" or not token:
+        raise HTTPException(status_code=401, detail="Expected Bearer auth token")
+    return token
+
+
+def get_current_user(authorization: str | None = Header(default=None)) -> User:
+    token = _bearer_token(authorization)
+    if token:
+        return get_or_create_firebase_user(verify_firebase_token(token))
+    if firebase_auth_enabled():
+        raise HTTPException(status_code=401, detail="Authentication required")
+    return get_or_create_local_user()
+
+
+def dump_user(user: User) -> UserSchema:
+    return UserSchema(
+        id=user.id,
+        slug=user.slug,
+        firebase_uid=user.firebase_uid,
+        email=user.email,
+        display_name=user.display_name,
+        photo_url=user.photo_url,
+    )
+
+
 @app.get("/health", response_model=HealthSchema)
 def health(_bound_session=Depends(get_session)) -> HealthSchema:
     counts = admin.get_health_counts()
     return HealthSchema(ok=True, sources=counts.sources, documents=counts.documents)
+
+
+@app.get("/api/me", response_model=UserSchema)
+def me(_bound_session=Depends(get_session), user: User = Depends(get_current_user)) -> UserSchema:
+    return dump_user(user)
 
 
 @app.post("/api/sources", response_model=SourceSchema)
@@ -265,32 +305,15 @@ def search(q: str, limit: int = 12, _bound_session=Depends(get_session)) -> Sear
     )
 
 
-@app.get("/api/agentic-search", response_model=SearchSchema)
-def agentic_search_endpoint(q: str, limit: int = 12, _bound_session=Depends(get_session)) -> SearchSchema:
-    result = agentic_search(q, limit=limit)
-    return SearchSchema(
-        query=q,
-        answer=result.answer,
-        results=[
-            SearchResultSchema(document=dump_document(item.document), score=item.score, reason=item.reason)
-            for item in result.results
-        ],
-        tools=[
-            SearchToolTraceSchema(
-                tool=tool.tool,
-                query=tool.query,
-                hits=tool.hits,
-                top_titles=tool.top_titles,
-            )
-            for tool in result.tools
-        ],
-    )
-
-
 @app.post("/api/agent-chat", response_model=AgentChatSchema)
-def agent_chat(payload: AgentChatRequestSchema, _bound_session=Depends(get_session)) -> AgentChatSchema:
+def agent_chat(
+    payload: AgentChatRequestSchema,
+    _bound_session=Depends(get_session),
+    user: User = Depends(get_current_user),
+) -> AgentChatSchema:
     conversation, user_message, assistant_message, result = agent_dao.create_agent_chat(
         payload.message,
+        user=user,
         limit=payload.limit,
         conversation_id=payload.conversation_id,
     )
@@ -306,21 +329,178 @@ def agent_chat(payload: AgentChatRequestSchema, _bound_session=Depends(get_sessi
         ],
         steps=[
             AgentStepSchema(
-                kind=step.kind,
-                title=step.title,
-                detail=step.detail,
-                tool=step.tool,
-                query=step.query,
-                hits=step.hits,
+                **_agent_step_payload(step),
             )
             for step in result.steps
         ],
     )
 
 
+@app.post("/api/agent-chat/stream")
+def agent_chat_stream(
+    payload: AgentChatRequestSchema,
+    authorization: str | None = Header(default=None),
+) -> StreamingResponse:
+    return StreamingResponse(
+        _agent_chat_stream_events(payload, authorization),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+async def _agent_chat_stream_events(payload: AgentChatRequestSchema, authorization: str | None):
+    try:
+        init_db()
+        with db.session_scope():
+            user = _current_user_from_header(authorization)
+            conversation, user_message = agent_dao.start_agent_chat(
+                payload.message,
+                user=user,
+                conversation_id=payload.conversation_id,
+            )
+            conversation_id = conversation.id
+            user_message_id = user_message.id
+        yield _sse(
+            "conversation",
+            {
+                "conversation_id": conversation_id,
+                "user_message_id": user_message_id,
+                "message": payload.message,
+            },
+        )
+
+        if not openai_api_key():
+            yield _sse("error", {"message": "OpenAI API key is required for agent chat", "type": "MissingOpenAIKeyError"})
+            return
+
+        with db.session_scope():
+            user = _current_user_from_header(authorization)
+            conversation = agent_dao.get_agent_conversation(conversation_id, user=user)
+            if conversation is None:
+                yield _sse("error", {"message": "Conversation not found", "type": "ConversationNotFoundError"})
+                return
+            user_message = next((message for message in conversation.messages if message.id == user_message_id), None)
+            if user_message is None:
+                yield _sse("error", {"message": "User message not found", "type": "UserMessageNotFoundError"})
+                return
+            conversation_context = _agent_conversation_context(conversation, current_user_message_id=user_message_id)
+            async for event in stream_openai_agentic_chat(
+                payload.message,
+                limit=payload.limit,
+                conversation_context=conversation_context,
+            ):
+                async for chunk in _agent_chat_event_chunks(event, conversation, user_message, payload):
+                    yield chunk
+    except Exception as exc:
+        yield _sse("error", {"message": str(exc), "type": type(exc).__name__})
+
+
+def _current_user_from_header(authorization: str | None) -> User:
+    token = _bearer_token(authorization)
+    if token:
+        return get_or_create_firebase_user(verify_firebase_token(token))
+    if firebase_auth_enabled():
+        raise HTTPException(status_code=401, detail="Authentication required")
+    return get_or_create_local_user()
+
+
+async def _agent_chat_event_chunks(event, conversation, user_message, payload: AgentChatRequestSchema):
+    if event.event == "tool_result" and event.step:
+        yield _sse(
+            "tool_result",
+            {
+                "step": _agent_step_payload(event.step),
+                "hits": [
+                    {
+                        "document_id": row.document.id,
+                        "title": row.document.title or row.document.url,
+                        "source_domain": row.document.source.canonical_domain,
+                        "score": row.score,
+                        "reason": row.reason,
+                    }
+                    for row in event.rows[:5]
+                ],
+            },
+        )
+        return
+
+    if event.event == "step" and event.step:
+        yield _sse("step", {"step": _agent_step_payload(event.step)})
+        return
+
+    if event.event == "final" and event.result:
+        assistant_message = agent_dao.finish_agent_chat(conversation, event.result)
+        yield _sse(
+            "final",
+            {
+                "conversation_id": conversation.id,
+                "user_message_id": user_message.id,
+                "assistant_message_id": assistant_message.id,
+                "message": payload.message,
+                "answer": event.result.answer,
+                "steps": [_agent_step_payload(step) for step in event.result.steps],
+                "results": [
+                    {
+                        "document": dump_document(item.document).model_dump(),
+                        "score": item.score,
+                        "reason": item.reason,
+                    }
+                    for item in event.result.results
+                ],
+            },
+        )
+        yield _sse("done", {"conversation_id": conversation.id})
+        return
+
+
+def _agent_step_payload(step) -> dict[str, object]:
+    kind = step.kind.value if hasattr(step.kind, "value") else str(step.kind)
+    tool = step.tool.value if hasattr(step.tool, "value") else step.tool
+    return {
+        "kind": kind,
+        "title": step.title,
+        "detail": step.detail,
+        "tool": tool,
+        "query": step.query,
+        "hits": step.hits,
+    }
+
+
+def _agent_conversation_context(conversation, *, current_user_message_id: int) -> str:
+    lines: list[str] = []
+    prior_messages = [message for message in conversation.messages if message.id != current_user_message_id]
+    for message in prior_messages:
+        role = "User" if message.role == AgentMessageRole.USER else "Iris"
+        content = " ".join(message.content.split())
+        if len(content) > 700:
+            content = f"{content[:697]}..."
+        lines.append(f"{role}: {content}")
+        if message.role == AgentMessageRole.ASSISTANT and message.results:
+            lines.append("Iris recommended links:")
+            for result in message.results[:8]:
+                document = result.document
+                title = document.title or document.url
+                summary = " ".join((document.summary or "").split())
+                if len(summary) > 260:
+                    summary = f"{summary[:257]}..."
+                lines.append(
+                    f"- document_id={document.id}; title={title}; source={document.source.canonical_domain}; "
+                    f"url={document.url}; summary={summary}"
+                )
+    return "\n".join(lines)
+
+
+def _sse(event: str, data: dict[str, object]) -> str:
+    return f"event: {event}\ndata: {json.dumps(data, default=str)}\n\n"
+
+
 @app.get("/api/agent-conversations", response_model=list[AgentConversationSummarySchema])
-def agent_conversations(limit: int = 30, _bound_session=Depends(get_session)) -> list[AgentConversationSummarySchema]:
-    conversations = agent_dao.list_agent_conversations(limit=limit)
+def agent_conversations(
+    limit: int = 30,
+    _bound_session=Depends(get_session),
+    user: User = Depends(get_current_user),
+) -> list[AgentConversationSummarySchema]:
+    conversations = agent_dao.list_agent_conversations(limit=limit, user=user)
     return [
         AgentConversationSummarySchema(
             id=conversation.id,
@@ -334,8 +514,12 @@ def agent_conversations(limit: int = 30, _bound_session=Depends(get_session)) ->
 
 
 @app.get("/api/agent-conversations/{conversation_id}", response_model=AgentConversationSchema)
-def agent_conversation(conversation_id: int, _bound_session=Depends(get_session)) -> AgentConversationSchema:
-    conversation = agent_dao.get_agent_conversation(conversation_id)
+def agent_conversation(
+    conversation_id: int,
+    _bound_session=Depends(get_session),
+    user: User = Depends(get_current_user),
+) -> AgentConversationSchema:
+    conversation = agent_dao.get_agent_conversation(conversation_id, user=user)
     if not conversation:
         raise HTTPException(status_code=404, detail="Conversation not found")
     return AgentConversationSchema(
@@ -373,8 +557,12 @@ def _dump_agent_message(message) -> AgentMessageSchema:
 
 
 @app.get("/api/digest", response_model=list[DigestRecommendationSchema])
-def digest(limit: int = 20, _bound_session=Depends(get_session)) -> list[DigestRecommendationSchema]:
-    items = get_digest(limit=limit)
+def digest(
+    limit: int = 20,
+    _bound_session=Depends(get_session),
+    user: User = Depends(get_current_user),
+) -> list[DigestRecommendationSchema]:
+    items = get_digest(limit=limit, user=user)
     return [dump_digest_recommendation(item) for item in items]
 
 

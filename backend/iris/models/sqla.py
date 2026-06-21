@@ -15,6 +15,7 @@ from iris.schemas.enums import (
     IndexMode,
     IndexRunStatus,
     LinkType,
+    SourceProfileAnalysisStatus,
     SourceStatus,
     StringEnum,
 )
@@ -76,15 +77,24 @@ class SourceProfileAnalysis(Base):
     updated_at: Mapped[datetime] = mapped_column(default=utcnow, onupdate=utcnow)
     generated_at: Mapped[datetime | None] = mapped_column(nullable=True)
 
-    status: Mapped[str] = mapped_column(String(40), default="pending", index=True)
+    status: Mapped[SourceProfileAnalysisStatus] = mapped_column(
+        enum_type(SourceProfileAnalysisStatus, "source_profile_analysis_status"),
+        default=SourceProfileAnalysisStatus.PENDING,
+        index=True,
+    )
     model: Mapped[str | None] = mapped_column(String(120), nullable=True)
     input_fingerprint: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     display_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    payload: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    bio: Mapped[str | None] = mapped_column(Text, nullable=True)
+    themes: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
+    writing_style: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
+    strong_takes: Mapped[list[dict] | None] = mapped_column(JSON, nullable=True)
+    public_links: Mapped[list[dict] | None] = mapped_column(JSON, nullable=True)
+    public_contact: Mapped[list[dict] | None] = mapped_column(JSON, nullable=True)
+    caveats: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
     scraped_facts: Mapped[dict | None] = mapped_column(JSON, nullable=True)
-    unavailable_sections: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
 
     source: Mapped[Source] = relationship(back_populates="profile_analysis")
 

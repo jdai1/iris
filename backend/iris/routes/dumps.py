@@ -44,9 +44,14 @@ def dump_source_profile_analysis(analysis: SourceProfileAnalysis) -> SourceProfi
         generated_at=analysis.generated_at,
         model=analysis.model,
         input_fingerprint=analysis.input_fingerprint,
-        payload=analysis.payload,
+        bio=analysis.bio,
+        themes=analysis.themes,
+        writing_style=analysis.writing_style,
+        strong_takes=analysis.strong_takes,
+        public_links=analysis.public_links,
+        public_contact=analysis.public_contact,
+        caveats=analysis.caveats,
         scraped_facts=analysis.scraped_facts,
-        unavailable_sections=analysis.unavailable_sections or [],
         error=analysis.error,
     )
 

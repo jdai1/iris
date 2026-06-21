@@ -4,11 +4,11 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 
 from iris.dao import db
 from iris.models import Document, Source, SourceProfileAnalysis
-from iris.schemas.enums import CrawlStatus, DocumentType, SourceStatus
+from iris.schemas.enums import CrawlStatus, DocumentType, SourceProfileAnalysisStatus, SourceStatus
 
 
 def get_source(source_id: int) -> Source | None:
@@ -32,7 +32,7 @@ def get_or_create_analysis(source: Source) -> SourceProfileAnalysis:
     analysis = get_analysis(source.id)
     if analysis:
         return analysis
-    analysis = SourceProfileAnalysis(source_id=source.id, status="pending")
+    analysis = SourceProfileAnalysis(source_id=source.id, status=SourceProfileAnalysisStatus.PENDING)
     session.add(analysis)
     session.flush()
     return analysis
@@ -41,11 +41,16 @@ def get_or_create_analysis(source: Source) -> SourceProfileAnalysis:
 def upsert_analysis(
     source: Source,
     *,
-    status: str,
+    status: SourceProfileAnalysisStatus,
     display_name: str | None,
-    payload: dict | None,
+    bio: str | None,
+    themes: list[str] | None,
+    writing_style: list[str] | None,
+    strong_takes: list[dict] | None,
+    public_links: list[dict] | None,
+    public_contact: list[dict] | None,
+    caveats: list[str] | None,
     scraped_facts: dict | None,
-    unavailable_sections: list[str],
     model: str | None,
     input_fingerprint: str | None,
     error: str | None = None,
@@ -54,13 +59,18 @@ def upsert_analysis(
     analysis = get_or_create_analysis(source)
     analysis.status = status
     analysis.display_name = display_name
-    analysis.payload = payload
+    analysis.bio = bio
+    analysis.themes = themes
+    analysis.writing_style = writing_style
+    analysis.strong_takes = strong_takes
+    analysis.public_links = public_links
+    analysis.public_contact = public_contact
+    analysis.caveats = caveats
     analysis.scraped_facts = scraped_facts
-    analysis.unavailable_sections = unavailable_sections
     analysis.model = model
     analysis.input_fingerprint = input_fingerprint
     analysis.error = error
-    analysis.generated_at = datetime.now(timezone.utc) if status == "succeeded" else None
+    analysis.generated_at = datetime.now(timezone.utc) if status == SourceProfileAnalysisStatus.SUCCEEDED else None
     db.flush()
     return analysis
 
@@ -71,9 +81,15 @@ def get_documents_for_profile(source_id: int, *, limit: int = 500) -> list[Docum
     return list(
         session.scalars(
             select(Document)
+            .join(Source, Source.id == Document.source_id)
             .where(Document.source_id == source_id)
             .where(Document.crawl_status == CrawlStatus.FETCHED.value)
-            .where(Document.document_type.in_([DocumentType.ESSAY.value, DocumentType.PROFILE.value, DocumentType.COLLECTION.value]))
+            .where(
+                or_(
+                    Document.document_type.in_([DocumentType.ESSAY.value, DocumentType.PROFILE.value, DocumentType.COLLECTION.value]),
+                    Document.url == Source.url,
+                )
+            )
             .order_by(Document.document_type.desc(), Document.published_at.desc().nullslast(), Document.id.desc())
             .limit(max(1, limit))
         )

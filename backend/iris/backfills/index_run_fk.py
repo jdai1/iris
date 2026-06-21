@@ -31,3 +31,13 @@ def migrate_index_run_fk() -> int:
         )
     )
     return result.rowcount or 0
+
+
+def main() -> int:
+    with db.session_scope():
+        print(f"backfilled={migrate_index_run_fk()}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
