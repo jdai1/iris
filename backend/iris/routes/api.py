@@ -50,7 +50,7 @@ from iris.schemas.api import (
     UserSchema,
 )
 from iris.services.auth import verify_firebase_token
-from iris.services.common.config import firebase_auth_enabled, openai_api_key
+from iris.services.common.config import ADMIN_EMAILS, firebase_auth_enabled, openai_api_key
 from iris.services.retrieval.search import search_documents, stream_openai_agentic_chat, synthesize_answer
 from iris.services.retrieval.source_profiles import generate_source_profile
 from iris.routes.dumps import dump_crawl_job, dump_digest_recommendation, dump_document, dump_source, dump_source_profile_analysis
@@ -94,6 +94,16 @@ def get_current_user(authorization: str | None = Header(default=None)) -> User:
     return get_or_create_local_user()
 
 
+def is_admin_user(user: User) -> bool:
+    return bool(user.email and user.email.lower() in ADMIN_EMAILS)
+
+
+def require_admin(user: User = Depends(get_current_user)) -> User:
+    if is_admin_user(user):
+        return user
+    raise HTTPException(status_code=403, detail="Admin access required")
+
+
 def dump_user(user: User) -> UserSchema:
     return UserSchema(
         id=user.id,
@@ -102,6 +112,7 @@ def dump_user(user: User) -> UserSchema:
         email=user.email,
         display_name=user.display_name,
         photo_url=user.photo_url,
+        is_admin=is_admin_user(user),
     )
 
 
@@ -181,7 +192,7 @@ def list_documents(
 
 
 @app.get("/api/admin/overview", response_model=AdminOverviewSchema)
-def get_admin_overview(_bound_session=Depends(get_session)) -> AdminOverviewSchema:
+def get_admin_overview(_bound_session=Depends(get_session), _admin_user: User = Depends(require_admin)) -> AdminOverviewSchema:
     return admin.get_admin_overview()
 
 
@@ -222,6 +233,7 @@ def admin_crawl_jobs(
     source_id: int | None = None,
     index_run_id: int | None = None,
     _bound_session=Depends(get_session),
+    _admin_user: User = Depends(require_admin),
 ) -> PageSchema[AdminCrawlJobSchema]:
     crawl_status = CrawlJobStatus(status) if status and status != "all" else None
     items, total = admin.get_admin_crawl_jobs_page(
@@ -256,6 +268,7 @@ def admin_index_runs(
     offset: int = 0,
     status: str | None = None,
     _bound_session=Depends(get_session),
+    _admin_user: User = Depends(require_admin),
 ) -> PageSchema[AdminIndexRunSchema]:
     items, total = admin.get_admin_index_runs_page(limit=limit, offset=offset, status=status)
     return _page_response(items, total, limit, offset)

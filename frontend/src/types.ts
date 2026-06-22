@@ -16,6 +16,7 @@ export interface User {
   email: string | null;
   display_name: string | null;
   photo_url: string | null;
+  is_admin: boolean;
 }
 
 export interface Document {

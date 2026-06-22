@@ -53,6 +53,22 @@ npm run dev
 
 The frontend expects the API at `http://127.0.0.1:8000` unless `VITE_API_BASE` is set.
 
+To enable Google OAuth, create a Firebase web app in the same Firebase project where
+Google is enabled under Authentication > Sign-in method, then set these frontend
+environment variables:
+
+```bash
+VITE_FIREBASE_API_KEY=...
+VITE_FIREBASE_AUTH_DOMAIN=try-iris.firebaseapp.com
+VITE_FIREBASE_PROJECT_ID=try-iris
+VITE_FIREBASE_APP_ID=...
+VITE_FIREBASE_MESSAGING_SENDER_ID=920930167060
+```
+
+Also set `FIREBASE_PROJECT_ID=try-iris` for the backend so it verifies Firebase ID
+tokens. In Firebase Authentication > Settings > Authorized domains, include the
+local host you run Vite on, usually `localhost` and `127.0.0.1`.
+
 ## Validation
 
 ```bash

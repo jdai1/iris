@@ -47,6 +47,11 @@ DEEPSEEK_API_BASE = os.getenv("DEEPSEEK_API_BASE", "https://api.deepseek.com")
 FIREBASE_PROJECT_ID = os.getenv("FIREBASE_PROJECT_ID") or os.getenv("GOOGLE_CLOUD_PROJECT")
 FIREBASE_SERVICE_ACCOUNT_FILE = os.getenv("FIREBASE_SERVICE_ACCOUNT_FILE") or os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
 FIREBASE_SERVICE_ACCOUNT_JSON = os.getenv("FIREBASE_SERVICE_ACCOUNT_JSON")
+ADMIN_EMAILS = {
+    email.strip().lower()
+    for email in os.getenv("IRIS_ADMIN_EMAILS", "julian.dai@gmail.com").split(",")
+    if email.strip()
+}
 
 
 def firebase_auth_enabled() -> bool:

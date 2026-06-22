@@ -1,6 +1,6 @@
 import { FormEvent, ReactNode, useEffect, useRef, useState } from 'react';
 import type { User as FirebaseUser } from 'firebase/auth';
-import { onAuthStateChanged, signInWithPopup, signOut } from 'firebase/auth';
+import { getRedirectResult, onAuthStateChanged, signInWithPopup, signInWithRedirect, signOut } from 'firebase/auth';
 import {
   Box,
   Button,
@@ -598,11 +598,19 @@ function DirectoryView({ target, onOpenProfile }: { target: ProfileTarget; onOpe
     setLoading(true);
     setError(null);
     try {
-      const sources = await getAdminSources({ status: 'indexed', q: nextQuery.trim(), limit: 25 });
+      const normalizedQuery = nextQuery.trim();
+      if (!nextSelected && !normalizedQuery) {
+        setSelectedSource(null);
+        setSelected(null);
+        setDocumentsPage(emptyPage<Document>());
+        setProfileAnalysis(null);
+        return;
+      }
+      const sources = await getAdminSources({ status: 'indexed', q: normalizedQuery, limit: 25 });
       const source =
         (nextSelected && sources.items.find((item) => item.id === nextSelected.sourceId)) ??
-        sources.items.find((item) => item.canonical_domain === nextQuery.trim().toLowerCase()) ??
-        sources.items[0] ??
+        sources.items.find((item) => item.canonical_domain === normalizedQuery.toLowerCase()) ??
+        (normalizedQuery ? sources.items[0] : null) ??
         null;
       const nextProfile = source ? { sourceId: source.id, domain: source.canonical_domain } : null;
       setSelectedSource(source);
@@ -695,7 +703,7 @@ function DirectoryView({ target, onOpenProfile }: { target: ProfileTarget; onOpe
         value={query}
         onChange={updateQuery}
         onSubmit={submit}
-        placeholder={loading ? 'Loading profile...' : 'Find a person or domain...'}
+        placeholder={loading ? 'Loading...' : 'Find a person or domain...'}
         disabled={loading || !query.trim()}
       >
         {suggestionsOpen && suggestions.length > 0 && (
@@ -711,7 +719,7 @@ function DirectoryView({ target, onOpenProfile }: { target: ProfileTarget; onOpe
       </CorpusSearchForm>
 
       {error && <div className="error">{error}</div>}
-      {loading && <div className="empty-state">Loading directory...</div>}
+      {loading && <div className="empty-state">Loading...</div>}
 
       {!loading && (
         <div className="profile-panel">
@@ -741,7 +749,7 @@ function DirectoryView({ target, onOpenProfile }: { target: ProfileTarget; onOpe
                 <ProfilePagination page={documentsPage} onChange={pageProfileDocuments} />
               </>
             ) : (
-              <div className="empty-state">Search for an indexed profile.</div>
+              null
             )}
           </div>
       )}
@@ -1344,19 +1352,26 @@ function IrisApp({ currentUser, onSignOut }: { currentUser: IrisUser | null; onS
     window.localStorage.setItem(VIEW_STORAGE_KEY, view);
   }, [view]);
 
+  useEffect(() => {
+    if (view === 'admin' && !currentUser?.is_admin) {
+      setView('search');
+    }
+  }, [currentUser?.is_admin, view]);
+
   function openProfile(sourceId: number, domain: string) {
     setProfileTarget({ sourceId, domain });
     setView('directory');
   }
 
-  const navItems: Array<{ view: View; label: string; icon: ReactNode }> = [
+  const navItems: Array<{ view: View; label: string; icon: ReactNode; adminOnly?: boolean }> = [
     { view: 'search', label: 'Search', icon: <Search size={15} /> },
     { view: 'digest', label: 'Digest', icon: <BookOpen size={15} /> },
     { view: 'explore', label: 'Explore', icon: <Orbit size={15} /> },
     { view: 'graph', label: 'Graph', icon: <GitFork size={15} /> },
     { view: 'directory', label: 'Directory', icon: <Users size={15} /> },
-    { view: 'admin', label: 'Admin', icon: <LayoutDashboard size={15} /> },
+    { view: 'admin', label: 'Admin', icon: <LayoutDashboard size={15} />, adminOnly: true },
   ];
+  const visibleNavItems = navItems.filter((item) => !item.adminOnly || currentUser?.is_admin);
 
   return (
     <Box as="main" className="app-shell">
@@ -1365,7 +1380,7 @@ function IrisApp({ currentUser, onSignOut }: { currentUser: IrisUser | null; onS
           <span>iris</span>
         </Box>
         <Stack as="nav" className="sidebar-nav" gap="1">
-          {navItems.map((item) => (
+          {visibleNavItems.map((item) => (
             <Button
               key={item.view}
               type="button"
@@ -1397,15 +1412,7 @@ function IrisApp({ currentUser, onSignOut }: { currentUser: IrisUser | null; onS
                   <UserCircle size={16} />
                   <span>{currentUser.email || currentUser.display_name || currentUser.slug}</span>
                 </div>
-                <div className="settings-menu-row settings-menu-muted">
-                  <Settings size={16} />
-                  <span>Personal account</span>
-                </div>
                 <div className="settings-menu-divider" />
-                <button className="settings-menu-row" type="button">
-                  <Settings size={16} />
-                  <span>Settings</span>
-                </button>
                 <button className="settings-menu-row" type="button" onClick={onSignOut}>
                   <LogOut size={16} />
                   <span>Log out</span>
@@ -1433,7 +1440,7 @@ function IrisApp({ currentUser, onSignOut }: { currentUser: IrisUser | null; onS
         {view === 'directory' && <DirectoryView target={profileTarget} onOpenProfile={openProfile} />}
         {view === 'explore' && <EmbeddingExplorer />}
         {view === 'graph' && <GraphExplorer onOpenProfile={openProfile} />}
-        {view === 'admin' && <AdminView />}
+        {view === 'admin' && currentUser?.is_admin && <AdminView />}
       </Box>
     </Box>
   );
@@ -1444,17 +1451,23 @@ export default function App() {
   const [currentUser, setCurrentUser] = useState<IrisUser | null>(null);
   const [authReady, setAuthReady] = useState(!firebaseEnabled);
   const [authError, setAuthError] = useState<string | null>(null);
+  const [signingIn, setSigningIn] = useState(false);
 
   useEffect(() => {
     if (!auth) {
       setAuthTokenProvider(null);
       return;
     }
+    getRedirectResult(auth).catch((err) => {
+      setAuthError(readAuthError(err, 'Sign-in failed'));
+      setSigningIn(false);
+    });
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       setFirebaseUser(user);
       setCurrentUser(null);
-      setAuthError(null);
+      if (user) setAuthError(null);
       setAuthReady(true);
+      setSigningIn(false);
       setAuthTokenProvider(user ? () => user.getIdToken() : null);
     });
     return () => {
@@ -1481,27 +1494,48 @@ export default function App() {
   async function signIn() {
     if (!auth) return;
     setAuthError(null);
+    setSigningIn(true);
     try {
       await signInWithPopup(auth, googleProvider);
     } catch (err) {
-      setAuthError(err instanceof Error ? err.message : 'Sign-in failed');
+      if (shouldUseRedirectSignIn(err)) {
+        await signInWithRedirect(auth, googleProvider);
+        return;
+      }
+      setAuthError(readAuthError(err, 'Sign-in failed'));
+      setSigningIn(false);
     }
   }
 
   async function handleSignOut() {
     if (!auth) return;
+    setAuthError(null);
     await signOut(auth);
   }
 
   if (!firebaseEnabled) return <IrisApp currentUser={null} onSignOut={() => {}} />;
-  if (!authReady) return <div className="auth-shell">Loading...</div>;
-  if (!firebaseUser) return <AuthScreen error={authError} onSignIn={signIn} />;
-  if (!currentUser && !authError) return <div className="auth-shell">Loading account...</div>;
-  if (authError) return <AuthScreen error={authError} onSignIn={signIn} />;
+  if (!authReady) return <div className="auth-shell auth-shell-center">Loading...</div>;
+  if (!firebaseUser) return <AuthScreen error={authError} signingIn={signingIn} onSignIn={signIn} />;
+  if (!currentUser && !authError) return <div className="auth-shell auth-shell-center">Loading account...</div>;
+  if (authError) return <AuthScreen error={authError} signingIn={signingIn} onSignIn={signIn} />;
   return <IrisApp currentUser={currentUser} onSignOut={handleSignOut} />;
 }
 
-function AuthScreen({ error, onSignIn }: { error: string | null; onSignIn: () => void }) {
+function shouldUseRedirectSignIn(err: unknown): boolean {
+  const code = typeof err === 'object' && err && 'code' in err ? String(err.code) : '';
+  return code === 'auth/popup-blocked' || code === 'auth/cancelled-popup-request';
+}
+
+function readAuthError(err: unknown, fallback: string): string {
+  const code = typeof err === 'object' && err && 'code' in err ? String(err.code) : '';
+  if (code === 'auth/unauthorized-domain') {
+    return 'This domain is not authorized in Firebase Authentication. Add the current localhost/domain to Authorized domains.';
+  }
+  if (err instanceof Error) return err.message;
+  return fallback;
+}
+
+function AuthScreen({ error, signingIn, onSignIn }: { error: string | null; signingIn: boolean; onSignIn: () => void }) {
   return (
     <main className="auth-shell">
       <section className="auth-landing">
@@ -1509,19 +1543,10 @@ function AuthScreen({ error, onSignIn }: { error: string | null; onSignIn: () =>
           <div className="auth-brand">
             <span>iris</span>
           </div>
-          <div className="auth-copy">
-            <h1>
-              <span>The good web is still out there.</span>
-              <span>Iris helps you find it.</span>
-            </h1>
-            <p>
-              Start with writers and essays you trust. Iris builds a searchable corpus around them,
-              follows their links, and helps you discover what is worth reading next.
-            </p>
-          </div>
           {error && <div className="error">{error}</div>}
-          <button type="button" onClick={onSignIn}>
-            Continue <span aria-hidden="true">→</span>
+          <button className="auth-link-button" type="button" onClick={onSignIn} disabled={signingIn}>
+            <span>The good web is still out there</span>
+            <span aria-hidden="true">→</span>
           </button>
         </div>
       </section>
