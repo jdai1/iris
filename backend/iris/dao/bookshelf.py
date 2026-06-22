@@ -311,6 +311,16 @@ def update_collection(
     return collection
 
 
+def delete_collection(user: User, collection_id: int) -> bool:
+    """Delete a user-owned collection and its item memberships."""
+    collection = get_collection(user, collection_id)
+    if collection is None:
+        return False
+    db.current_session().delete(collection)
+    db.current_session().flush()
+    return True
+
+
 def get_collection(user: User, collection_id: int) -> BookshelfCollection | None:
     """Return a user-owned collection by id."""
     return (

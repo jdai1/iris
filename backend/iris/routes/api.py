@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from typing import TypeVar
 
-from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select
@@ -78,7 +78,7 @@ app.add_middleware(
 T = TypeVar("T")
 
 
-def get_session():
+async def get_session():
     init_db()
     with db.session_scope():
         yield
@@ -93,7 +93,10 @@ def _bearer_token(authorization: str | None) -> str | None:
     return token
 
 
-def get_current_user(authorization: str | None = Header(default=None)) -> User:
+def get_current_user(
+    authorization: str | None = Header(default=None),
+    _bound_session=Depends(get_session),
+) -> User:
     token = _bearer_token(authorization)
     if token:
         return get_or_create_firebase_user(verify_firebase_token(token))
@@ -733,6 +736,18 @@ def update_bookshelf_collection(
     if collection is None:
         raise HTTPException(status_code=404, detail="Collection not found")
     return _dump_bookshelf_collection(collection)
+
+
+@app.delete("/api/bookshelf/collections/{collection_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_bookshelf_collection(
+    collection_id: int,
+    _bound_session=Depends(get_session),
+    user: User = Depends(get_current_user),
+) -> Response:
+    deleted = bookshelf_dao.delete_collection(user, collection_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Collection not found")
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @app.post("/api/bookshelf/collections/{collection_id}/items", response_model=BookshelfCollectionSchema)

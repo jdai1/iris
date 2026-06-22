@@ -242,6 +242,24 @@
   .answer-panel {
     position: static;
   }
+
+  .bookshelf-playlist-shell,
+  .bookshelf-toolbar-actions,
+  .bookshelf-add-link {
+    grid-template-columns: 1fr;
+  }
+
+  .bookshelf-rail {
+    position: static;
+  }
+
+  .bookshelf-table {
+    overflow-x: auto;
+  }
+
+  .bookshelf-table-row {
+    min-width: 920px;
+  }
 }
 
 @media (max-width: 820px) {

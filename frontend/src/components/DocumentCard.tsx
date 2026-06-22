@@ -1,6 +1,8 @@
+import { useState } from 'react';
 import { Badge, Box, Heading, HStack, Link, Text } from '@chakra-ui/react';
-import { ArrowUpRight } from 'lucide-react';
-import type { Document } from '../types';
+import { ArrowUpRight, BookmarkPlus, Plus } from 'lucide-react';
+import { addBookshelfCollectionItem, getBookshelfCollections, updateDocumentBookshelf } from '../api';
+import type { BookshelfCollection, Document } from '../types';
 
 type DocumentCardProps = {
   document: Document;
@@ -17,6 +19,51 @@ export function DocumentCard({
   onOpenProfile,
   compact = false,
 }: DocumentCardProps) {
+  const [collections, setCollections] = useState<BookshelfCollection[]>([]);
+  const [collectionsLoaded, setCollectionsLoaded] = useState(false);
+  const [actionsOpen, setActionsOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [addedCollectionIds, setAddedCollectionIds] = useState<Set<number>>(new Set());
+  const [error, setError] = useState<string | null>(null);
+
+  async function loadCollections() {
+    if (collectionsLoaded) return;
+    try {
+      setCollections(await getBookshelfCollections());
+      setCollectionsLoaded(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not load collections');
+    }
+  }
+
+  async function saveToReadNext() {
+    setSaving(true);
+    setError(null);
+    try {
+      await updateDocumentBookshelf(document.id, { status: 'saved' });
+      setSaved(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not save');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function addToCollection(collectionId: number) {
+    setSaving(true);
+    setError(null);
+    try {
+      await addBookshelfCollectionItem(collectionId, document.id);
+      setAddedCollectionIds((current) => new Set(current).add(collectionId));
+      setSaved(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not add');
+    } finally {
+      setSaving(false);
+    }
+  }
+
   return (
     <Box as="article" className={compact ? 'document-card document-card-compact' : 'document-card'}>
       {!compact && (
@@ -60,6 +107,40 @@ export function DocumentCard({
           </Link>
         </HStack>
       )}
+      <div className="document-bookshelf-actions">
+        <button type="button" onClick={saveToReadNext} disabled={saving || saved}>
+          <BookmarkPlus size={14} />
+          {saved ? 'Saved' : 'Read next'}
+        </button>
+        <div className="document-collection-menu">
+          <button
+            type="button"
+            onClick={() => {
+              const nextOpen = !actionsOpen;
+              setActionsOpen(nextOpen);
+              if (nextOpen) loadCollections();
+            }}
+            aria-expanded={actionsOpen}
+          >
+            <Plus size={14} />
+            Collection
+          </button>
+          {actionsOpen && (
+            <div className="document-collection-menu-list">
+              {collections.length === 0 && <span>No collections yet</span>}
+              {collections.map((collection) => {
+                const added = addedCollectionIds.has(collection.id);
+                return (
+                  <button key={collection.id} type="button" onClick={() => addToCollection(collection.id)} disabled={saving || added}>
+                    {added ? 'Added' : collection.name}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+        {error && <small>{error}</small>}
+      </div>
     </Box>
   );
 }
