@@ -1347,6 +1347,7 @@ function IrisApp({ currentUser, onSignOut }: { currentUser: IrisUser | null; onS
   const [view, setView] = useState<View>(initialView);
   const [profileTarget, setProfileTarget] = useState<ProfileTarget>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const settingsRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     window.localStorage.setItem(VIEW_STORAGE_KEY, view);
@@ -1357,6 +1358,17 @@ function IrisApp({ currentUser, onSignOut }: { currentUser: IrisUser | null; onS
       setView('search');
     }
   }, [currentUser?.is_admin, view]);
+
+  useEffect(() => {
+    if (!settingsOpen) return;
+    function closeSettingsOnOutsideClick(event: PointerEvent) {
+      const target = event.target;
+      if (target instanceof Node && settingsRef.current?.contains(target)) return;
+      setSettingsOpen(false);
+    }
+    document.addEventListener('pointerdown', closeSettingsOnOutsideClick);
+    return () => document.removeEventListener('pointerdown', closeSettingsOnOutsideClick);
+  }, [settingsOpen]);
 
   function openProfile(sourceId: number, domain: string) {
     setProfileTarget({ sourceId, domain });
@@ -1405,7 +1417,7 @@ function IrisApp({ currentUser, onSignOut }: { currentUser: IrisUser | null; onS
           ))}
         </Stack>
         {currentUser && (
-          <div className="sidebar-settings">
+          <div className="sidebar-settings" ref={settingsRef}>
             {settingsOpen && (
               <div className="settings-menu">
                 <div className="settings-menu-row settings-menu-muted">
