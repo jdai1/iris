@@ -7,7 +7,14 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from iris.dao.db import Base
 from iris.models.sqla import Document, enum_type, utcnow
-from iris.schemas.enums import AgentMessageRole, CategoryAssignmentSource, CategoryStatus, TagScope
+from iris.schemas.enums import (
+    AgentMessageRole,
+    BookshelfCollectionVisibility,
+    BookshelfStatus,
+    CategoryAssignmentSource,
+    CategoryStatus,
+    TagScope,
+)
 
 
 class User(Base):
@@ -29,6 +36,9 @@ class User(Base):
     document_mappings: Mapped[list["UserDocumentMapping"]] = relationship(
         back_populates="user", cascade="all, delete-orphan"
     )
+    bookshelf_collections: Mapped[list["BookshelfCollection"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
+    )
     tags: Mapped[list["Tag"]] = relationship(
         back_populates="user", foreign_keys="Tag.user_id"
     )
@@ -48,6 +58,7 @@ class UserDocumentMapping(Base):
         Index("idx_user_document_mappings_user_favorite", "user_id", "favorited_at"),
         Index("idx_user_document_mappings_user_read", "user_id", "read_at"),
         Index("idx_user_document_mappings_user_dismissed", "user_id", "dismissed_at"),
+        Index("idx_user_document_mappings_user_bookshelf", "user_id", "bookshelf_status"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -63,11 +74,66 @@ class UserDocumentMapping(Base):
     read_at: Mapped[datetime | None] = mapped_column(nullable=True)
     favorited_at: Mapped[datetime | None] = mapped_column(nullable=True)
     dismissed_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    bookshelf_status: Mapped[BookshelfStatus | None] = mapped_column(
+        enum_type(BookshelfStatus, "bookshelf_status"), nullable=True, index=True
+    )
 
     open_count: Mapped[int] = mapped_column(Integer, default=0)
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    intent_note: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     user: Mapped[User] = relationship(back_populates="document_mappings")
+    document: Mapped[Document] = relationship(foreign_keys=[document_id])
+
+
+class BookshelfCollection(Base):
+    """A user-curated collection of bookshelf entries."""
+
+    __tablename__ = "bookshelf_collections"
+    __table_args__ = (
+        UniqueConstraint("share_token", name="uq_bookshelf_collections_share_token"),
+        Index("idx_bookshelf_collections_user_updated", "user_id", "updated_at"),
+        Index("idx_bookshelf_collections_visibility", "visibility"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(default=utcnow, onupdate=utcnow)
+
+    name: Mapped[str] = mapped_column(String(255))
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    visibility: Mapped[BookshelfCollectionVisibility] = mapped_column(
+        enum_type(BookshelfCollectionVisibility, "bookshelf_collection_visibility"),
+        default=BookshelfCollectionVisibility.PRIVATE,
+        index=True,
+    )
+    share_token: Mapped[str | None] = mapped_column(String(64), nullable=True, unique=True, index=True)
+
+    user: Mapped[User] = relationship(back_populates="bookshelf_collections")
+    items: Mapped[list["BookshelfCollectionItem"]] = relationship(
+        back_populates="collection", cascade="all, delete-orphan", order_by="BookshelfCollectionItem.position"
+    )
+
+
+class BookshelfCollectionItem(Base):
+    """One document in a user-created bookshelf collection."""
+
+    __tablename__ = "bookshelf_collection_items"
+    __table_args__ = (
+        UniqueConstraint("collection_id", "document_id", name="uq_bookshelf_collection_items_collection_document"),
+        Index("idx_bookshelf_collection_items_collection_position", "collection_id", "position"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    collection_id: Mapped[int] = mapped_column(ForeignKey("bookshelf_collections.id"), index=True)
+    document_id: Mapped[int] = mapped_column(ForeignKey("documents.id"), index=True)
+
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+    position: Mapped[int] = mapped_column(Integer, default=0)
+
+    collection: Mapped[BookshelfCollection] = relationship(back_populates="items")
     document: Mapped[Document] = relationship(foreign_keys=[document_id])
 
 

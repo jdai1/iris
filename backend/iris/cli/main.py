@@ -36,7 +36,6 @@ from iris.services.ingestion.source_classifier import (
     classify_source_homepage,
     classify_source_url,
 )
-from iris.services.retrieval.digest import get_digest
 from iris.services.retrieval.search import search_documents, synthesize_answer
 
 
@@ -113,16 +112,6 @@ def cmd_search(args: argparse.Namespace) -> None:
             print(f"   {doc.url}")
             if doc.summary:
                 print(f"   {doc.summary[:260]}")
-
-
-def cmd_digest(args: argparse.Namespace) -> None:
-    with db.session_scope():
-        items = get_digest(limit=args.limit)
-        for idx, item in enumerate(items, start=1):
-            doc = item.document
-            print(f"{idx}. {doc.title or doc.url}")
-            print(f"   {doc.source.canonical_domain} | score={item.score:.3f}")
-            print(f"   {item.reason}")
 
 
 def cmd_status(_args: argparse.Namespace) -> None:
@@ -562,10 +551,6 @@ def build_parser() -> argparse.ArgumentParser:
     search.add_argument("query")
     search.add_argument("--limit", type=int, default=10)
     search.set_defaults(func=cmd_search)
-
-    digest = subparsers.add_parser("digest")
-    digest.add_argument("--limit", type=int, default=10)
-    digest.set_defaults(func=cmd_digest)
 
     status = subparsers.add_parser("status")
     status.set_defaults(func=cmd_status)

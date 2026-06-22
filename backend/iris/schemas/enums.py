@@ -86,6 +86,17 @@ class TagScope(StringEnum):
     USER = "user"
 
 
+class BookshelfStatus(StringEnum):
+    SAVED = "saved"
+    READ = "read"
+    ARCHIVED = "archived"
+
+
+class BookshelfCollectionVisibility(StringEnum):
+    PRIVATE = "private"
+    SHARE_LINK = "share_link"
+
+
 class CategoryStatus(StringEnum):
     ACTIVE = "active"
     ARCHIVED = "archived"

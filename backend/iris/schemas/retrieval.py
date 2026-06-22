@@ -19,17 +19,6 @@ class RankedDocument:
 
 
 @dataclass(frozen=True)
-class DigestRecommendation:
-    document: Document
-    score: float
-    reason: str
-
-    @property
-    def document_id(self) -> int:
-        return self.document.id
-
-
-@dataclass(frozen=True)
 class AgentStep:
     kind: AgentStepKind
     title: str

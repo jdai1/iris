@@ -6,16 +6,18 @@ from typing import TypeVar
 from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
+from sqlalchemy import select
+from sqlalchemy.orm import joinedload
 
 from iris.dao import admin
 from iris.dao import agent as agent_dao
+from iris.dao import bookshelf as bookshelf_dao
 from iris.dao import db
 from iris.dao import source_profiles as profile_dao
 from iris.dao.user_state import get_or_create_firebase_user, get_or_create_local_user
-from iris.models import User
+from iris.models import BookshelfCollection, BookshelfCollectionItem, BookshelfCollectionVisibility, BookshelfStatus, Document, User, UserDocumentMapping
 from iris.services.ingestion.crawler import Crawler
 from iris.dao.db import init_db
-from iris.services.retrieval.digest import get_digest
 from iris.schemas.enums import AgentMessageRole, CrawlJobStatus, SourceStatus
 from iris.dao.sources import get_or_create_source
 from iris.schemas.api import (
@@ -29,8 +31,14 @@ from iris.schemas.api import (
     AgentConversationSummarySchema,
     AgentMessageSchema,
     AgentStepSchema,
+    BookshelfCollectionCreateSchema,
+    BookshelfCollectionItemCreateSchema,
+    BookshelfCollectionSchema,
+    BookshelfCollectionUpdateSchema,
+    BookshelfEntrySchema,
+    BookshelfLinkCreateSchema,
+    BookshelfUpdateSchema,
     CrawlSchema,
-    DigestRecommendationSchema,
     DocumentDetailSchema,
     DocumentIncomingLinkSchema,
     DocumentOutgoingLinkSchema,
@@ -53,7 +61,7 @@ from iris.services.auth import verify_firebase_token
 from iris.services.common.config import ADMIN_EMAILS, firebase_auth_enabled, openai_api_key
 from iris.services.retrieval.search import search_documents, stream_openai_agentic_chat, synthesize_answer
 from iris.services.retrieval.source_profiles import generate_source_profile
-from iris.routes.dumps import dump_crawl_job, dump_digest_recommendation, dump_document, dump_source, dump_source_profile_analysis
+from iris.routes.dumps import dump_bookshelf_collection, dump_bookshelf_entry, dump_crawl_job, dump_document, dump_source, dump_source_profile_analysis
 from iris.services.ingestion.source_classifier import classify_source_url
 
 
@@ -261,6 +269,36 @@ def _page_response(items: list[T], total: int, limit: int, offset: int) -> PageS
         has_next=page_offset + page_limit < total,
         has_previous=page_offset > 0,
     )
+
+
+def _dump_bookshelf_entries(user: User, mappings: list[UserDocumentMapping]) -> list[BookshelfEntrySchema]:
+    tags = bookshelf_dao.user_tags_for_documents(user, [mapping.document_id for mapping in mappings])
+    return [dump_bookshelf_entry(mapping, tags.get(mapping.document_id, [])) for mapping in mappings]
+
+
+def _dump_bookshelf_collection(collection: BookshelfCollection) -> BookshelfCollectionSchema:
+    document_ids = [item.document_id for item in collection.items]
+    mappings = (
+        db.current_session()
+        .execute(
+            select(UserDocumentMapping)
+            .options(joinedload(UserDocumentMapping.document).joinedload(Document.source))
+            .where(UserDocumentMapping.user_id == collection.user_id)
+            .where(UserDocumentMapping.document_id.in_(document_ids))
+        )
+        .scalars()
+        .all()
+        if document_ids
+        else []
+    )
+    by_document_id = {mapping.document_id: mapping for mapping in mappings}
+    tags = bookshelf_dao.user_tags_for_documents(collection.user, document_ids)
+    entries = [
+        dump_bookshelf_entry(by_document_id[item.document_id], tags.get(item.document_id, []))
+        for item in collection.items
+        if item.document_id in by_document_id
+    ]
+    return dump_bookshelf_collection(collection, entries)
 
 @app.get("/api/admin/index-runs", response_model=PageSchema[AdminIndexRunSchema])
 def admin_index_runs(
@@ -569,14 +607,178 @@ def _dump_agent_message(message) -> AgentMessageSchema:
     )
 
 
-@app.get("/api/digest", response_model=list[DigestRecommendationSchema])
-def digest(
-    limit: int = 20,
+@app.get("/api/bookshelf", response_model=PageSchema[BookshelfEntrySchema])
+def list_bookshelf(
+    status: str | None = None,
+    limit: int = 100,
+    offset: int = 0,
     _bound_session=Depends(get_session),
     user: User = Depends(get_current_user),
-) -> list[DigestRecommendationSchema]:
-    items = get_digest(limit=limit, user=user)
-    return [dump_digest_recommendation(item) for item in items]
+) -> PageSchema[BookshelfEntrySchema]:
+    if status == "favorite":
+        mappings, total = bookshelf_dao.favorite_entries(user, limit=limit, offset=offset)
+    else:
+        parsed_status = None
+        if status:
+            try:
+                parsed_status = BookshelfStatus(status)
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail="Invalid bookshelf status") from exc
+        mappings, total = bookshelf_dao.list_entries(user, status=parsed_status, limit=limit, offset=offset)
+    return _page_response(_dump_bookshelf_entries(user, mappings), total, limit, offset)
+
+
+@app.patch("/api/documents/{document_id}/bookshelf", response_model=BookshelfEntrySchema)
+def update_document_bookshelf(
+    document_id: int,
+    payload: BookshelfUpdateSchema,
+    _bound_session=Depends(get_session),
+    user: User = Depends(get_current_user),
+) -> BookshelfEntrySchema:
+    document = db.current_session().get(Document, document_id)
+    if not document:
+        raise HTTPException(status_code=404, detail="Document not found")
+    fields = payload.model_fields_set
+    mapping = bookshelf_dao.update_entry(
+        user,
+        document,
+        status=payload.status,
+        favorited=payload.favorited,
+        note=payload.note,
+        intent_note=payload.intent_note,
+        tags=payload.tags,
+        update_note="note" in fields,
+        update_intent_note="intent_note" in fields,
+    )
+    tags = bookshelf_dao.user_tags_for_documents(user, [document.id]).get(document.id, [])
+    return dump_bookshelf_entry(mapping, tags)
+
+
+@app.post("/api/bookshelf/links", response_model=BookshelfEntrySchema)
+def create_bookshelf_link(
+    payload: BookshelfLinkCreateSchema,
+    _bound_session=Depends(get_session),
+    user: User = Depends(get_current_user),
+) -> BookshelfEntrySchema:
+    try:
+        mapping = bookshelf_dao.create_entry_for_url(
+            user,
+            url=payload.url,
+            title=payload.title,
+            note=payload.note,
+            intent_note=payload.intent_note,
+            tags=payload.tags,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if payload.collection_id is not None:
+        item = bookshelf_dao.add_collection_item(user, payload.collection_id, mapping.document)
+        if item is None:
+            raise HTTPException(status_code=404, detail="Collection not found")
+    if payload.crawl_now:
+        try:
+            Crawler().crawl_source(mapping.document.source, max_pages=5, max_depth=1, active_pages=1)
+        except Exception:
+            pass
+    tags = bookshelf_dao.user_tags_for_documents(user, [mapping.document_id]).get(mapping.document_id, [])
+    return dump_bookshelf_entry(mapping, tags)
+
+
+@app.get("/api/bookshelf/collections", response_model=list[BookshelfCollectionSchema])
+def list_bookshelf_collections(
+    _bound_session=Depends(get_session),
+    user: User = Depends(get_current_user),
+) -> list[BookshelfCollectionSchema]:
+    return [_dump_bookshelf_collection(collection) for collection in bookshelf_dao.list_collections(user)]
+
+
+@app.post("/api/bookshelf/collections", response_model=BookshelfCollectionSchema)
+def create_bookshelf_collection(
+    payload: BookshelfCollectionCreateSchema,
+    _bound_session=Depends(get_session),
+    user: User = Depends(get_current_user),
+) -> BookshelfCollectionSchema:
+    try:
+        collection = bookshelf_dao.create_collection(
+            user,
+            name=payload.name,
+            description=payload.description,
+            visibility=payload.visibility,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _dump_bookshelf_collection(collection)
+
+
+@app.patch("/api/bookshelf/collections/{collection_id}", response_model=BookshelfCollectionSchema)
+def update_bookshelf_collection(
+    collection_id: int,
+    payload: BookshelfCollectionUpdateSchema,
+    _bound_session=Depends(get_session),
+    user: User = Depends(get_current_user),
+) -> BookshelfCollectionSchema:
+    fields = payload.model_fields_set
+    try:
+        collection = bookshelf_dao.update_collection(
+            user,
+            collection_id,
+            name=payload.name,
+            description=payload.description,
+            visibility=payload.visibility,
+            update_name="name" in fields,
+            update_description="description" in fields,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if collection is None:
+        raise HTTPException(status_code=404, detail="Collection not found")
+    return _dump_bookshelf_collection(collection)
+
+
+@app.post("/api/bookshelf/collections/{collection_id}/items", response_model=BookshelfCollectionSchema)
+def add_bookshelf_collection_item(
+    collection_id: int,
+    payload: BookshelfCollectionItemCreateSchema,
+    _bound_session=Depends(get_session),
+    user: User = Depends(get_current_user),
+) -> BookshelfCollectionSchema:
+    document = db.current_session().get(Document, payload.document_id)
+    if not document:
+        raise HTTPException(status_code=404, detail="Document not found")
+    item = bookshelf_dao.add_collection_item(user, collection_id, document, position=payload.position)
+    if item is None:
+        raise HTTPException(status_code=404, detail="Collection not found")
+    collection = bookshelf_dao.get_collection(user, collection_id)
+    if collection is None:
+        raise HTTPException(status_code=404, detail="Collection not found")
+    return _dump_bookshelf_collection(collection)
+
+
+@app.delete("/api/bookshelf/collections/{collection_id}/items/{document_id}", response_model=BookshelfCollectionSchema)
+def remove_bookshelf_collection_item(
+    collection_id: int,
+    document_id: int,
+    _bound_session=Depends(get_session),
+    user: User = Depends(get_current_user),
+) -> BookshelfCollectionSchema:
+    removed = bookshelf_dao.remove_collection_item(user, collection_id, document_id)
+    if not removed:
+        raise HTTPException(status_code=404, detail="Collection item not found")
+    collection = bookshelf_dao.get_collection(user, collection_id)
+    if collection is None:
+        raise HTTPException(status_code=404, detail="Collection not found")
+    return _dump_bookshelf_collection(collection)
+
+
+@app.get("/api/shared/bookshelf/collections/{share_token}", response_model=BookshelfCollectionSchema)
+def get_shared_bookshelf_collection(
+    share_token: str,
+    _bound_session=Depends(get_session),
+) -> BookshelfCollectionSchema:
+    collection = bookshelf_dao.get_shared_collection(share_token)
+    if collection is None:
+        raise HTTPException(status_code=404, detail="Collection not found")
+    return _dump_bookshelf_collection(collection)
 
 
 @app.get("/api/embedding-map", response_model=EmbeddingMapSchema)
