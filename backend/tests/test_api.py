@@ -361,6 +361,26 @@ def test_bookshelf_collection_share_includes_notes_and_tags(session):
     assert body["items"][0]["tags"] == ["memory", "reading"]
 
 
+def test_delete_bookshelf_collection_removes_collection(session):
+    client = TestClient(app)
+    created = client.post(
+        "/api/bookshelf/collections",
+        json={"name": "Temporary playlist", "visibility": "private"},
+    )
+    assert created.status_code == 200
+    collection_id = created.json()["id"]
+
+    deleted = client.delete(f"/api/bookshelf/collections/{collection_id}")
+    assert deleted.status_code == 204
+
+    listed = client.get("/api/bookshelf/collections")
+    assert listed.status_code == 200
+    assert all(collection["id"] != collection_id for collection in listed.json())
+
+    deleted_again = client.delete(f"/api/bookshelf/collections/{collection_id}")
+    assert deleted_again.status_code == 404
+
+
 def test_documents_api_can_scope_to_crawl_job_and_index_run(session):
     started = datetime(2026, 1, 1, tzinfo=timezone.utc)
     run = IndexRun(status="succeeded", started_at=started, finished_at=started + timedelta(hours=3))

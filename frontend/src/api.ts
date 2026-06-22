@@ -1,4 +1,27 @@
-import type { AdminCrawlJob, AdminIndexRun, AdminOverview, AdminSource, AgentChatResponse, AgentConversation, AgentConversationSummary, AgentStreamEvent, DigestRecommendation, Document, EmbeddingMap, EmbeddingNeighbor, GraphResponse, Page, SourceProfileAnalysis, User } from './types';
+import type {
+  AdminCrawlJob,
+  AdminIndexRun,
+  AdminOverview,
+  AdminSource,
+  AgentChatResponse,
+  AgentConversation,
+  AgentConversationSummary,
+  AgentStreamEvent,
+  BookshelfCollection,
+  BookshelfCollectionVisibility,
+  BookshelfEntry,
+  BookshelfLinkCreate,
+  BookshelfStatus,
+  BookshelfUpdate,
+  Document,
+  EmbeddingMap,
+  EmbeddingNeighbor,
+  GraphResponse,
+  Page,
+  SearchResponse,
+  SourceProfileAnalysis,
+  User,
+} from './types';
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? 'http://127.0.0.1:8001';
 
@@ -44,6 +67,7 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
     const detail = await response.text();
     throw new Error(detail || `Request failed: ${response.status}: ${url}`);
   }
+  if (response.status === 204) return undefined as T;
   return response.json() as Promise<T>;
 }
 
@@ -124,8 +148,64 @@ export function getAgentConversation(conversationId: number): Promise<AgentConve
   return request<AgentConversation>(`/api/agent-conversations/${conversationId}`);
 }
 
-export function getDigest(): Promise<DigestRecommendation[]> {
-  return request<DigestRecommendation[]>('/api/digest?limit=20');
+export function searchCorpus(query: string, limit = 50): Promise<SearchResponse> {
+  const search = new URLSearchParams();
+  search.set('q', query);
+  search.set('limit', String(limit));
+  return request<SearchResponse>(`/api/search?${search.toString()}`);
+}
+
+export function getBookshelf(params: { status?: BookshelfStatus | 'favorite'; limit?: number; offset?: number } = {}): Promise<Page<BookshelfEntry>> {
+  const search = new URLSearchParams();
+  search.set('limit', String(params.limit ?? 100));
+  search.set('offset', String(params.offset ?? 0));
+  if (params.status) search.set('status', params.status);
+  return request<Page<BookshelfEntry>>(`/api/bookshelf?${search.toString()}`);
+}
+
+export function updateDocumentBookshelf(documentId: number, payload: BookshelfUpdate): Promise<BookshelfEntry> {
+  return request<BookshelfEntry>(`/api/documents/${documentId}/bookshelf`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload),
+  });
+}
+
+export function createBookshelfLink(payload: BookshelfLinkCreate): Promise<BookshelfEntry> {
+  return request<BookshelfEntry>('/api/bookshelf/links', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export function getBookshelfCollections(): Promise<BookshelfCollection[]> {
+  return request<BookshelfCollection[]>('/api/bookshelf/collections');
+}
+
+export function createBookshelfCollection(payload: { name: string; description?: string | null; visibility?: BookshelfCollectionVisibility }): Promise<BookshelfCollection> {
+  return request<BookshelfCollection>('/api/bookshelf/collections', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export function updateBookshelfCollection(collectionId: number, payload: { name?: string | null; description?: string | null; visibility?: BookshelfCollectionVisibility | null }): Promise<BookshelfCollection> {
+  return request<BookshelfCollection>(`/api/bookshelf/collections/${collectionId}`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload),
+  });
+}
+
+export function deleteBookshelfCollection(collectionId: number): Promise<void> {
+  return request<void>(`/api/bookshelf/collections/${collectionId}`, {
+    method: 'DELETE',
+  });
+}
+
+export function addBookshelfCollectionItem(collectionId: number, documentId: number): Promise<BookshelfCollection> {
+  return request<BookshelfCollection>(`/api/bookshelf/collections/${collectionId}/items`, {
+    method: 'POST',
+    body: JSON.stringify({ document_id: documentId }),
+  });
 }
 
 export function getEmbeddingMap(limit = 3000): Promise<EmbeddingMap> {

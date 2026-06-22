@@ -39,6 +39,12 @@ export interface SearchResult {
   reason: string;
 }
 
+export interface SearchResponse {
+  query: string;
+  answer: string;
+  results: SearchResult[];
+}
+
 export interface AgentStep {
   kind: string;
   title: string;
@@ -129,10 +135,49 @@ export interface AgentConversation {
   messages: AgentMessage[];
 }
 
-export interface DigestRecommendation {
+export type BookshelfStatus = 'saved' | 'read' | 'archived';
+export type BookshelfCollectionVisibility = 'private' | 'share_link';
+
+export interface BookshelfEntry {
   document: Document;
-  score: number;
-  reason: string;
+  status: BookshelfStatus;
+  favorited: boolean;
+  note: string | null;
+  intent_note: string | null;
+  tags: string[];
+  first_seen_at: string | null;
+  read_at: string | null;
+  archived_at: string | null;
+  favorited_at: string | null;
+}
+
+export interface BookshelfCollection {
+  id: number;
+  name: string;
+  description: string | null;
+  visibility: BookshelfCollectionVisibility;
+  share_token: string | null;
+  created_at: string;
+  updated_at: string;
+  items: BookshelfEntry[];
+}
+
+export interface BookshelfUpdate {
+  status?: BookshelfStatus;
+  favorited?: boolean;
+  note?: string | null;
+  intent_note?: string | null;
+  tags?: string[];
+}
+
+export interface BookshelfLinkCreate {
+  url: string;
+  title?: string | null;
+  note?: string | null;
+  intent_note?: string | null;
+  tags?: string[];
+  collection_id?: number | null;
+  crawl_now?: boolean;
 }
 
 export interface EmbeddingMapPoint {

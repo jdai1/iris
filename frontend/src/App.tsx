@@ -12,6 +12,10 @@ import {
 } from '@chakra-ui/react';
 import { ArrowUpRight, BookOpen, ChevronDown, GitFork, History, LayoutDashboard, LogOut, Orbit, PenLine, Search, Settings, UserCircle, Users } from 'lucide-react';
 import {
+  addBookshelfCollectionItem,
+  createBookshelfCollection,
+  createBookshelfLink,
+  deleteBookshelfCollection,
   getAgentConversation,
   getAgentConversations,
   getAdminCrawlJobs,
@@ -19,9 +23,11 @@ import {
   getAdminIndexRuns,
   getAdminOverview,
   getAdminSources,
-  getDigest,
+  getBookshelf,
+  getBookshelfCollections,
   getMe,
   getSourceProfileAnalysis,
+  searchCorpus,
   setAuthTokenProvider,
   streamChatSearch,
 } from './api';
@@ -33,9 +39,25 @@ import { DocumentCard } from './components/DocumentCard';
 import { Pagination, ProfilePagination, type PageState } from './components/Pagination';
 import { ProfileAnalysisCard } from './components/ProfileAnalysisCard';
 import { StatusPill } from './components/StatusPill';
-import type { AdminCrawlJob, AdminIndexRun, AdminOverview, AdminSource, AgentConversation, AgentConversationSummary, AgentStep, DigestRecommendation, Page, SearchResult, Document, SourceProfileAnalysis, User as IrisUser } from './types';
+import type {
+  AdminCrawlJob,
+  AdminIndexRun,
+  AdminOverview,
+  AdminSource,
+  AgentConversation,
+  AgentConversationSummary,
+  AgentStep,
+  BookshelfCollection,
+  BookshelfEntry,
+  BookshelfStatus,
+  Page,
+  SearchResult,
+  Document,
+  SourceProfileAnalysis,
+  User as IrisUser,
+} from './types';
 
-type View = 'search' | 'digest' | 'directory' | 'explore' | 'graph' | 'admin';
+type View = 'search' | 'bookshelf' | 'directory' | 'explore' | 'graph' | 'admin';
 type ProfileTarget = { sourceId: number; domain: string } | null;
 type ChatMessage = {
   id: string;
@@ -56,7 +78,7 @@ const emptyPage = <T,>(): Page<T> => ({
 });
 
 const VIEW_STORAGE_KEY = 'iris.activeView';
-const views: View[] = ['search', 'digest', 'directory', 'explore', 'graph', 'admin'];
+const views: View[] = ['search', 'bookshelf', 'directory', 'explore', 'graph', 'admin'];
 
 function initialView(): View {
   if (typeof window === 'undefined') return 'search';
@@ -527,18 +549,41 @@ function isLegacySyntheticAssistantMessage(message: AgentConversation['messages'
   return onlySyntheticSteps && message.content.includes('Tell me what you want to find in the corpus');
 }
 
-function DigestView({ onOpenProfile }: { onOpenProfile: (sourceId: number, domain: string) => void }) {
-  const [items, setItems] = useState<DigestRecommendation[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+type BookshelfViewKey = 'unread' | 'favorites' | 'reading-log' | `collection:${number}`;
 
+function BookshelfView({ onDiscover }: { onDiscover: () => void }) {
+  const [entries, setEntries] = useState<BookshelfEntry[]>([]);
+  const [collections, setCollections] = useState<BookshelfCollection[]>([]);
+  const [activeView, setActiveView] = useState<BookshelfViewKey>('unread');
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [addingLink, setAddingLink] = useState(false);
+  const [creatingCollection, setCreatingCollection] = useState(false);
+  const [linkUrl, setLinkUrl] = useState('');
+  const [linkTitle, setLinkTitle] = useState('');
+  const [collectionName, setCollectionName] = useState('');
+  const [collectionSearchQuery, setCollectionSearchQuery] = useState('');
+  const [collectionSearchResults, setCollectionSearchResults] = useState<SearchResult[]>([]);
+  const [collectionSearching, setCollectionSearching] = useState(false);
+  const [addingDocumentId, setAddingDocumentId] = useState<number | null>(null);
+  const [confirmDeleteCollectionId, setConfirmDeleteCollectionId] = useState<number | null>(null);
+  const collectionDraftRef = useRef<HTMLInputElement | null>(null);
+
+  const tableRows = filterBookshelfEntries(entries, collections, activeView);
+  const discoverLabel = discoverLabelForBookshelfView(activeView, collections);
+  const activeCollection = activeView.startsWith('collection:')
+    ? collections.find((collection) => collection.id === Number(activeView.slice('collection:'.length))) ?? null
+    : null;
   async function refresh() {
     setLoading(true);
     setError(null);
     try {
-      setItems(await getDigest());
+      const [nextPage, loadedCollections] = await Promise.all([getBookshelf({ limit: 500 }), getBookshelfCollections()]);
+      setEntries(nextPage.items);
+      setCollections(loadedCollections.filter((collection) => collection.name.trim().toLowerCase() !== 'read next'));
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Digest failed');
+      setError(err instanceof Error ? err.message : 'Bookshelf failed');
     } finally {
       setLoading(false);
     }
@@ -548,31 +593,367 @@ function DigestView({ onOpenProfile }: { onOpenProfile: (sourceId: number, domai
     refresh();
   }, []);
 
-  if (loading) return <div className="empty-state">Loading digest...</div>;
+  useEffect(() => {
+    if (creatingCollection) collectionDraftRef.current?.focus();
+  }, [creatingCollection]);
+
+  useEffect(() => {
+    setConfirmDeleteCollectionId(null);
+  }, [activeView]);
+
+  async function submitLink(event: FormEvent) {
+    event.preventDefault();
+    if (!linkUrl.trim()) return;
+    setSaving(true);
+    setError(null);
+    try {
+      await createBookshelfLink({
+        url: linkUrl.trim(),
+        title: linkTitle.trim() || null,
+      });
+      setLinkUrl('');
+      setLinkTitle('');
+      setAddingLink(false);
+      setActiveView('unread');
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not save link');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function submitCollection(event: FormEvent) {
+    event.preventDefault();
+    if (!collectionName.trim()) {
+      setCreatingCollection(false);
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    try {
+      const collection = await createBookshelfCollection({
+        name: collectionName.trim(),
+        description: null,
+        visibility: 'private',
+      });
+      setCollectionName('');
+      setCreatingCollection(false);
+      setCollections((current) => [...current, collection]);
+      setActiveView(`collection:${collection.id}`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not create collection');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function deleteActiveCollection() {
+    if (!activeCollection || saving) return;
+    if (confirmDeleteCollectionId !== activeCollection.id) {
+      setConfirmDeleteCollectionId(activeCollection.id);
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    try {
+      await deleteBookshelfCollection(activeCollection.id);
+      setCollections((current) => current.filter((collection) => collection.id !== activeCollection.id));
+      setActiveView('unread');
+      setCollectionSearchQuery('');
+      setCollectionSearchResults([]);
+      setConfirmDeleteCollectionId(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not delete collection');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function submitCollectionSearch(event: FormEvent) {
+    event.preventDefault();
+    const query = collectionSearchQuery.trim();
+    if (!query) {
+      setCollectionSearchResults([]);
+      return;
+    }
+    setCollectionSearching(true);
+    setError(null);
+    try {
+      const response = await searchCorpus(query, 8);
+      setCollectionSearchResults(response.results);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not search corpus');
+    } finally {
+      setCollectionSearching(false);
+    }
+  }
+
+  async function addResultToActiveCollection(result: SearchResult) {
+    if (!activeCollection) return;
+    setAddingDocumentId(result.document.id);
+    setError(null);
+    try {
+      const collection = await addBookshelfCollectionItem(activeCollection.id, result.document.id);
+      setCollections((current) => current.map((item) => (item.id === collection.id ? collection : item)));
+      setEntries((current) => {
+        if (current.some((entry) => entry.document.id === result.document.id)) return current;
+        const entry = collection.items.find((item) => item.document.id === result.document.id);
+        return entry ? [entry, ...current] : current;
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not add document');
+    } finally {
+      setAddingDocumentId(null);
+    }
+  }
 
   return (
-    <section>
-      <Flex className="section-header">
-        <div>
-          <Heading as="h2" fontSize="2xl" fontWeight="650">Digest</Heading>
-          <Text color="iris.500" mt="1">Old and new corpus items ranked by fit, quality, and graph signal.</Text>
+    <section className="bookshelf-view">
+      <div className="bookshelf-playlist-shell">
+        <aside className="bookshelf-rail">
+          <div className="bookshelf-rail-label">Library</div>
+          <button className={activeView === 'unread' ? 'bookshelf-rail-item bookshelf-rail-item-active' : 'bookshelf-rail-item'} type="button" onClick={() => setActiveView('unread')}>
+            <span>Read next</span>
+            <small>{entries.filter((entry) => entry.status === 'saved').length}</small>
+          </button>
+          <button className={activeView === 'favorites' ? 'bookshelf-rail-item bookshelf-rail-item-active' : 'bookshelf-rail-item'} type="button" onClick={() => setActiveView('favorites')}>
+            <span>Favorites</span>
+            <small>{entries.filter((entry) => entry.favorited).length}</small>
+          </button>
+          <button className={activeView === 'reading-log' ? 'bookshelf-rail-item bookshelf-rail-item-active' : 'bookshelf-rail-item'} type="button" onClick={() => setActiveView('reading-log')}>
+            <span>Reading log</span>
+            <small>{entries.filter((entry) => entry.status === 'read').length}</small>
+          </button>
+          <div className="bookshelf-rail-divider" />
+          <div className="bookshelf-rail-section-heading">
+            <span>Collections</span>
+            <button
+              type="button"
+              onClick={() => {
+                setCollectionName('');
+                setCreatingCollection(true);
+              }}
+              aria-label="Create collection"
+            >
+              +
+            </button>
+          </div>
+          {creatingCollection && (
+            <form className="bookshelf-rail-draft" onSubmit={submitCollection}>
+              <input
+                ref={collectionDraftRef}
+                value={collectionName}
+                onChange={(event) => setCollectionName(event.target.value)}
+                onBlur={() => {
+                  if (!collectionName.trim()) setCreatingCollection(false);
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === 'Escape') {
+                    setCollectionName('');
+                    setCreatingCollection(false);
+                  }
+                }}
+                placeholder="Untitled collection"
+                disabled={saving}
+              />
+            </form>
+          )}
+          {collections.map((collection) => (
+            <button
+              key={collection.id}
+              className={activeView === `collection:${collection.id}` ? 'bookshelf-rail-item bookshelf-rail-item-active' : 'bookshelf-rail-item'}
+              type="button"
+              onClick={() => setActiveView(`collection:${collection.id}`)}
+            >
+              <span>{collection.name}</span>
+              <small>{collection.items.length}</small>
+            </button>
+          ))}
+        </aside>
+
+        <div className="bookshelf-table-panel">
+          <div className="bookshelf-toolbar">
+            <div className="bookshelf-toolbar-actions">
+              <button className="bookshelf-add-filter" type="button">+ Add filter</button>
+              {activeCollection && (
+                <button className="bookshelf-delete-collection" type="button" onClick={deleteActiveCollection} disabled={saving}>
+                  {confirmDeleteCollectionId === activeCollection.id ? 'Confirm delete' : 'Delete collection'}
+                </button>
+              )}
+            </div>
+          </div>
+
+          {addingLink && (
+            <form className="bookshelf-add-link bookshelf-add-link-compact" onSubmit={submitLink}>
+              <input value={linkUrl} onChange={(event) => setLinkUrl(event.target.value)} placeholder="Paste a URL..." />
+              <input value={linkTitle} onChange={(event) => setLinkTitle(event.target.value)} placeholder="Title override" />
+              <Button type="submit" disabled={saving || !linkUrl.trim()} borderRadius="0">Save</Button>
+            </form>
+          )}
+
+          {error && <div className="error">{error}</div>}
+          {loading && <div className="empty-state">Loading bookshelf...</div>}
+          {!loading && (
+            <BookshelfTable
+              rows={tableRows}
+              collections={collections}
+            />
+          )}
+          {!loading && tableRows.length === 0 && (
+            <div className="bookshelf-empty-cta">
+              <h3>No rows yet</h3>
+              <button className="bookshelf-discover-cta" type="button" onClick={onDiscover}>
+                <Search size={15} />
+                {discoverLabel}
+              </button>
+            </div>
+          )}
+          {activeCollection && (
+            <form className="bookshelf-collection-search" onSubmit={submitCollectionSearch}>
+              <label htmlFor="bookshelf-collection-search">Add documents</label>
+              <div>
+                <Search size={14} />
+                <input
+                  id="bookshelf-collection-search"
+                  value={collectionSearchQuery}
+                  onChange={(event) => setCollectionSearchQuery(event.target.value)}
+                  placeholder="Keyword search corpus..."
+                />
+                <button type="submit" disabled={collectionSearching || !collectionSearchQuery.trim()}>
+                  Search
+                </button>
+              </div>
+              {collectionSearching && <p>Searching...</p>}
+              {collectionSearchResults.length > 0 && (
+                <div className="bookshelf-collection-results">
+                  {collectionSearchResults.map((result) => {
+                    const alreadyAdded = activeCollection.items.some((item) => item.document.id === result.document.id);
+                    return (
+                      <div key={result.document.id} className="bookshelf-collection-result">
+                        <span>
+                          <strong>{result.document.title ?? result.document.url}</strong>
+                          <small>{result.document.source_domain}</small>
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => addResultToActiveCollection(result)}
+                          disabled={alreadyAdded || addingDocumentId === result.document.id}
+                        >
+                          {alreadyAdded ? 'Added' : 'Add'}
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </form>
+          )}
         </div>
-        <Button type="button" onClick={refresh} variant="outline" borderRadius="0">Refresh</Button>
-      </Flex>
-      <Stack gap="3">
-        {error && <div className="error">{error}</div>}
-        {items.map((item) => (
-          <DocumentCard
-            key={item.document.id}
-            document={item.document}
-            reason={item.reason}
-            score={item.score}
-            onOpenProfile={onOpenProfile}
-          />
-        ))}
-        {items.length === 0 && <div className="empty-state">No digest items yet. Add and crawl a source.</div>}
-      </Stack>
+      </div>
     </section>
+  );
+}
+
+function filterBookshelfEntries(entries: BookshelfEntry[], collections: BookshelfCollection[], activeView: BookshelfViewKey): BookshelfEntry[] {
+  let scoped = entries;
+  if (activeView === 'favorites') {
+    scoped = entries.filter((entry) => entry.favorited);
+  } else if (activeView === 'unread') {
+    scoped = entries.filter((entry) => entry.status === 'saved');
+  } else if (activeView === 'reading-log') {
+    scoped = entries.filter((entry) => entry.status === 'read');
+  } else if (activeView.startsWith('collection:')) {
+    const collectionId = Number(activeView.slice('collection:'.length));
+    scoped = collections.find((collection) => collection.id === collectionId)?.items ?? [];
+  }
+  return scoped;
+}
+
+function notePreview(entry: BookshelfEntry): string {
+  const text = (entry.note || entry.intent_note || '').trim();
+  if (!text) return 'No note';
+  return text.split('\n')[0];
+}
+
+function collectionsForEntry(entry: BookshelfEntry, collections: BookshelfCollection[]): BookshelfCollection[] {
+  return collections.filter((collection) => collection.items.some((item) => item.document.id === entry.document.id));
+}
+
+function discoverLabelForBookshelfView(activeView: BookshelfViewKey, collections: BookshelfCollection[]): string {
+  if (activeView === 'favorites') return 'Discover favorites';
+  if (activeView === 'reading-log') return 'Discover something to read';
+  if (activeView.startsWith('collection:')) {
+    const collectionId = Number(activeView.slice('collection:'.length));
+    const collectionName = collections.find((collection) => collection.id === collectionId)?.name;
+    return collectionName ? `Discover ${collectionName}` : 'Discover documents';
+  }
+  return 'Discover read next';
+}
+
+function entryDate(entry: BookshelfEntry): string {
+  const value = entry.read_at ?? entry.first_seen_at ?? entry.favorited_at;
+  if (!value) return '';
+  return new Date(value).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+function statusLabel(status: BookshelfStatus): string {
+  if (status === 'saved') return 'Read next';
+  if (status === 'read') return 'Read';
+  return 'Removed';
+}
+
+function BookshelfTable({
+  rows,
+  collections,
+}: {
+  rows: BookshelfEntry[];
+  collections: BookshelfCollection[];
+}) {
+  return (
+    <div className="bookshelf-table" role="table" aria-label="Bookshelf documents">
+      <div className="bookshelf-table-row bookshelf-table-head" role="row">
+        <span />
+        <span>Title</span>
+        <span>Status</span>
+        <span>Tags</span>
+        <span>Collections</span>
+        <span>Notes</span>
+        <span>Date</span>
+        <span />
+      </div>
+      {rows.map((entry) => {
+        const document = entry.document;
+        const entryCollections = collectionsForEntry(entry, collections);
+        return (
+          <div
+            key={document.id}
+            className="bookshelf-table-row"
+            role="row"
+          >
+            <span className={entry.favorited ? 'bookshelf-fav bookshelf-fav-on' : 'bookshelf-fav'}>
+              {entry.favorited ? '♥' : '♡'}
+            </span>
+            <span className="bookshelf-table-title">
+              <strong>{document.title ?? document.url}</strong>
+              <small>{document.source_domain}</small>
+            </span>
+            <span>{statusLabel(entry.status)}</span>
+            <span className="bookshelf-table-tags">{entry.tags.slice(0, 3).join(', ')}</span>
+            <span>{entryCollections.map((collection) => collection.name).join(', ')}</span>
+            <span className={entry.note || entry.intent_note ? 'bookshelf-note-preview' : 'bookshelf-note-empty'}>
+              {notePreview(entry)}
+            </span>
+            <span>{entryDate(entry)}</span>
+            <span>
+              <a href={document.url} aria-label="Open document">
+                <ArrowUpRight size={15} />
+              </a>
+            </span>
+          </div>
+        );
+      })}
+    </div>
   );
 }
 
@@ -1377,7 +1758,7 @@ function IrisApp({ currentUser, onSignOut }: { currentUser: IrisUser | null; onS
 
   const navItems: Array<{ view: View; label: string; icon: ReactNode; adminOnly?: boolean }> = [
     { view: 'search', label: 'Search', icon: <Search size={15} /> },
-    { view: 'digest', label: 'Digest', icon: <BookOpen size={15} /> },
+    { view: 'bookshelf', label: 'Bookshelf', icon: <BookOpen size={15} /> },
     { view: 'explore', label: 'Explore', icon: <Orbit size={15} /> },
     { view: 'graph', label: 'Graph', icon: <GitFork size={15} /> },
     { view: 'directory', label: 'Directory', icon: <Users size={15} /> },
@@ -1448,7 +1829,7 @@ function IrisApp({ currentUser, onSignOut }: { currentUser: IrisUser | null; onS
       </Box>
       <Box className={view === 'explore' || view === 'graph' ? 'workspace workspace-fullscreen' : view === 'search' ? 'workspace workspace-search' : 'workspace'}>
         {view === 'search' && <SearchView onOpenProfile={openProfile} />}
-        {view === 'digest' && <DigestView onOpenProfile={openProfile} />}
+        {view === 'bookshelf' && <BookshelfView onDiscover={() => setView('search')} />}
         {view === 'directory' && <DirectoryView target={profileTarget} onOpenProfile={openProfile} />}
         {view === 'explore' && <EmbeddingExplorer />}
         {view === 'graph' && <GraphExplorer onOpenProfile={openProfile} />}
