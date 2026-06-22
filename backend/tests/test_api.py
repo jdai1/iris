@@ -277,6 +277,90 @@ def test_embedding_neighbors_api_uses_full_embeddings(session):
     assert body[0]["similarity"] > body[1]["similarity"]
 
 
+def test_bookshelf_link_api_captures_external_url_with_notes_and_tags(session):
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/bookshelf/links",
+        json={
+            "url": "https://example.com/post?utm_source=noise",
+            "title": "A saved post",
+            "intent_note": "Useful for a writing project.",
+            "note": "Initial reflection.",
+            "tags": ["writing", "reflection"],
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["document"]["url"] == "https://example.com/post"
+    assert body["document"]["title"] == "A saved post"
+    assert body["status"] == "saved"
+    assert body["intent_note"] == "Useful for a writing project."
+    assert body["note"] == "Initial reflection."
+    assert body["tags"] == ["reflection", "writing"]
+
+    list_response = client.get("/api/bookshelf", params={"status": "saved"})
+    assert list_response.status_code == 200
+    assert list_response.json()["total"] == 1
+
+
+def test_bookshelf_collection_share_includes_notes_and_tags(session):
+    source = get_or_create_source("https://bookshelf.test", status="indexed")
+    document = upsert_document(
+        source=source,
+        url="https://bookshelf.test/essay",
+        document_type="essay",
+        crawl_status="fetched",
+        title="Reflective reading",
+        author=None,
+        published_at=None,
+        extracted_text="reading writing reflection retention",
+        summary="Reflection improves retention.",
+        topics=["reading"],
+        embedding=dumps_embedding(embed_text("reading writing reflection retention")),
+        content_hash="bookshelf-share",
+    )
+    session.commit()
+    client = TestClient(app)
+
+    update = client.patch(
+        f"/api/documents/{document.id}/bookshelf",
+        json={
+            "status": "read",
+            "note": "Writing made this stick.",
+            "tags": ["reading", "memory"],
+        },
+    )
+    assert update.status_code == 200
+
+    created = client.post(
+        "/api/bookshelf/collections",
+        json={
+            "name": "Reading better",
+            "description": "What helps me retain ideas?",
+            "visibility": "share_link",
+        },
+    )
+    assert created.status_code == 200
+    collection = created.json()
+    assert collection["share_token"]
+
+    added = client.post(
+        f"/api/bookshelf/collections/{collection['id']}/items",
+        json={"document_id": document.id},
+    )
+    assert added.status_code == 200
+
+    shared = client.get(f"/api/shared/bookshelf/collections/{collection['share_token']}")
+    assert shared.status_code == 200
+    body = shared.json()
+    assert body["name"] == "Reading better"
+    assert body["items"][0]["document"]["title"] == "Reflective reading"
+    assert body["items"][0]["note"] == "Writing made this stick."
+    assert body["items"][0]["tags"] == ["memory", "reading"]
+
+
 def test_documents_api_can_scope_to_crawl_job_and_index_run(session):
     started = datetime(2026, 1, 1, tzinfo=timezone.utc)
     run = IndexRun(status="succeeded", started_at=started, finished_at=started + timedelta(hours=3))

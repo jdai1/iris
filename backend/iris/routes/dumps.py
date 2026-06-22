@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from iris.models import CrawlJob, Document, Source, SourceProfileAnalysis
-from iris.schemas.api import CrawlSchema, DigestRecommendationSchema, DocumentSchema, SourceProfileAnalysisSchema, SourceSchema
-from iris.schemas.retrieval import DigestRecommendation
+from iris.dao.bookshelf import effective_status
+from iris.models import BookshelfCollection, CrawlJob, Document, Source, SourceProfileAnalysis, UserDocumentMapping
+from iris.schemas.api import BookshelfCollectionSchema, BookshelfEntrySchema, CrawlSchema, DocumentSchema, SourceProfileAnalysisSchema, SourceSchema
 
 
 def dump_source(source: Source) -> SourceSchema:
@@ -56,11 +56,31 @@ def dump_source_profile_analysis(analysis: SourceProfileAnalysis) -> SourceProfi
     )
 
 
-def dump_digest_recommendation(item: DigestRecommendation) -> DigestRecommendationSchema:
-    return DigestRecommendationSchema(
-        document=dump_document(item.document),
-        score=item.score,
-        reason=item.reason,
+def dump_bookshelf_entry(mapping: UserDocumentMapping, tags: list[str] | None = None) -> BookshelfEntrySchema:
+    return BookshelfEntrySchema(
+        document=dump_document(mapping.document),
+        status=effective_status(mapping),
+        favorited=mapping.favorited_at is not None,
+        note=mapping.note,
+        intent_note=mapping.intent_note,
+        tags=tags or [],
+        first_seen_at=mapping.first_seen_at,
+        read_at=mapping.read_at,
+        archived_at=mapping.dismissed_at,
+        favorited_at=mapping.favorited_at,
+    )
+
+
+def dump_bookshelf_collection(collection: BookshelfCollection, entries: list[BookshelfEntrySchema]) -> BookshelfCollectionSchema:
+    return BookshelfCollectionSchema(
+        id=collection.id,
+        name=collection.name,
+        description=collection.description,
+        visibility=collection.visibility,
+        share_token=collection.share_token,
+        created_at=collection.created_at,
+        updated_at=collection.updated_at,
+        items=entries,
     )
 
 

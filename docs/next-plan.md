@@ -32,7 +32,7 @@ Build:
 
 Acceptance:
 
-- Search/digest only surface `essay`.
+- Search only surfaces `essay`.
 - Fixture crawls do not surface archives/tag pages.
 - Ben Kuhn keeps actual essays and demotes `/posts`, `/tag/*`, `/writing`, etc.
 

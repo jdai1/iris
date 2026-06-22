@@ -5,7 +5,14 @@ from typing import Generic, TypeVar
 
 from pydantic import BaseModel, Field
 
-from iris.schemas.enums import AgentMessageRole, AgentStepKind, SourceProfileAnalysisStatus, SourceProfileLinkKind
+from iris.schemas.enums import (
+    AgentMessageRole,
+    AgentStepKind,
+    BookshelfCollectionVisibility,
+    BookshelfStatus,
+    SourceProfileAnalysisStatus,
+    SourceProfileLinkKind,
+)
 
 T = TypeVar("T")
 
@@ -155,10 +162,63 @@ class AgentConversationSchema(BaseModel):
     messages: list[AgentMessageSchema]
 
 
-class DigestRecommendationSchema(BaseModel):
+class BookshelfEntrySchema(BaseModel):
     document: DocumentSchema
-    score: float
-    reason: str
+    status: BookshelfStatus
+    favorited: bool
+    note: str | None
+    intent_note: str | None
+    tags: list[str]
+    first_seen_at: datetime | None
+    read_at: datetime | None
+    archived_at: datetime | None
+    favorited_at: datetime | None
+
+
+class BookshelfUpdateSchema(BaseModel):
+    status: BookshelfStatus | None = None
+    favorited: bool | None = None
+    note: str | None = None
+    intent_note: str | None = None
+    tags: list[str] | None = None
+
+
+class BookshelfLinkCreateSchema(BaseModel):
+    url: str
+    title: str | None = None
+    note: str | None = None
+    intent_note: str | None = None
+    tags: list[str] = []
+    collection_id: int | None = None
+    crawl_now: bool = False
+
+
+class BookshelfCollectionCreateSchema(BaseModel):
+    name: str
+    description: str | None = None
+    visibility: BookshelfCollectionVisibility = BookshelfCollectionVisibility.PRIVATE
+
+
+class BookshelfCollectionUpdateSchema(BaseModel):
+    name: str | None = None
+    description: str | None = None
+    visibility: BookshelfCollectionVisibility | None = None
+
+
+class BookshelfCollectionItemCreateSchema(BaseModel):
+    document_id: int
+    position: int | None = None
+
+
+class BookshelfCollectionSchema(BaseModel):
+    id: int
+    name: str
+    description: str | None
+    visibility: BookshelfCollectionVisibility
+    share_token: str | None
+    created_at: datetime
+    updated_at: datetime
+    items: list[BookshelfEntrySchema] = []
 
 
 class EmbeddingMapPointSchema(BaseModel):

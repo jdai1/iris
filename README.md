@@ -1,6 +1,6 @@
 # Iris
 
-Local-first search and digest over a self-growing corpus of substantive blogs and essays.
+Local-first search and bookshelf over a self-growing corpus of substantive blogs and essays.
 
 ## Backend
 
@@ -33,7 +33,6 @@ Useful CLI commands:
 .venv/bin/python -m iris.cli index-runs --limit 10
 .venv/bin/python -m iris.cli index-events 1
 .venv/bin/python -m iris.cli search "small teams"
-.venv/bin/python -m iris.cli digest --populate
 .venv/bin/python -m iris.cli status
 .venv/bin/python -m iris.cli sql "select status, count(*) from sources group by status"
 ```
