@@ -111,7 +111,7 @@ def get_documents_for_embedding(*, missing_only: bool, limit: int | None) -> lis
         .order_by(Document.last_crawled_at.desc())
     )
     if missing_only:
-        statement = statement.where(Document.embedding.is_(None))
+        statement = statement.where(Document.embedding_vector.is_(None))
     if limit:
         statement = statement.limit(limit)
     return session.execute(statement).scalars().all()

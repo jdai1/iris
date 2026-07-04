@@ -16,7 +16,6 @@ from iris.services.common.config import (
     SEARCH_RERANK_MODEL,
     SEARCH_RERANK_TIMEOUT_SECONDS,
     USE_LLM_RERANKER,
-    USE_PGVECTOR_SEARCH,
     openai_api_key,
 )
 from iris.services.ingestion.embedding import cosine, embed_text, loads_embedding
@@ -53,13 +52,17 @@ def _keyword_score(query_terms: set[str], document: Document) -> float:
 def search_documents(query: str, limit: int = 12, persist: bool = True) -> tuple[None, list[RankedDocument]]:
     query_vector = embed_text(query)
     query_terms = _terms(query)
-    documents = search_dao.get_searchable_documents()
+    vector_rows = search_dao.vector_search_documents(query_vector, limit=max(limit * 8, 80))
+    documents = [document for document, _score in vector_rows] if vector_rows else search_dao.get_searchable_documents()
+    vector_scores = {document.id: score for document, score in vector_rows}
     saved_ids = search_dao.get_favorited_document_ids()
     dismissed_ids = search_dao.get_dismissed_document_ids()
 
     ranked: list[RankedDocument] = []
     for document in documents:
-        semantic = cosine(query_vector, loads_embedding(document.embedding))
+        semantic = vector_scores.get(document.id)
+        if semantic is None:
+            semantic = cosine(query_vector, loads_embedding(document.embedding_vector))
         keyword = _keyword_score(query_terms, document)
         favorite_bonus = 0.08 if document.id in saved_ids else 0.0
         dismissed_penalty = 0.18 if document.id in dismissed_ids else 0.0
@@ -536,19 +539,18 @@ def _keyword_search(query_terms: set[str], documents: list[Document], *, limit: 
 
 def _semantic_search(query: str, documents: list[Document], *, limit: int) -> list[RankedDocument]:
     query_vector = embed_text(query)
-    if USE_PGVECTOR_SEARCH:
-        vector_rows = search_dao.vector_search_documents(query_vector, limit=limit)
-        if vector_rows:
-            return [
-                RankedDocument(document=document, score=similarity, reason=f"pgvector cosine {similarity:.2f}")
-                for document, similarity in vector_rows
-                if similarity > 0.04
-            ]
+    vector_rows = search_dao.vector_search_documents(query_vector, limit=limit)
+    if vector_rows:
+        return [
+            RankedDocument(document=document, score=similarity, reason=f"pgvector cosine {similarity:.2f}")
+            for document, similarity in vector_rows
+            if similarity > 0.04
+        ]
     rows: list[RankedDocument] = []
     for document in documents:
-        if not document.embedding:
+        if not document.embedding_vector:
             continue
-        semantic = cosine(query_vector, loads_embedding(document.embedding))
+        semantic = cosine(query_vector, loads_embedding(document.embedding_vector))
         if semantic > 0.04:
             rows.append(RankedDocument(document=document, score=semantic, reason=f"embedding cosine {semantic:.2f}"))
     rows.sort(key=lambda item: item.score, reverse=True)

@@ -8,6 +8,18 @@ from iris.services.auth import FirebaseIdentity
 from iris.services.ingestion.embedding import dumps_embedding, embed_text
 from iris.dao.sources import get_or_create_source
 from iris.dao.documents import upsert_document
+from iris.dao.links import upsert_link
+
+
+def _bookshelf_auth(monkeypatch):
+    from iris.routes import api as api_routes
+
+    monkeypatch.setattr(
+        api_routes,
+        "verify_firebase_token",
+        lambda token: FirebaseIdentity(uid="bookshelf-user", email="bookshelf@example.com", display_name="Bookshelf User"),
+    )
+    return {"Authorization": "Bearer bookshelf-token"}
 
 
 def test_health_and_search_api(session):
@@ -39,6 +51,93 @@ def test_health_and_search_api(session):
     assert body["results"][0]["document"]["title"] == "Small teams"
 
 
+def test_document_picker_search_returns_documents_without_answer(session):
+    source = get_or_create_source("https://picker.test", status="indexed")
+    upsert_document(
+        source=source,
+        url="https://picker.test/document",
+        document_type="essay",
+        crawl_status="fetched",
+        title="Database search notes",
+        author="Picker Author",
+        published_at=None,
+        extracted_text="full text search for fast collection document picking",
+        summary="Fast collection picking with SQL text search.",
+        topics=["search"],
+        embedding=None,
+        content_hash="picker-search",
+    )
+    session.commit()
+
+    response = TestClient(app).get("/api/documents/search", params={"q": "collection picking", "limit": 5})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["answer"] == ""
+    assert body["results"][0]["document"]["title"] == "Database search notes"
+
+
+def test_directory_sources_default_to_most_referenced(session):
+    alpha = get_or_create_source("https://alpha.test", status="indexed")
+    beta = get_or_create_source("https://beta.test", status="indexed")
+    gamma = get_or_create_source("https://gamma.test", status="indexed")
+    alpha_doc = upsert_document(
+        source=alpha,
+        url="https://alpha.test/essay",
+        document_type="essay",
+        crawl_status="fetched",
+        title="Alpha",
+        author=None,
+        published_at=None,
+        extracted_text="alpha",
+        summary=None,
+        topics=[],
+        embedding=None,
+        content_hash="directory-alpha",
+    )
+    beta_doc = upsert_document(
+        source=beta,
+        url="https://beta.test/essay",
+        document_type="essay",
+        crawl_status="fetched",
+        title="Beta",
+        author=None,
+        published_at=None,
+        extracted_text="beta",
+        summary=None,
+        topics=[],
+        embedding=None,
+        content_hash="directory-beta",
+    )
+    gamma_doc = upsert_document(
+        source=gamma,
+        url="https://gamma.test/essay",
+        document_type="essay",
+        crawl_status="fetched",
+        title="Gamma",
+        author=None,
+        published_at=None,
+        extracted_text="gamma",
+        summary=None,
+        topics=[],
+        embedding=None,
+        content_hash="directory-gamma",
+    )
+    upsert_link(source_document=alpha_doc, target_url="https://beta.test/profile", anchor_text="beta", context=None)
+    upsert_link(source_document=gamma_doc, target_url="https://beta.test/about", anchor_text="beta", context=None)
+    upsert_link(source_document=beta_doc, target_url="https://alpha.test/about", anchor_text="alpha", context=None)
+    session.commit()
+
+    response = TestClient(app).get("/api/directory/sources")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["total"] == 3
+    assert body["items"][0]["canonical_domain"] == "beta.test"
+    assert body["items"][0]["inbound_count"] == 2
+    assert body["items"][0]["essay_count"] == 1
+
+
 def test_me_maps_firebase_identity_to_user(session, monkeypatch):
     from iris.routes import api as api_routes
 
@@ -65,6 +164,7 @@ def test_me_maps_firebase_identity_to_user(session, monkeypatch):
 
 def test_agent_chat_persists_conversation_and_results(session, monkeypatch):
     from iris.dao import agent as agent_dao
+    from iris.routes import api as api_routes
     from iris.schemas.enums import AgentStepKind
     from iris.schemas.retrieval import AgentChatResult, AgentStep, RankedDocument
 
@@ -97,11 +197,18 @@ def test_agent_chat_persists_conversation_and_results(session, monkeypatch):
         )
 
     monkeypatch.setattr(agent_dao, "agentic_chat", fake_agentic_chat)
+    monkeypatch.setattr(
+        api_routes,
+        "verify_firebase_token",
+        lambda token: FirebaseIdentity(uid="agent-user", email="agent@example.com", display_name="Agent User"),
+    )
+    headers = {"Authorization": "Bearer agent-token"}
 
     client = TestClient(app)
     first = client.post(
         "/api/agent-chat",
         json={"message": "how should I evaluate joining a company?", "limit": 5},
+        headers=headers,
     )
     assert first.status_code == 200
     first_body = first.json()
@@ -117,16 +224,17 @@ def test_agent_chat_persists_conversation_and_results(session, monkeypatch):
             "limit": 5,
             "conversation_id": first_body["conversation_id"],
         },
+        headers=headers,
     )
     assert second.status_code == 200
     assert second.json()["conversation_id"] == first_body["conversation_id"]
 
-    conversations = client.get("/api/agent-conversations")
+    conversations = client.get("/api/agent-conversations", headers=headers)
     assert conversations.status_code == 200
     assert conversations.json()[0]["id"] == first_body["conversation_id"]
     assert conversations.json()[0]["message_count"] == 4
 
-    replay = client.get(f"/api/agent-conversations/{first_body['conversation_id']}")
+    replay = client.get(f"/api/agent-conversations/{first_body['conversation_id']}", headers=headers)
     assert replay.status_code == 200
     replay_body = replay.json()
     assert [message["role"] for message in replay_body["messages"]] == ["user", "assistant", "user", "assistant"]
@@ -305,7 +413,7 @@ def test_bookshelf_link_api_captures_external_url_with_notes_and_tags(session):
     assert list_response.json()["total"] == 1
 
 
-def test_bookshelf_collection_share_includes_notes_and_tags(session):
+def test_bookshelf_collection_share_includes_notes_and_tags(session, monkeypatch):
     source = get_or_create_source("https://bookshelf.test", status="indexed")
     document = upsert_document(
         source=source,
@@ -323,6 +431,7 @@ def test_bookshelf_collection_share_includes_notes_and_tags(session):
     )
     session.commit()
     client = TestClient(app)
+    headers = _bookshelf_auth(monkeypatch)
 
     update = client.patch(
         f"/api/documents/{document.id}/bookshelf",
@@ -331,6 +440,7 @@ def test_bookshelf_collection_share_includes_notes_and_tags(session):
             "note": "Writing made this stick.",
             "tags": ["reading", "memory"],
         },
+        headers=headers,
     )
     assert update.status_code == 200
 
@@ -341,6 +451,7 @@ def test_bookshelf_collection_share_includes_notes_and_tags(session):
             "description": "What helps me retain ideas?",
             "visibility": "share_link",
         },
+        headers=headers,
     )
     assert created.status_code == 200
     collection = created.json()
@@ -349,6 +460,7 @@ def test_bookshelf_collection_share_includes_notes_and_tags(session):
     added = client.post(
         f"/api/bookshelf/collections/{collection['id']}/items",
         json={"document_id": document.id},
+        headers=headers,
     )
     assert added.status_code == 200
 
@@ -361,24 +473,70 @@ def test_bookshelf_collection_share_includes_notes_and_tags(session):
     assert body["items"][0]["tags"] == ["memory", "reading"]
 
 
-def test_delete_bookshelf_collection_removes_collection(session):
+def test_delete_bookshelf_collection_removes_collection(session, monkeypatch):
     client = TestClient(app)
+    headers = _bookshelf_auth(monkeypatch)
     created = client.post(
         "/api/bookshelf/collections",
         json={"name": "Temporary playlist", "visibility": "private"},
+        headers=headers,
     )
     assert created.status_code == 200
     collection_id = created.json()["id"]
 
-    deleted = client.delete(f"/api/bookshelf/collections/{collection_id}")
+    deleted = client.delete(f"/api/bookshelf/collections/{collection_id}", headers=headers)
     assert deleted.status_code == 204
 
-    listed = client.get("/api/bookshelf/collections")
+    listed = client.get("/api/bookshelf/collections", headers=headers)
     assert listed.status_code == 200
     assert all(collection["id"] != collection_id for collection in listed.json())
 
-    deleted_again = client.delete(f"/api/bookshelf/collections/{collection_id}")
+    deleted_again = client.delete(f"/api/bookshelf/collections/{collection_id}", headers=headers)
     assert deleted_again.status_code == 404
+
+
+def test_bookshelf_collection_names_are_unique_per_user(session, monkeypatch):
+    client = TestClient(app)
+    headers = _bookshelf_auth(monkeypatch)
+    created = client.post(
+        "/api/bookshelf/collections",
+        json={"name": "Reading queue", "visibility": "private"},
+        headers=headers,
+    )
+    assert created.status_code == 200
+
+    duplicate = client.post(
+        "/api/bookshelf/collections",
+        json={"name": " reading queue ", "visibility": "private"},
+        headers=headers,
+    )
+    assert duplicate.status_code == 400
+    assert duplicate.json()["detail"] == "Collection name already exists"
+
+
+def test_bookshelf_collection_rename_cannot_collide(session, monkeypatch):
+    client = TestClient(app)
+    headers = _bookshelf_auth(monkeypatch)
+    first = client.post(
+        "/api/bookshelf/collections",
+        json={"name": "Essays", "visibility": "private"},
+        headers=headers,
+    )
+    second = client.post(
+        "/api/bookshelf/collections",
+        json={"name": "Papers", "visibility": "private"},
+        headers=headers,
+    )
+    assert first.status_code == 200
+    assert second.status_code == 200
+
+    rename = client.patch(
+        f"/api/bookshelf/collections/{second.json()['id']}",
+        json={"name": "essays"},
+        headers=headers,
+    )
+    assert rename.status_code == 400
+    assert rename.json()["detail"] == "Collection name already exists"
 
 
 def test_documents_api_can_scope_to_crawl_job_and_index_run(session):

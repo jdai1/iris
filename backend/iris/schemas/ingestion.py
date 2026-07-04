@@ -67,5 +67,5 @@ class PagePipelineResult:
     fetched: FetchResult | None
     extracted: ExtractedPage | None
     content_hash: str | None
-    embedding: str | None
+    embedding: list[float] | None
     error: str | None = None

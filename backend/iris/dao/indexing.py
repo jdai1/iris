@@ -134,15 +134,17 @@ def get_source_documents_missing_embedding(source: Source) -> list[Document]:
             .where(Document.source_id == source.id)
             .where(Document.document_type == DocumentType.ESSAY.value)
             .where(Document.crawl_status == CrawlStatus.FETCHED.value)
-            .where(Document.embedding.is_(None))
+            .where(Document.embedding_vector.is_(None))
         )
         .scalars()
         .all()
     )
 
 
-def set_document_embedding(document: Document, embedding: str) -> None:
-    """Store a serialized embedding on a document."""
-    document.embedding = embedding
-    db.current_session().flush()
+def set_document_embedding(document: Document, embedding: list[float] | str) -> None:
+    """Store an embedding vector on a document."""
+    from iris.dao.documents import _store_embedding_vector
+    from iris.services.ingestion.embedding import coerce_embedding_vector
 
+    document.embedding_vector = _store_embedding_vector(coerce_embedding_vector(embedding))
+    db.current_session().flush()

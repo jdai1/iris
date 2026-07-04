@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from sqlalchemy import Enum as SqlEnum
 from sqlalchemy import ForeignKey, Index, Integer, JSON, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+from pgvector.sqlalchemy import Vector
 
 from iris.dao.db import Base
 from iris.schemas.enums import (
@@ -113,7 +114,7 @@ class Document(Base):
     crawl_job_id: Mapped[int | None] = mapped_column(ForeignKey("crawl_jobs.id"), nullable=True, index=True)
     url: Mapped[str] = mapped_column(Text)
     content_hash: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
-    embedding: Mapped[str | None] = mapped_column(Text, nullable=True)
+    embedding_vector: Mapped[list[float] | None] = mapped_column(Vector(1536).with_variant(Text(), "sqlite"), nullable=True)
 
     crawl_status: Mapped[CrawlStatus] = mapped_column(enum_type(CrawlStatus, "crawl_status"), default=CrawlStatus.PENDING, index=True)
     first_seen_at: Mapped[datetime] = mapped_column(default=utcnow)

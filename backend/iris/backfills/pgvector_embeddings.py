@@ -1,58 +1,62 @@
-"""Create and backfill the optional pgvector embedding mirror column."""
+"""Create and backfill the pgvector embedding column from legacy JSON rows."""
 
 from __future__ import annotations
 
-import json
-
-from sqlalchemy import inspect, select, text
+from sqlalchemy import inspect, text
 
 from iris.dao import db
-from iris.models import Document
 from iris.schemas.backfills import PgvectorBackfillResult
-from iris.schemas.enums import CrawlStatus, DocumentType
 from iris.services.ingestion.embedding import loads_embedding
+
+EMBEDDING_DIMENSIONS = 1536
 
 
 def setup_pgvector_embeddings(*, limit: int | None = None, create_index: bool = True) -> PgvectorBackfillResult:
-    """Ensure pgvector schema exists and backfill from `documents.embedding` JSON strings.
-
-    This intentionally keeps the existing string column as the compatibility/source column.
-    `documents.embedding_vector` is a query-optimized mirror for Postgres semantic search.
-    """
+    """Ensure pgvector schema exists and backfill from legacy `documents.embedding` if present."""
     session = db.current_session()
     _require_postgres()
-    dimensions = _infer_dimensions()
+    dimensions = EMBEDDING_DIMENSIONS
     _ensure_pgvector_schema(dimensions=dimensions, create_index=create_index)
+    columns = {column["name"] for column in inspect(session.connection()).get_columns("documents")}
+    if "embedding" not in columns:
+        return PgvectorBackfillResult(checked=0, updated=0, skipped=0, dimensions=dimensions)
 
-    statement = (
-        select(Document)
-        .where(Document.document_type == DocumentType.ESSAY.value)
-        .where(Document.crawl_status == CrawlStatus.FETCHED.value)
-        .where(Document.embedding.is_not(None))
-        .where(text("embedding_vector is null"))
-        .order_by(Document.id)
+    query = (
+        "select id, embedding from documents "
+        "where document_type = 'essay' and crawl_status = 'fetched' "
+        "and embedding is not null and embedding_vector is null "
+        "order by id"
     )
     if limit:
-        statement = statement.limit(limit)
+        query += " limit :limit"
 
     checked = 0
     updated = 0
     skipped = 0
-    for document in session.execute(statement).scalars():
+    params = {"limit": limit} if limit else {}
+    for row in session.execute(text(query), params):
         checked += 1
-        vector = loads_embedding(document.embedding)
+        vector = loads_embedding(row.embedding)
         if len(vector) != dimensions:
             skipped += 1
             continue
         session.execute(
             text("update documents set embedding_vector = cast(:embedding as vector) where id = :document_id"),
-            {"embedding": _vector_literal(vector), "document_id": document.id},
+            {"embedding": _vector_literal(vector), "document_id": row.id},
         )
         updated += 1
         if updated % 100 == 0:
             session.flush()
             print(f"pgvector backfill updated={updated} checked={checked}")
 
+    remaining = session.scalar(
+        text(
+            "select count(*) from documents where document_type = 'essay' and crawl_status = 'fetched' "
+            "and embedding is not null and embedding_vector is null"
+        )
+    )
+    if not remaining:
+        session.execute(text("alter table documents drop column if exists embedding"))
     return PgvectorBackfillResult(checked=checked, updated=updated, skipped=skipped, dimensions=dimensions)
 
 
@@ -60,21 +64,6 @@ def _require_postgres() -> None:
     session = db.current_session()
     if session.bind is None or session.bind.dialect.name != "postgresql":
         raise RuntimeError("pgvector setup requires a PostgreSQL database")
-
-
-def _infer_dimensions() -> int:
-    session = db.current_session()
-    value = session.execute(
-        select(Document.embedding)
-        .where(Document.document_type == DocumentType.ESSAY.value)
-        .where(Document.crawl_status == CrawlStatus.FETCHED.value)
-        .where(Document.embedding.is_not(None))
-        .limit(1)
-    ).scalar_one_or_none()
-    if not value:
-        raise RuntimeError("cannot infer embedding dimensions: no embedded fetched essays")
-    loaded = json.loads(value)
-    return len(loaded)
 
 
 def _ensure_pgvector_schema(*, dimensions: int, create_index: bool) -> None:

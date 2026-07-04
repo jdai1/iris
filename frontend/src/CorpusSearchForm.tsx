@@ -26,7 +26,7 @@ export function CorpusSearchForm({
     <form className={className ? `corpus-search ${className}` : 'corpus-search'} onSubmit={onSubmit}>
       <Search size={18} />
       <input value={value} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} autoFocus={autoFocus} />
-      <button type="submit" disabled={disabled} aria-label="Submit search">
+      <button type="submit" disabled={disabled} aria-label="Submit search" data-tooltip="Submit" data-tooltip-placement="bottom">
         <CornerDownLeft size={18} />
       </button>
       {children}

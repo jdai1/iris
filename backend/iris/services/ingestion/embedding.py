@@ -116,9 +116,23 @@ def dumps_embedding(vector: list[float]) -> str:
     return json.dumps([round(value, 6) for value in vector])
 
 
-def loads_embedding(value: str | None) -> list[float]:
+def coerce_embedding_vector(value: list[float] | str | None) -> list[float] | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return loads_embedding(value)
+    if hasattr(value, "tolist"):
+        value = value.tolist()
+    return [float(item) for item in value]
+
+
+def loads_embedding(value: str | list[float] | tuple[float, ...] | None) -> list[float]:
+    if hasattr(value, "tolist"):
+        value = value.tolist()
     if not value:
         return [0.0] * DIMENSIONS
+    if isinstance(value, (list, tuple)):
+        return [float(item) for item in value]
     loaded = json.loads(value)
     return [float(item) for item in loaded]
 

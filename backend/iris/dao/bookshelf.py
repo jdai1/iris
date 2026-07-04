@@ -270,9 +270,11 @@ def create_collection(
     visibility: BookshelfCollectionVisibility,
 ) -> BookshelfCollection:
     """Create a bookshelf collection."""
+    clean_name = _required_name(name)
+    _ensure_unique_collection_name(user, clean_name)
     collection = BookshelfCollection(
         user_id=user.id,
-        name=_required_name(name),
+        name=clean_name,
         description=_clean_optional_text(description),
         visibility=visibility,
         share_token=_new_share_token() if visibility == BookshelfCollectionVisibility.SHARE_LINK else None,
@@ -297,7 +299,9 @@ def update_collection(
     if collection is None:
         return None
     if update_name:
-        collection.name = _required_name(name or "")
+        clean_name = _required_name(name or "")
+        _ensure_unique_collection_name(user, clean_name, exclude_collection_id=collection.id)
+        collection.name = clean_name
     if update_description:
         collection.description = _clean_optional_text(description)
     if visibility is not None:
@@ -431,6 +435,25 @@ def _required_name(value: str) -> str:
     if not stripped:
         raise ValueError("Name is required")
     return stripped
+
+
+def _ensure_unique_collection_name(
+    user: User,
+    name: str,
+    *,
+    exclude_collection_id: int | None = None,
+) -> None:
+    query = (
+        select(BookshelfCollection.id)
+        .where(BookshelfCollection.user_id == user.id)
+        .where(func.lower(BookshelfCollection.name) == name.lower())
+        .limit(1)
+    )
+    if exclude_collection_id is not None:
+        query = query.where(BookshelfCollection.id != exclude_collection_id)
+    existing_id = db.current_session().execute(query).scalar_one_or_none()
+    if existing_id is not None:
+        raise ValueError("Collection name already exists")
 
 
 def _new_share_token() -> str:

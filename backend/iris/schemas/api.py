@@ -39,9 +39,8 @@ class HealthCountsSchema(BaseModel):
 
 class UserSchema(BaseModel):
     id: int
-    slug: str
     firebase_uid: str | None = None
-    email: str | None = None
+    email: str
     display_name: str | None = None
     photo_url: str | None = None
     is_admin: bool = False
@@ -66,6 +65,21 @@ class SourceSchema(BaseModel):
     last_checked_at: datetime | None
 
 
+class DirectorySourceSchema(BaseModel):
+    id: int
+    canonical_domain: str
+    url: str
+    name: str | None
+    status: str
+    description: str | None
+    first_seen_at: datetime
+    last_checked_at: datetime | None
+    document_count: int
+    essay_count: int
+    inbound_count: int
+    outbound_count: int
+
+
 class DocumentSchema(BaseModel):
     id: int
     source_id: int
@@ -78,6 +92,8 @@ class DocumentSchema(BaseModel):
     published_at: datetime | None
     summary: str | None
     topics: list[str]
+    bookshelf_status: BookshelfStatus | None = None
+    bookshelf_favorited: bool = False
 
 
 class DocumentOutgoingLinkSchema(BaseModel):

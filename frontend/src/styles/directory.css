@@ -57,6 +57,72 @@
   margin-top: 44px;
 }
 
+.directory-table-panel {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.directory-table-toolbar {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.directory-table-toolbar > div {
+  display: grid;
+  gap: 2px;
+}
+
+.directory-table-toolbar strong {
+  color: #111;
+  font-size: 15px;
+  font-weight: 560;
+}
+
+.directory-table-toolbar small,
+.directory-table-toolbar label {
+  color: #888;
+  font-size: 11px;
+  text-transform: uppercase;
+}
+
+.directory-table-toolbar label {
+  display: grid;
+  gap: 4px;
+}
+
+.directory-table-toolbar select {
+  min-width: 150px;
+  border: 0;
+  border-bottom: 1px solid #dedede;
+  background: transparent;
+  color: #111;
+  padding: 5px 0;
+  font: inherit;
+  font-size: 12px;
+  text-transform: none;
+}
+
+.directory-table-row {
+  grid-template-columns: minmax(240px, 1fr) 92px 92px;
+}
+
+.directory-table-row:not(.directory-table-head) {
+  width: 100%;
+  border-left: 0;
+  border-right: 0;
+  border-top: 0;
+  background: transparent;
+  font: inherit;
+}
+
+.directory-table-row:focus-visible {
+  outline: 2px solid #111;
+  outline-offset: -2px;
+}
+
 .directory-suggestions {
   position: absolute;
   top: calc(100% + 10px);
@@ -218,4 +284,3 @@
   color: #111111;
   padding: 0;
 }
-

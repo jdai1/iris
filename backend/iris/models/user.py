@@ -27,9 +27,8 @@ class User(Base):
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(default=utcnow, onupdate=utcnow)
 
-    slug: Mapped[str] = mapped_column(String(120), unique=True, index=True)
     firebase_uid: Mapped[str | None] = mapped_column(String(128), unique=True, nullable=True, index=True)
-    email: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    email: Mapped[str] = mapped_column(String(255), unique=True, index=True)
     display_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     photo_url: Mapped[str | None] = mapped_column(Text, nullable=True)
 

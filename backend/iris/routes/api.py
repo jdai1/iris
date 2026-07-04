@@ -13,6 +13,8 @@ from iris.dao import admin
 from iris.dao import agent as agent_dao
 from iris.dao import bookshelf as bookshelf_dao
 from iris.dao import db
+from iris.dao import directory as directory_dao
+from iris.dao import search as search_dao
 from iris.dao import source_profiles as profile_dao
 from iris.dao.user_state import get_or_create_firebase_user, get_or_create_local_user
 from iris.models import BookshelfCollection, BookshelfCollectionItem, BookshelfCollectionVisibility, BookshelfStatus, Document, User, UserDocumentMapping
@@ -43,6 +45,7 @@ from iris.schemas.api import (
     DocumentIncomingLinkSchema,
     DocumentOutgoingLinkSchema,
     DocumentSchema,
+    DirectorySourceSchema,
     EmbeddingNeighborSchema,
     EmbeddingMapSchema,
     GraphEdgeSchema,
@@ -105,6 +108,18 @@ def get_current_user(
     return get_or_create_local_user()
 
 
+def get_optional_user(
+    authorization: str | None = Header(default=None),
+    _bound_session=Depends(get_session),
+) -> User | None:
+    token = _bearer_token(authorization)
+    if token:
+        return get_or_create_firebase_user(verify_firebase_token(token))
+    if firebase_auth_enabled():
+        return None
+    return get_or_create_local_user()
+
+
 def is_admin_user(user: User) -> bool:
     return bool(user.email and user.email.lower() in ADMIN_EMAILS)
 
@@ -118,7 +133,6 @@ def require_admin(user: User = Depends(get_current_user)) -> User:
 def dump_user(user: User) -> UserSchema:
     return UserSchema(
         id=user.id,
-        slug=user.slug,
         firebase_uid=user.firebase_uid,
         email=user.email,
         display_name=user.display_name,
@@ -202,6 +216,21 @@ def list_documents(
     return _page_response([dump_document(document) for document in documents], total, limit, offset)
 
 
+@app.get("/api/documents/search", response_model=SearchSchema)
+def search_documents_picker(
+    q: str,
+    limit: int = 8,
+    _bound_session=Depends(get_session),
+    user: User | None = Depends(get_optional_user),
+) -> SearchSchema:
+    ranked = search_dao.search_documents_for_picker(q, limit=limit)
+    return SearchSchema(
+        query=q,
+        answer="",
+        results=_dump_search_results(ranked, user),
+    )
+
+
 @app.get("/api/admin/overview", response_model=AdminOverviewSchema)
 def get_admin_overview(_bound_session=Depends(get_session), _admin_user: User = Depends(require_admin)) -> AdminOverviewSchema:
     return admin.get_admin_overview()
@@ -216,6 +245,20 @@ def admin_sources(
     _bound_session=Depends(get_session),
 ) -> PageSchema[AdminSourceSchema]:
     items, total = admin.get_admin_sources_page(status=status, q=q, limit=limit, offset=offset)
+    return _page_response(items, total, limit, offset)
+
+
+@app.get("/api/directory/sources", response_model=PageSchema[DirectorySourceSchema])
+def directory_sources(
+    status: str | None = SourceStatus.INDEXED.value,
+    q: str | None = None,
+    sort: str = "inbound",
+    direction: str = "desc",
+    limit: int = 50,
+    offset: int = 0,
+    _bound_session=Depends(get_session),
+) -> PageSchema[DirectorySourceSchema]:
+    items, total = directory_dao.get_source_directory_page(status=status, q=q, sort=sort, direction=direction, limit=limit, offset=offset)
     return _page_response(items, total, limit, offset)
 
 
@@ -303,6 +346,39 @@ def _dump_bookshelf_collection(collection: BookshelfCollection) -> BookshelfColl
     ]
     return dump_bookshelf_collection(collection, entries)
 
+
+def _dump_document_for_user(document: Document, user: User) -> DocumentSchema:
+    payload = dump_document(document)
+    mapping = (
+        db.current_session()
+        .execute(
+            select(UserDocumentMapping)
+            .where(UserDocumentMapping.user_id == user.id)
+            .where(UserDocumentMapping.document_id == document.id)
+        )
+        .scalar_one_or_none()
+    )
+    if mapping:
+        payload.bookshelf_status = bookshelf_dao.effective_status(mapping)
+        payload.bookshelf_favorited = mapping.favorited_at is not None
+    return payload
+
+
+def _dump_search_results_for_user(results, user: User) -> list[SearchResultSchema]:
+    return [
+        SearchResultSchema(document=_dump_document_for_user(item.document, user), score=item.score, reason=item.reason)
+        for item in results
+    ]
+
+
+def _dump_search_results(results, user: User | None = None) -> list[SearchResultSchema]:
+    if user:
+        return _dump_search_results_for_user(results, user)
+    return [
+        SearchResultSchema(document=dump_document(item.document), score=item.score, reason=item.reason)
+        for item in results
+    ]
+
 @app.get("/api/admin/index-runs", response_model=PageSchema[AdminIndexRunSchema])
 def admin_index_runs(
     limit: int = 50,
@@ -346,16 +422,18 @@ def get_document(document_id: int, _bound_session=Depends(get_session)) -> Docum
 
 
 @app.get("/api/search", response_model=SearchSchema)
-def search(q: str, limit: int = 12, _bound_session=Depends(get_session)) -> SearchSchema:
+def search(
+    q: str,
+    limit: int = 12,
+    _bound_session=Depends(get_session),
+    user: User | None = Depends(get_optional_user),
+) -> SearchSchema:
     _search_row, ranked = search_documents(q, limit=limit, persist=False)
     answer = synthesize_answer(q, ranked)
     return SearchSchema(
         query=q,
         answer=answer or "",
-        results=[
-            SearchResultSchema(document=dump_document(item.document), score=item.score, reason=item.reason)
-            for item in ranked
-        ],
+        results=_dump_search_results(ranked, user),
     )
 
 
@@ -377,10 +455,7 @@ def agent_chat(
         assistant_message_id=assistant_message.id,
         message=payload.message,
         answer=result.answer,
-        results=[
-            SearchResultSchema(document=dump_document(item.document), score=item.score, reason=item.reason)
-            for item in result.results
-        ],
+        results=_dump_search_results_for_user(result.results, user),
         steps=[
             AgentStepSchema(
                 **_agent_step_payload(step),
@@ -495,7 +570,7 @@ async def _agent_chat_event_chunks(event, conversation, user_message, payload: A
                 "steps": [_agent_step_payload(step) for step in event.result.steps],
                 "results": [
                     {
-                        "document": dump_document(item.document).model_dump(),
+                        "document": _dump_document_for_user(item.document, conversation.user).model_dump(),
                         "score": item.score,
                         "reason": item.reason,
                     }
@@ -551,10 +626,12 @@ def _sse(event: str, data: dict[str, object]) -> str:
 @app.get("/api/agent-conversations", response_model=list[AgentConversationSummarySchema])
 def agent_conversations(
     limit: int = 30,
+    offset: int = 0,
+    q: str | None = None,
     _bound_session=Depends(get_session),
     user: User = Depends(get_current_user),
 ) -> list[AgentConversationSummarySchema]:
-    conversations = agent_dao.list_agent_conversations(limit=limit, user=user)
+    conversations = agent_dao.list_agent_conversations(limit=limit, offset=offset, q=q, user=user)
     return [
         AgentConversationSummarySchema(
             id=conversation.id,
@@ -581,11 +658,11 @@ def agent_conversation(
         title=conversation.title,
         created_at=conversation.created_at,
         updated_at=conversation.updated_at,
-        messages=[_dump_agent_message(message) for message in conversation.messages],
+        messages=[_dump_agent_message(message, user) for message in conversation.messages],
     )
 
 
-def _dump_agent_message(message) -> AgentMessageSchema:
+def _dump_agent_message(message, user: User) -> AgentMessageSchema:
     steps = [
         AgentStepSchema(
             kind=step.get("kind", ""),
@@ -604,7 +681,7 @@ def _dump_agent_message(message) -> AgentMessageSchema:
         created_at=message.created_at,
         steps=steps,
         results=[
-            SearchResultSchema(document=dump_document(result.document), score=result.score, reason=result.reason)
+            SearchResultSchema(document=_dump_document_for_user(result.document, user), score=result.score, reason=result.reason)
             for result in message.results
         ],
     )
@@ -823,10 +900,11 @@ def graph(
     source_id: int | None = None,
     domain: str | None = None,
     limit: int = 120,
+    depth: int = 1,
     _bound_session=Depends(get_session),
 ) -> GraphSchema:
     if mode == "sources":
-        sources, edges = admin.get_source_graph_rows(source_id=source_id, domain=domain, limit=limit)
+        sources, edges = admin.get_source_graph_rows(source_id=source_id, domain=domain, limit=limit, depth=depth)
         source_by_id = {source.id: source for source in sources}
         nodes = [
             GraphNodeSchema(
@@ -872,3 +950,12 @@ def graph(
         if link.target_document_id
     ]
     return GraphSchema(nodes=nodes, edges=edges)
+
+
+@app.get("/api/graph/sources/search", response_model=list[AdminSourceSchema])
+def graph_source_search(
+    q: str,
+    limit: int = 20,
+    _bound_session=Depends(get_session),
+) -> list[AdminSourceSchema]:
+    return admin.search_graph_sources(q, limit=limit)

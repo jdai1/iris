@@ -12,7 +12,7 @@ from iris.models import Document, DocumentCategory, DocumentTag, Tag, TagScope, 
 from iris.services.auth import FirebaseIdentity
 
 
-LOCAL_USER_SLUG = "local"
+LOCAL_USER_EMAIL = "local@iris.local"
 SYSTEM_NAMESPACE = "system"
 
 
@@ -34,10 +34,10 @@ CATEGORY_KEYWORDS: dict[DocumentCategory, set[str]] = {
 def get_or_create_local_user() -> User:
     """Return the singleton local user row."""
     session = db.current_session()
-    user = session.execute(select(User).where(User.slug == LOCAL_USER_SLUG)).scalar_one_or_none()
+    user = session.execute(select(User).where(User.email == LOCAL_USER_EMAIL)).scalar_one_or_none()
     if user:
         return user
-    user = User(slug=LOCAL_USER_SLUG, display_name="Local")
+    user = User(email=LOCAL_USER_EMAIL, display_name="Local")
     session.add(user)
     session.flush()
     return user
@@ -50,31 +50,24 @@ def get_or_create_firebase_user(identity: FirebaseIdentity) -> User:
         select(User).where(User.firebase_uid == identity.uid)
     ).scalar_one_or_none()
     if user is None:
-        slug = _unique_user_slug(_base_slug(identity))
-        user = User(slug=slug, firebase_uid=identity.uid)
-        session.add(user)
-    user.email = identity.email
-    user.display_name = identity.display_name or identity.email
+        email = _identity_email(identity)
+        user = session.execute(select(User).where(User.email == email)).scalar_one_or_none()
+        if user is None:
+            user = User(email=email, firebase_uid=identity.uid)
+            session.add(user)
+        else:
+            user.firebase_uid = identity.uid
+    user.email = _identity_email(identity)
+    user.display_name = identity.display_name or identity.email or user.email
     user.photo_url = identity.photo_url
     session.flush()
     return user
 
 
-def _base_slug(identity: FirebaseIdentity) -> str:
-    label = identity.email.split("@", 1)[0] if identity.email else identity.uid
-    slug = re.sub(r"[^a-z0-9]+", "-", label.strip().lower()).strip("-")
-    return slug or f"firebase-{identity.uid[:12].lower()}"
-
-
-def _unique_user_slug(base_slug: str) -> str:
-    session = db.current_session()
-    candidate = base_slug[:120]
-    suffix = 1
-    while session.execute(select(User.id).where(User.slug == candidate)).scalar_one_or_none():
-        suffix += 1
-        tail = f"-{suffix}"
-        candidate = f"{base_slug[:120 - len(tail)]}{tail}"
-    return candidate
+def _identity_email(identity: FirebaseIdentity) -> str:
+    if identity.email:
+        return identity.email.lower()
+    return f"{identity.uid.lower()}@firebase.local"
 
 
 def get_or_create_user_document_mapping(user: User, document: Document) -> UserDocumentMapping:

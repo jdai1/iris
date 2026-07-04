@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from sqlalchemy import desc, select
+from sqlalchemy import desc, exists, or_, select, text
 
 from iris.dao import db
 from iris.dao.user_state import get_or_create_local_user
@@ -81,18 +81,63 @@ def finish_agent_chat(conversation: AgentConversation, result: AgentChatResult) 
     return assistant_message
 
 
-def list_agent_conversations(limit: int = 30, *, user: User | None = None) -> list[AgentConversation]:
+def list_agent_conversations(
+    limit: int = 30,
+    offset: int = 0,
+    q: str | None = None,
+    *,
+    user: User | None = None,
+) -> list[AgentConversation]:
     session = db.current_session()
     user = user or get_or_create_local_user()
+    page_limit = max(1, min(limit, 100))
+    page_offset = max(offset, 0)
+    normalized_query = " ".join((q or "").split())
+    if normalized_query and session.bind and session.bind.dialect.name == "postgresql":
+        rows = session.execute(
+            text(
+                """
+                SELECT c.id
+                FROM agent_conversations c
+                WHERE c.user_id = :user_id
+                  AND to_tsvector('simple', coalesce(c.title, '') || ' ' || coalesce((
+                    SELECT string_agg(m.content, ' ')
+                    FROM agent_messages m
+                    WHERE m.conversation_id = c.id
+                  ), '')) @@ websearch_to_tsquery('simple', :q)
+                ORDER BY c.updated_at DESC, c.id DESC
+                LIMIT :limit OFFSET :offset
+                """
+            ),
+            {"user_id": user.id, "q": normalized_query, "limit": page_limit, "offset": page_offset},
+        ).all()
+        ids = [row.id for row in rows]
+        if not ids:
+            return []
+        conversations = session.execute(select(AgentConversation).where(AgentConversation.id.in_(ids))).scalars().all()
+        by_id = {conversation.id: conversation for conversation in conversations}
+        return [by_id[id_] for id_ in ids if id_ in by_id]
+
+    query = select(AgentConversation).where(AgentConversation.user_id == user.id)
+    if normalized_query:
+        pattern = f"%{normalized_query.lower()}%"
+        query = query.where(
+            or_(
+                AgentConversation.title.ilike(pattern),
+                exists()
+                .where(AgentMessage.conversation_id == AgentConversation.id)
+                .where(AgentMessage.content.ilike(pattern)),
+            )
+        )
     conversations = list(
         session.execute(
-            select(AgentConversation)
-            .where(AgentConversation.user_id == user.id)
+            query
             .order_by(desc(AgentConversation.updated_at), desc(AgentConversation.id))
-            .limit(max(10, min(limit * 3, 100)))
+            .limit(page_limit)
+            .offset(page_offset)
         ).scalars()
     )
-    return [conversation for conversation in conversations if _is_useful_conversation(conversation)][: max(1, min(limit, 100))]
+    return conversations
 
 
 def get_agent_conversation(conversation_id: int, *, user: User | None = None) -> AgentConversation | None:
@@ -123,19 +168,6 @@ def _get_or_create_conversation(user_id: int, message: str, conversation_id: int
     session.add(conversation)
     session.flush()
     return conversation
-
-
-def _is_useful_conversation(conversation: AgentConversation) -> bool:
-    user_messages = [message for message in conversation.messages if message.role == AgentMessageRole.USER]
-    assistant_messages = [message for message in conversation.messages if message.role == AgentMessageRole.ASSISTANT]
-    if not user_messages:
-        return False
-    if len(user_messages) > 1:
-        return True
-    normalized = " ".join(user_messages[0].content.lower().strip().split())
-    if normalized in {"hi", "hello", "hey", "yo", "sup", "thanks", "thank you", "ok", "okay"}:
-        return False
-    return any(message.results for message in assistant_messages) or len(normalized.split()) >= 3
 
 
 def _enum_value(value):

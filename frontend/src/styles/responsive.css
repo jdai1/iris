@@ -72,8 +72,16 @@
     display: none;
   }
 
-  .chat-history-panel {
-    width: calc(100vw - 24px);
+  .chat-page-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .chat-history-rail {
+    grid-template-rows: auto auto auto;
+    max-height: 260px;
+    border-right: 0;
+    border-bottom: 1px solid #eeeeee;
+    padding: 0 0 12px;
   }
 
   .chat-transcript {
@@ -259,6 +267,15 @@
 
   .bookshelf-table-row {
     min-width: 920px;
+  }
+
+  .directory-table-toolbar {
+    align-items: start;
+    flex-direction: column;
+  }
+
+  .directory-table-row {
+    min-width: 760px;
   }
 }
 

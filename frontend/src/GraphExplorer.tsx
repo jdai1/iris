@@ -1,9 +1,9 @@
 import { FormEvent, PointerEvent, useEffect, useMemo, useRef, useState } from 'react';
 import * as d3 from 'd3-force';
 import { ArrowUpRight, FileText, Loader2, LocateFixed, Users } from 'lucide-react';
-import { getGraph } from './api';
+import { getGraph, searchGraphSources } from './api';
 import { CorpusSearchForm } from './CorpusSearchForm';
-import type { GraphEdge, GraphNode, GraphResponse } from './types';
+import type { AdminSource, GraphEdge, GraphNode, GraphResponse } from './types';
 
 type GraphMode = 'sources' | 'documents';
 type LayoutNode = GraphNode & d3.SimulationNodeDatum & { x: number; y: number; r: number; color: string };
@@ -16,8 +16,11 @@ const HEIGHT = 1000;
 
 export function GraphExplorer({ onOpenProfile }: { onOpenProfile?: (sourceId: number, domain: string) => void }) {
   const [mode, setMode] = useState<GraphMode>('sources');
+  const [depth, setDepth] = useState(1);
   const [domain, setDomain] = useState('');
   const [graph, setGraph] = useState<GraphResponse>({ nodes: [], edges: [] });
+  const [sourceMatches, setSourceMatches] = useState<AdminSource[]>([]);
+  const [searchOpen, setSearchOpen] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [layout, setLayout] = useState<LayoutNode[]>([]);
@@ -28,18 +31,19 @@ export function GraphExplorer({ onOpenProfile }: { onOpenProfile?: (sourceId: nu
   const dragRef = useRef<DragState | null>(null);
   const simulationRef = useRef<d3.Simulation<LayoutNode, undefined> | null>(null);
   const nodesRef = useRef<Map<string, LayoutNode>>(new Map());
+  const searchWrapRef = useRef<HTMLDivElement | null>(null);
   const suppressClickRef = useRef(false);
 
-  async function refresh(nextMode = mode, nextDomain = domain, focusId?: string) {
+  async function refresh(nextMode = mode, nextDomain = domain, focusId?: string, nextDepth = depth) {
     setLoading(true);
     setError(null);
     try {
       const params =
         focusId && nextMode === 'sources'
-          ? { mode: nextMode, sourceId: numericNodeId(focusId), limit: 90 }
+          ? { mode: nextMode, sourceId: numericNodeId(focusId), limit: 160, depth: nextDepth }
           : focusId && nextMode === 'documents'
             ? { mode: nextMode, documentId: numericNodeId(focusId), limit: 120 }
-            : { mode: nextMode, domain: nextDomain.trim(), limit: nextMode === 'sources' ? 90 : 120 };
+            : { mode: nextMode, domain: nextDomain.trim(), limit: nextMode === 'sources' ? 160 : 120, depth: nextDepth };
       const data = await getGraph(params);
       setGraph(data);
       setSelectedId(focusId && data.nodes.some((node) => node.id === focusId) ? focusId : data.nodes[0]?.id ?? null);
@@ -66,6 +70,16 @@ export function GraphExplorer({ onOpenProfile }: { onOpenProfile?: (sourceId: nu
     }
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
+  useEffect(() => {
+    function handlePointerDown(event: globalThis.PointerEvent) {
+      const target = event.target as Node | null;
+      if (!target || searchWrapRef.current?.contains(target)) return;
+      setSearchOpen(false);
+    }
+    window.addEventListener('pointerdown', handlePointerDown);
+    return () => window.removeEventListener('pointerdown', handlePointerDown);
   }, []);
 
   useEffect(() => {
@@ -112,20 +126,56 @@ export function GraphExplorer({ onOpenProfile }: { onOpenProfile?: (sourceId: nu
   const matches = domain.trim()
     ? layout.filter((node) => node.label.toLowerCase().includes(domain.trim().toLowerCase()) || node.domain.toLowerCase().includes(domain.trim().toLowerCase())).slice(0, 8)
     : [];
+  const visibleMatches = mode === 'sources' && domain.trim() ? sourceMatches : matches;
+  const showMatches = searchOpen && visibleMatches.length > 0;
+
+  useEffect(() => {
+    if (mode !== 'sources') {
+      setSourceMatches([]);
+      return;
+    }
+    const query = domain.trim();
+    if (!query) {
+      setSourceMatches([]);
+      return;
+    }
+    let cancelled = false;
+    const timeout = window.setTimeout(() => {
+      searchGraphSources(query)
+        .then((items) => {
+          if (!cancelled) setSourceMatches(items);
+        })
+        .catch(() => {
+          if (!cancelled) setSourceMatches([]);
+        });
+    }, 140);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timeout);
+    };
+  }, [domain, mode]);
 
   function updateMode(nextMode: GraphMode) {
     setMode(nextMode);
     refresh(nextMode, domain);
   }
 
+  function updateDepth(nextDepth: number) {
+    setDepth(nextDepth);
+    if (mode === 'sources') refresh(mode, domain, selectedId ?? undefined, nextDepth);
+  }
+
   function submit(event: FormEvent) {
     event.preventDefault();
+    setSearchOpen(false);
     const query = domain.trim();
     const match = exactSearchMatch(domain, layout);
     if (match) {
       openNodeGraph(match);
     } else if (mode === 'sources' && isSpecificDomainQuery(query)) {
       refresh(mode, normalizeDomainQuery(query));
+    } else if (mode === 'sources' && sourceMatches[0]) {
+      selectSourceSearchMatch(sourceMatches[0]);
     }
   }
 
@@ -146,8 +196,15 @@ export function GraphExplorer({ onOpenProfile }: { onOpenProfile?: (sourceId: nu
   }
 
   function selectSearchMatch(node: LayoutNode) {
+    setSearchOpen(false);
     setDomain(node.domain);
     openNodeGraph(node);
+  }
+
+  function selectSourceSearchMatch(source: AdminSource) {
+    setSearchOpen(false);
+    setDomain(source.canonical_domain);
+    refresh('sources', source.canonical_domain, `source:${source.id}`);
   }
 
   function pointerDown(event: PointerEvent<SVGSVGElement>) {
@@ -211,26 +268,45 @@ export function GraphExplorer({ onOpenProfile }: { onOpenProfile?: (sourceId: nu
   return (
     <section className="graph-view">
       <div className="graph-toolbar">
-        <div className="graph-search-wrap">
+        <div className="graph-search-wrap" ref={searchWrapRef} onFocusCapture={() => setSearchOpen(true)}>
           <CorpusSearchForm
             className="graph-search"
             value={domain}
-            onChange={setDomain}
+            onChange={(value) => {
+              setDomain(value);
+              setSearchOpen(true);
+            }}
             onSubmit={submit}
             placeholder={mode === 'sources' ? 'focus domain, e.g. jdai1.github.io' : 'filter title/domain'}
           />
-          {matches.length > 0 && (
+          {showMatches && (
             <div className="graph-matches">
-              {matches.map((node) => (
-                <button key={node.id} type="button" onClick={() => selectSearchMatch(node)}>
-                  <span>{node.label}</span>
-                  <small>{node.domain}</small>
-                </button>
-              ))}
+              {mode === 'sources'
+                ? sourceMatches.map((source) => (
+                    <button key={source.id} type="button" onClick={() => selectSourceSearchMatch(source)}>
+                      <span>{source.canonical_domain}</span>
+                      <small>{source.canonical_domain}</small>
+                    </button>
+                  ))
+                : matches.map((node) => (
+                    <button key={node.id} type="button" onClick={() => selectSearchMatch(node)}>
+                      <span>{node.label}</span>
+                      <small>{node.domain}</small>
+                    </button>
+                  ))}
             </div>
           )}
         </div>
         <div className="segmented">
+          {mode === 'sources' && (
+            <div className="graph-depth" aria-label="Graph depth">
+              {[1, 2, 3].map((value) => (
+                <button key={value} type="button" className={depth === value ? 'active' : ''} onClick={() => updateDepth(value)}>
+                  {value}
+                </button>
+              ))}
+            </div>
+          )}
           <button type="button" className={mode === 'sources' ? 'active' : ''} onClick={() => updateMode('sources')}>
             <Users size={16} /> People
           </button>
@@ -275,14 +351,12 @@ export function GraphExplorer({ onOpenProfile }: { onOpenProfile?: (sourceId: nu
                 const target = nodeById.get(edge.target);
                 if (!source || !target) return null;
                 const active = activeId === edge.source || activeId === edge.target;
-                const points = edgePoints(source, target);
+                const hasReverse = visibleEdges.some((other) => other.source === edge.target && other.target === edge.source);
+                const path = edgePath(source, target, hasReverse, edge.source < edge.target ? 1 : -1);
                 return (
-                  <line
+                  <path
                     key={`${edge.source}-${edge.target}-${index}`}
-                    x1={points.x1}
-                    y1={points.y1}
-                    x2={points.x2}
-                    y2={points.y2}
+                    d={path}
                     className={active ? 'graph-edge active' : 'graph-edge'}
                     strokeWidth={edgeWidth(edge.weight, mode)}
                     markerEnd={active ? 'url(#graph-arrow-active)' : undefined}
@@ -328,15 +402,15 @@ export function GraphExplorer({ onOpenProfile }: { onOpenProfile?: (sourceId: nu
                 <h3>{selected.label}</h3>
                 <div className="graph-title-actions" aria-label="Graph actions">
                   {mode === 'sources' && (
-                    <button type="button" onClick={() => openProfile(selected)} aria-label="Open profile">
+                    <button type="button" onClick={() => openProfile(selected)} aria-label="Open profile" data-tooltip="Open profile">
                       <Users size={16} />
                     </button>
                   )}
-                  <button type="button" onClick={() => openNodeGraph(selected)} aria-label="Open this graph">
+                  <button type="button" onClick={() => openNodeGraph(selected)} aria-label="Open this graph" data-tooltip="Open this graph">
                     <LocateFixed size={16} />
                   </button>
                   {selected.url && (
-                    <a href={selected.url} aria-label="Open source">
+                    <a href={selected.url} aria-label="Open source" data-tooltip="Open source">
                       <ArrowUpRight size={16} />
                     </a>
                   )}
@@ -412,18 +486,22 @@ function colorForNode(node: GraphNode, mode: GraphMode) {
   return `hsl(${hue} ${mode === 'documents' ? '38%' : '32%'} ${mode === 'documents' ? '84%' : '82%'})`;
 }
 
-function edgePoints(source: LayoutNode, target: LayoutNode) {
+function edgePath(source: LayoutNode, target: LayoutNode, curved: boolean, curveSign: number) {
   const dx = target.x - source.x;
   const dy = target.y - source.y;
   const distance = Math.hypot(dx, dy) || 1;
   const ux = dx / distance;
   const uy = dy / distance;
-  return {
-    x1: source.x + ux * (source.r + 2),
-    y1: source.y + uy * (source.r + 2),
-    x2: target.x - ux * (target.r + 5),
-    y2: target.y - uy * (target.r + 5),
-  };
+  const x1 = source.x + ux * (source.r + 2);
+  const y1 = source.y + uy * (source.r + 2);
+  const x2 = target.x - ux * (target.r + 5);
+  const y2 = target.y - uy * (target.r + 5);
+  if (!curved) return `M ${x1} ${y1} L ${x2} ${y2}`;
+
+  const offset = Math.min(38, Math.max(18, distance * 0.08));
+  const cx = (x1 + x2) / 2 + -uy * offset * curveSign;
+  const cy = (y1 + y2) / 2 + ux * offset * curveSign;
+  return `M ${x1} ${y1} Q ${cx} ${cy} ${x2} ${y2}`;
 }
 
 function edgeWidth(weight: number, mode: GraphMode) {

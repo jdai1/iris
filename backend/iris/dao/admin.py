@@ -10,6 +10,7 @@ from sqlalchemy import desc, func, select
 from sqlalchemy.orm import joinedload
 
 from iris.dao import db
+from iris.dao import search as search_dao
 from iris.models import CrawlJob, Document, IndexEvent, IndexRun, Link, Source
 from iris.schemas.api import (
     AdminCrawlJobSchema,
@@ -117,7 +118,7 @@ def get_embedding_map(*, limit: int) -> EmbeddingMapSchema:
     statement = (
         select(Document)
         .options(joinedload(Document.source))
-        .where(Document.embedding.is_not(None))
+        .where(Document.embedding_vector.is_not(None))
         .where(Document.document_type == DocumentType.ESSAY.value)
         .order_by(Document.id.asc())
     )
@@ -126,7 +127,7 @@ def get_embedding_map(*, limit: int) -> EmbeddingMapSchema:
     loaded: list[tuple[Document, list[float]]] = []
     for document in documents:
         try:
-            vector = loads_embedding(document.embedding)
+            vector = loads_embedding(document.embedding_vector)
         except (TypeError, ValueError, json.JSONDecodeError):
             continue
         if any(value != 0.0 for value in vector):
@@ -163,25 +164,34 @@ def get_embedding_neighbors(document_id: int, *, limit: int = 5) -> list[Embeddi
     """Return nearest essay documents by full-dimensional embedding cosine similarity."""
     session = db.current_session()
     selected = session.get(Document, document_id)
-    if not selected or not selected.embedding:
+    if not selected or not selected.embedding_vector:
         return None
     try:
-        selected_vector = loads_embedding(selected.embedding)
+        selected_vector = loads_embedding(selected.embedding_vector)
     except (TypeError, ValueError, json.JSONDecodeError):
         return None
+    vector_rows = search_dao.vector_search_documents(selected_vector, limit=limit, exclude_document_id=document_id)
+    if vector_rows:
+        return [
+            EmbeddingNeighborSchema(
+                document=_embedding_map_document(document),
+                similarity=round(score, 4),
+            )
+            for document, score in vector_rows[: max(1, min(limit, 20))]
+        ]
 
     statement = (
         select(Document)
         .options(joinedload(Document.source))
         .where(Document.id != document_id)
-        .where(Document.embedding.is_not(None))
+        .where(Document.embedding_vector.is_not(None))
         .where(Document.document_type == DocumentType.ESSAY.value)
     )
     documents = session.execute(statement.limit(2000)).scalars().all()
     neighbors: list[EmbeddingNeighborSchema] = []
     for document in documents:
         try:
-            vector = loads_embedding(document.embedding)
+            vector = loads_embedding(document.embedding_vector)
         except (TypeError, ValueError, json.JSONDecodeError):
             continue
         score = cosine(selected_vector, vector)
@@ -307,6 +317,46 @@ def get_admin_sources_page(*, status: str | None, q: str | None, limit: int, off
             )
         )
     return items, total
+
+
+def search_graph_sources(q: str, *, limit: int = 20) -> list[AdminSourceSchema]:
+    """Search all indexed source nodes for graph focusing."""
+    session = db.current_session()
+    normalized = q.strip().lower()
+    if not normalized:
+        return []
+    pattern = f"%{normalized}%"
+    rows = session.execute(
+        select(Source, func.count(Document.id).label("document_count"))
+        .outerjoin(Document, Document.source_id == Source.id)
+        .where(Source.status == SourceStatus.INDEXED.value)
+        .where(
+            Source.canonical_domain.ilike(pattern)
+            | Source.name.ilike(pattern)
+            | Source.description.ilike(pattern)
+        )
+        .group_by(Source.id)
+        .order_by(desc(func.count(Document.id)), Source.canonical_domain)
+        .limit(max(1, min(limit, 50)))
+    ).all()
+    return [
+        AdminSourceSchema(
+            id=source.id,
+            canonical_domain=source.canonical_domain,
+            name=source.name,
+            status=source.status,
+            url=source.url,
+            rss_url=source.rss_url,
+            sitemap_url=source.sitemap_url,
+            description=source.description,
+            first_seen_at=source.first_seen_at,
+            last_checked_at=source.last_checked_at,
+            document_count=int(document_count or 0),
+            essay_count=int(document_count or 0),
+            latest_job=None,
+        )
+        for source, document_count in rows
+    ]
 
 
 def get_admin_crawl_jobs_page(
@@ -439,6 +489,7 @@ def get_source_graph_rows(
     source_id: int | None = None,
     domain: str | None = None,
     limit: int = 120,
+    depth: int = 1,
 ) -> tuple[list[Source], list[tuple[int, int, int]]]:
     """Return source nodes and weighted source-to-source link edges."""
     session = db.current_session()
@@ -447,7 +498,7 @@ def get_source_graph_rows(
         seed = session.scalar(select(Source).where(Source.canonical_domain == domain))
         seed_id = seed.id if seed else None
 
-    edge_statement = (
+    base_edge_statement = (
         select(Document.source_id, Link.target_source_id, func.count(Link.id).label("weight"))
         .join(Link, Link.source_document_id == Document.id)
         .where(Link.target_source_id.is_not(None))
@@ -460,8 +511,31 @@ def get_source_graph_rows(
         .order_by(desc(func.count(Link.id)))
     )
     if seed_id:
-        edge_statement = edge_statement.where((Document.source_id == seed_id) | (Link.target_source_id == seed_id))
-    rows = session.execute(edge_statement.limit(max(1, min(limit, 500)))).all()
+        selected_ids = {int(seed_id)}
+        frontier = {int(seed_id)}
+        rows_by_pair: dict[tuple[int, int], int] = {}
+        graph_depth = max(1, min(depth, 3))
+        for _ in range(graph_depth):
+            layer_rows = session.execute(
+                base_edge_statement
+                .where((Document.source_id.in_(frontier)) | (Link.target_source_id.in_(frontier)))
+                .limit(max(1, min(limit, 500)))
+            ).all()
+            next_frontier: set[int] = set()
+            for source, target, _weight in layer_rows:
+                source_id = int(source)
+                target_id = int(target)
+                rows_by_pair[(source_id, target_id)] = int(_weight or 1)
+                next_frontier.add(source_id)
+                next_frontier.add(target_id)
+            next_frontier -= selected_ids
+            selected_ids.update(next_frontier)
+            frontier = next_frontier
+            if not frontier:
+                break
+        rows = [(source, target, weight) for (source, target), weight in rows_by_pair.items()]
+    else:
+        rows = session.execute(base_edge_statement.limit(max(1, min(limit, 500)))).all()
     if not rows and seed_id:
         source = session.get(Source, seed_id)
         return ([source] if source else []), []

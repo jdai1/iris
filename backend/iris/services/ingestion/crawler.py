@@ -16,7 +16,7 @@ from iris.dao.categories import assign_category, get_or_create_category
 from iris.dao.links import upsert_link
 from iris.dao.sources import get_or_create_source
 from iris.services.common.config import DEFAULT_MAX_DEPTH, DEFAULT_MAX_PAGES, MAX_HTML_BYTES, REQUEST_TIMEOUT_SECONDS, USER_AGENT
-from iris.services.ingestion.embedding import document_embedding_text, dumps_embedding, embed_text_async
+from iris.services.ingestion.embedding import document_embedding_text, embed_text_async
 from iris.services.ingestion.extract import extract_page_async
 from iris.models import CrawlJob, Document, Source
 from iris.schemas.enums import CrawlJobStatus, CrawlStatus, DocumentType, LinkType, SourceStatus
@@ -487,14 +487,12 @@ class Crawler:
                 return PagePipelineResult(url, fetched, None, None, None)
             extracted = await extract_page_async(fetched.text, fetched.final_url)
             text_hash = content_hash(extracted.text)
-            embedding = dumps_embedding(
-                await embed_text_async(
-                    document_embedding_text(
-                        title=extracted.title,
-                        summary=extracted.summary,
-                        topics=extracted.topics,
-                        extracted_text=extracted.text,
-                    )
+            embedding = await embed_text_async(
+                document_embedding_text(
+                    title=extracted.title,
+                    summary=extracted.summary,
+                    topics=extracted.topics,
+                    extracted_text=extracted.text,
                 )
             )
             return PagePipelineResult(url, fetched, extracted, text_hash, embedding)

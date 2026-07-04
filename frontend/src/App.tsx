@@ -1,4 +1,4 @@
-import { FormEvent, ReactNode, useEffect, useRef, useState } from 'react';
+import { FormEvent, MouseEvent, ReactNode, useEffect, useRef, useState } from 'react';
 import type { User as FirebaseUser } from 'firebase/auth';
 import { getRedirectResult, onAuthStateChanged, signInWithPopup, signInWithRedirect, signOut } from 'firebase/auth';
 import {
@@ -10,7 +10,7 @@ import {
   Stack,
   Text,
 } from '@chakra-ui/react';
-import { ArrowUpRight, BookOpen, ChevronDown, GitFork, History, LayoutDashboard, LogOut, Orbit, PenLine, Search, Settings, UserCircle, Users } from 'lucide-react';
+import { ArrowUpRight, BookOpen, ChevronDown, GitFork, LayoutDashboard, LogOut, MoreVertical, Orbit, Search, Settings, Trash2, UserCircle, Users } from 'lucide-react';
 import {
   addBookshelfCollectionItem,
   createBookshelfCollection,
@@ -25,11 +25,16 @@ import {
   getAdminSources,
   getBookshelf,
   getBookshelfCollections,
+  getDocument,
+  getDirectorySources,
   getMe,
   getSourceProfileAnalysis,
+  removeBookshelfCollectionItem,
   searchCorpus,
+  searchDocuments,
   setAuthTokenProvider,
   streamChatSearch,
+  updateDocumentBookshelf,
 } from './api';
 import { auth, firebaseEnabled, googleProvider } from './firebase';
 import { EmbeddingExplorer } from './EmbeddingExplorer';
@@ -50,9 +55,13 @@ import type {
   BookshelfCollection,
   BookshelfEntry,
   BookshelfStatus,
+  DirectorySource,
+  DirectorySourceSort,
+  SortDirection,
   Page,
   SearchResult,
   Document,
+  DocumentDetail,
   SourceProfileAnalysis,
   User as IrisUser,
 } from './types';
@@ -78,12 +87,40 @@ const emptyPage = <T,>(): Page<T> => ({
 });
 
 const VIEW_STORAGE_KEY = 'iris.activeView';
+const ACTIVE_CHAT_STORAGE_KEY = 'iris.activeChatId';
+const SEARCH_RELOAD_STORAGE_KEY = 'iris.searchReloading';
+const HISTORY_PAGE_SIZE = 15;
 const views: View[] = ['search', 'bookshelf', 'directory', 'explore', 'graph', 'admin'];
+const viewPaths: Record<View, string> = {
+  search: '/search',
+  bookshelf: '/bookshelf',
+  directory: '/directory',
+  explore: '/explore',
+  graph: '/graph',
+  admin: '/admin',
+};
 
 function initialView(): View {
   if (typeof window === 'undefined') return 'search';
+  const pathView = viewFromPath(window.location.pathname);
+  if (pathView) return pathView;
   const saved = window.localStorage.getItem(VIEW_STORAGE_KEY);
   return views.includes(saved as View) ? (saved as View) : 'search';
+}
+
+function viewFromPath(pathname: string): View | null {
+  const normalized = pathname.replace(/\/+$/, '') || '/';
+  if (normalized === '/') return null;
+  if (normalized.startsWith('/directory/')) return 'directory';
+  const match = views.find((view) => viewPaths[view] === normalized);
+  return match ?? null;
+}
+
+function profileTargetFromPath(pathname: string): ProfileTarget {
+  const normalized = pathname.replace(/\/+$/, '');
+  if (!normalized.startsWith('/directory/')) return null;
+  const domain = decodeURIComponent(normalized.slice('/directory/'.length)).trim();
+  return domain ? { sourceId: 0, domain } : null;
 }
 
 function defaultArtifactWidth() {
@@ -96,9 +133,11 @@ function SearchView({ onOpenProfile }: { onOpenProfile: (sourceId: number, domai
   const [query, setQuery] = useState('');
   const [conversationId, setConversationId] = useState<number | undefined>();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [historyOpen, setHistoryOpen] = useState(false);
   const [history, setHistory] = useState<AgentConversationSummary[]>([]);
+  const [historyQuery, setHistoryQuery] = useState('');
   const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyLoadingMore, setHistoryLoadingMore] = useState(false);
+  const [historyHasMore, setHistoryHasMore] = useState(false);
   const [startedNewChat, setStartedNewChat] = useState(false);
   const [selectedResultMessageId, setSelectedResultMessageId] = useState<string | null>(null);
   const [searchesOpen, setSearchesOpen] = useState(false);
@@ -106,15 +145,50 @@ function SearchView({ onOpenProfile }: { onOpenProfile: (sourceId: number, domai
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const transcriptRef = useRef<HTMLDivElement | null>(null);
+  const historyRef = useRef<HTMLDivElement | null>(null);
   const didLoadInitialConversation = useRef(false);
+  const shouldRestoreConversation = useRef(
+    typeof window !== 'undefined' && window.sessionStorage.getItem(SEARCH_RELOAD_STORAGE_KEY) === '1',
+  );
 
   useEffect(() => {
+    if (typeof window !== 'undefined') {
+      window.sessionStorage.removeItem(SEARCH_RELOAD_STORAGE_KEY);
+    }
     loadInitialHistory();
+    return () => {
+      if (typeof window === 'undefined') return;
+      if (window.sessionStorage.getItem(SEARCH_RELOAD_STORAGE_KEY) === '1') return;
+      window.sessionStorage.removeItem(ACTIVE_CHAT_STORAGE_KEY);
+    };
   }, []);
+
+  useEffect(() => {
+    function preserveChatForReload() {
+      window.sessionStorage.setItem(SEARCH_RELOAD_STORAGE_KEY, '1');
+    }
+    window.addEventListener('beforeunload', preserveChatForReload);
+    return () => window.removeEventListener('beforeunload', preserveChatForReload);
+  }, []);
+
+  useEffect(() => {
+    if (conversationId) {
+      window.sessionStorage.setItem(ACTIVE_CHAT_STORAGE_KEY, String(conversationId));
+    } else {
+      window.sessionStorage.removeItem(ACTIVE_CHAT_STORAGE_KEY);
+    }
+  }, [conversationId]);
 
   useEffect(() => {
     transcriptRef.current?.scrollTo({ top: transcriptRef.current.scrollHeight, behavior: 'smooth' });
   }, [messages]);
+
+  useEffect(() => {
+    const timeout = window.setTimeout(() => {
+      refreshHistory(historyQuery);
+    }, 160);
+    return () => window.clearTimeout(timeout);
+  }, [historyQuery]);
 
   const resultTurns = messages
     .map((message, index) => {
@@ -141,15 +215,30 @@ function SearchView({ onOpenProfile }: { onOpenProfile: (sourceId: number, domai
     }
   }, [resultTurns.length, selectedResultMessageId]);
 
-  async function refreshHistory() {
+  async function refreshHistory(nextQuery = historyQuery) {
     setHistoryLoading(true);
     try {
-      const items = await getAgentConversations();
+      const items = await getAgentConversations({ limit: HISTORY_PAGE_SIZE, q: nextQuery });
       setHistory(items);
+      setHistoryHasMore(items.length === HISTORY_PAGE_SIZE);
     } catch {
       // History is secondary; leave the chat surface usable if it fails.
     } finally {
       setHistoryLoading(false);
+    }
+  }
+
+  async function loadMoreHistory() {
+    if (historyLoadingMore || historyLoading) return;
+    setHistoryLoadingMore(true);
+    try {
+      const items = await getAgentConversations({ limit: HISTORY_PAGE_SIZE, offset: history.length, q: historyQuery });
+      setHistory((current) => [...current, ...items]);
+      setHistoryHasMore(items.length === HISTORY_PAGE_SIZE);
+    } catch {
+      // History is secondary; keep the current list intact.
+    } finally {
+      setHistoryLoadingMore(false);
     }
   }
 
@@ -158,12 +247,12 @@ function SearchView({ onOpenProfile }: { onOpenProfile: (sourceId: number, domai
     didLoadInitialConversation.current = true;
     setHistoryLoading(true);
     try {
-      const items = await getAgentConversations();
+      const items = await getAgentConversations({ limit: HISTORY_PAGE_SIZE });
       setHistory(items);
-      if (items[0]) {
-        const conversation = await getAgentConversation(items[0].id);
-        setConversationId(conversation.id);
-        setMessages(messagesFromConversation(conversation));
+      setHistoryHasMore(items.length === HISTORY_PAGE_SIZE);
+      const activeChatId = Number(window.sessionStorage.getItem(ACTIVE_CHAT_STORAGE_KEY));
+      if (shouldRestoreConversation.current && Number.isFinite(activeChatId) && activeChatId > 0) {
+        await loadConversation(activeChatId);
       }
     } catch {
       // History is secondary; start on a clean chat if it fails.
@@ -180,7 +269,6 @@ function SearchView({ onOpenProfile }: { onOpenProfile: (sourceId: number, domai
       setConversationId(conversation.id);
       setStartedNewChat(false);
       setMessages(messagesFromConversation(conversation));
-      setHistoryOpen(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not load chat');
     }
@@ -193,7 +281,14 @@ function SearchView({ onOpenProfile }: { onOpenProfile: (sourceId: number, domai
     setMessages([]);
     setSelectedResultMessageId(null);
     setError(null);
-    setHistoryOpen(false);
+  }
+
+  function handleHistoryScroll() {
+    const node = historyRef.current;
+    if (!node || !historyHasMore || historyLoading || historyLoadingMore) return;
+    if (node.scrollTop + node.clientHeight >= node.scrollHeight - 80) {
+      loadMoreHistory();
+    }
   }
 
   async function submit(event: FormEvent) {
@@ -225,6 +320,8 @@ function SearchView({ onOpenProfile }: { onOpenProfile: (sourceId: number, domai
           return;
         }
         if (event.event === 'final') {
+          setSelectedResultMessageId(assistantId);
+          setSearchesOpen(false);
           setMessages((current) =>
             current.map((item) =>
               item.id === assistantId
@@ -297,49 +394,41 @@ function SearchView({ onOpenProfile }: { onOpenProfile: (sourceId: number, domai
 
   return (
     <Box as="section" className="search-view">
-      <div className="chat-topbar">
-        <div className="chat-topbar-spacer" />
-        <div className="chat-history">
-          <div className="chat-history-actions">
-            <button
-              className="chat-history-toggle"
-              type="button"
-              onClick={() => {
-                setHistoryOpen((value) => !value);
-                if (!historyOpen) refreshHistory();
-              }}
-              aria-expanded={historyOpen}
-            >
-              <History size={14} />
-              Chats
-              <ChevronDown size={14} className={historyOpen ? 'history-chevron history-chevron-open' : 'history-chevron'} />
+      <div className="chat-page-grid">
+        <aside className="chat-history-rail">
+          <div className="chat-history-rail-header">
+            <span>Chats</span>
+            <button className="chat-new-button" type="button" onClick={startNewChat} aria-label="New chat" data-tooltip="New chat" data-tooltip-placement="bottom">
+              +
             </button>
-            {(messages.length > 0 || conversationId) && (
-              <button className="chat-new-button" type="button" onClick={startNewChat} aria-label="New chat" title="New chat">
-                <PenLine size={16} />
-              </button>
-            )}
           </div>
-          {historyOpen && (
-            <div className="chat-history-panel">
-              {historyLoading && <div className="chat-history-empty">Loading chats...</div>}
-              {!historyLoading && history.length === 0 && <div className="chat-history-empty">No saved chats yet.</div>}
-              {!historyLoading &&
-                history.slice(0, 8).map((item) => (
-                  <button
-                    key={item.id}
-                    className={item.id === conversationId ? 'chat-history-item chat-history-item-active' : 'chat-history-item'}
-                    type="button"
-                    onClick={() => loadConversation(item.id)}
-                  >
-                    <span>{item.title || 'Untitled search'}</span>
-                    <small>{item.message_count} messages · {formatDate(item.updated_at)}</small>
-                  </button>
-                ))}
-            </div>
-          )}
-        </div>
-      </div>
+          <form className="corpus-search chat-history-search" onSubmit={(event) => event.preventDefault()}>
+            <Search size={15} />
+            <input
+              value={historyQuery}
+              onChange={(event) => setHistoryQuery(event.target.value)}
+              placeholder="Search chats"
+            />
+          </form>
+          <div className="chat-history-list" ref={historyRef} onScroll={handleHistoryScroll}>
+            {historyLoading && <div className="chat-history-empty">Loading chats...</div>}
+            {!historyLoading && history.length === 0 && <div className="chat-history-empty">No saved chats yet.</div>}
+            {!historyLoading &&
+              history.map((item) => (
+                <button
+                  key={item.id}
+                  className={item.id === conversationId ? 'chat-history-item chat-history-item-active' : 'chat-history-item'}
+                  type="button"
+                  onClick={() => loadConversation(item.id)}
+                >
+                  <span>{item.title || 'Untitled search'}</span>
+                </button>
+              ))}
+            {!historyLoading && historyLoadingMore && <div className="chat-history-empty">Loading more...</div>}
+          </div>
+        </aside>
+
+        <div className="chat-main-panel">
 
       {error && <div className="error">{error}</div>}
 
@@ -379,11 +468,8 @@ function SearchView({ onOpenProfile }: { onOpenProfile: (sourceId: number, domai
                         <div key={`${step.kind}-${step.title}-${index}`} className="activity-row">
                           <span className="activity-dot" />
                           <div>
-                            <strong>{step.title}</strong>
-                            <small>
-                              {typeof step.hits === 'number' ? `${step.hits} hits` : step.detail}
-                              {typeof step.hits === 'number' && step.detail ? ` · ${step.detail}` : ''}
-                            </small>
+                            <strong>{activityTitle(step)}</strong>
+                            <small>{activityMeta(step)}</small>
                           </div>
                         </div>
                       ))}
@@ -397,7 +483,7 @@ function SearchView({ onOpenProfile }: { onOpenProfile: (sourceId: number, domai
 
         {selectedResultTurn && (
           <aside className="chat-artifact" aria-label="Search results">
-            <button className="chat-artifact-resize" type="button" aria-label="Resize links panel" onPointerDown={startResizeArtifact} />
+            <button className="chat-artifact-resize" type="button" aria-label="Resize links panel" data-tooltip="Resize links panel" onPointerDown={startResizeArtifact} />
             <div className="chat-artifact-header">
               <span>Links</span>
               <small>{selectedResultTurn.results.length} result{selectedResultTurn.results.length === 1 ? '' : 's'}</small>
@@ -469,6 +555,8 @@ function SearchView({ onOpenProfile }: { onOpenProfile: (sourceId: number, domai
           </div>
         )}
       </Box>
+        </div>
+      </div>
     </Box>
   );
 }
@@ -541,6 +629,20 @@ function isSyntheticStep(step: AgentStep): boolean {
   return false;
 }
 
+function activityTitle(step: AgentStep): string {
+  const tool = step.tool?.toLowerCase();
+  if (tool === 'keyword') return 'Keyword';
+  if (tool === 'semantic') return 'Semantic';
+  if (tool === 'tags') return 'Tags';
+  if (tool === 'categories') return 'Categories';
+  return step.title.replace(/^Run\s+/i, '');
+}
+
+function activityMeta(step: AgentStep): string {
+  if (typeof step.hits === 'number') return `${step.hits}`;
+  return step.detail.replace(/^Top hits:\s*/i, '');
+}
+
 function isLegacySyntheticAssistantMessage(message: AgentConversation['messages'][number]): boolean {
   if (message.role !== 'assistant') return false;
   if (message.results.length > 0) return false;
@@ -559,6 +661,7 @@ function BookshelfView({ onDiscover }: { onDiscover: () => void }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [addingLink, setAddingLink] = useState(false);
+  const [addingCollectionDocs, setAddingCollectionDocs] = useState(false);
   const [creatingCollection, setCreatingCollection] = useState(false);
   const [linkUrl, setLinkUrl] = useState('');
   const [linkTitle, setLinkTitle] = useState('');
@@ -568,10 +671,19 @@ function BookshelfView({ onDiscover }: { onDiscover: () => void }) {
   const [collectionSearching, setCollectionSearching] = useState(false);
   const [addingDocumentId, setAddingDocumentId] = useState<number | null>(null);
   const [confirmDeleteCollectionId, setConfirmDeleteCollectionId] = useState<number | null>(null);
+  const [selectedDocumentIds, setSelectedDocumentIds] = useState<Set<number>>(new Set());
+  const [lastSelectedDocumentId, setLastSelectedDocumentId] = useState<number | null>(null);
+  const [bulkMenuOpen, setBulkMenuOpen] = useState(false);
+  const [drawerEntry, setDrawerEntry] = useState<BookshelfEntry | null>(null);
+  const [drawerDetail, setDrawerDetail] = useState<DocumentDetail | null>(null);
+  const [drawerLoading, setDrawerLoading] = useState(false);
+  const [drawerError, setDrawerError] = useState<string | null>(null);
   const collectionDraftRef = useRef<HTMLInputElement | null>(null);
+  const bookshelfPanelRef = useRef<HTMLDivElement | null>(null);
+  const drawerRef = useRef<HTMLDivElement | null>(null);
 
   const tableRows = filterBookshelfEntries(entries, collections, activeView);
-  const discoverLabel = discoverLabelForBookshelfView(activeView, collections);
+  const discoverLabel = 'Discover';
   const activeCollection = activeView.startsWith('collection:')
     ? collections.find((collection) => collection.id === Number(activeView.slice('collection:'.length))) ?? null
     : null;
@@ -599,7 +711,65 @@ function BookshelfView({ onDiscover }: { onDiscover: () => void }) {
 
   useEffect(() => {
     setConfirmDeleteCollectionId(null);
+    setAddingCollectionDocs(false);
+    setCollectionSearchQuery('');
+    setCollectionSearchResults([]);
+    setSelectedDocumentIds(new Set());
+    setLastSelectedDocumentId(null);
+    setBulkMenuOpen(false);
   }, [activeView]);
+
+  useEffect(() => {
+    if (selectedDocumentIds.size === 0) setBulkMenuOpen(false);
+  }, [selectedDocumentIds.size]);
+
+  useEffect(() => {
+    if (!drawerEntry) {
+      setDrawerDetail(null);
+      setDrawerError(null);
+      return;
+    }
+    let cancelled = false;
+    setDrawerLoading(true);
+    setDrawerError(null);
+    getDocument(drawerEntry.document.id)
+      .then((detail) => {
+        if (!cancelled) setDrawerDetail(detail);
+      })
+      .catch((err) => {
+        if (!cancelled) setDrawerError(err instanceof Error ? err.message : 'Could not load document');
+      })
+      .finally(() => {
+        if (!cancelled) setDrawerLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [drawerEntry?.document.id]);
+
+  useEffect(() => {
+    if (selectedDocumentIds.size === 0) return;
+    function clearSelectionOnOutsideClick(event: PointerEvent) {
+      const target = event.target;
+      if (target instanceof Node && bookshelfPanelRef.current?.contains(target)) return;
+      setSelectedDocumentIds(new Set());
+      setLastSelectedDocumentId(null);
+      setBulkMenuOpen(false);
+    }
+    document.addEventListener('pointerdown', clearSelectionOnOutsideClick);
+    return () => document.removeEventListener('pointerdown', clearSelectionOnOutsideClick);
+  }, [selectedDocumentIds.size]);
+
+  useEffect(() => {
+    if (!drawerEntry) return;
+    function closeDrawerOnOutsideClick(event: PointerEvent) {
+      const target = event.target;
+      if (target instanceof Node && drawerRef.current?.contains(target)) return;
+      setDrawerEntry(null);
+    }
+    document.addEventListener('pointerdown', closeDrawerOnOutsideClick);
+    return () => document.removeEventListener('pointerdown', closeDrawerOnOutsideClick);
+  }, [drawerEntry]);
 
   async function submitLink(event: FormEvent) {
     event.preventDefault();
@@ -680,7 +850,7 @@ function BookshelfView({ onDiscover }: { onDiscover: () => void }) {
     setCollectionSearching(true);
     setError(null);
     try {
-      const response = await searchCorpus(query, 8);
+      const response = await searchDocuments(query, 8);
       setCollectionSearchResults(response.results);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not search corpus');
@@ -706,6 +876,123 @@ function BookshelfView({ onDiscover }: { onDiscover: () => void }) {
     } finally {
       setAddingDocumentId(null);
     }
+  }
+
+  async function removeDocumentFromActiveView(documentId: number) {
+    if (saving) return;
+    setSaving(true);
+    setError(null);
+    try {
+      if (activeCollection) {
+        const collection = await removeBookshelfCollectionItem(activeCollection.id, documentId);
+        setCollections((current) => current.map((item) => (item.id === collection.id ? collection : item)));
+      } else if (activeView === 'favorites') {
+        const entry = await updateDocumentBookshelf(documentId, { favorited: false });
+        setEntries((current) => current.map((item) => (item.document.id === documentId ? entry : item)));
+      } else {
+        const entry = await updateDocumentBookshelf(documentId, { status: 'archived' });
+        setEntries((current) => current.map((item) => (item.document.id === documentId ? entry : item)));
+      }
+      setSelectedDocumentIds((current) => {
+        if (!current.has(documentId)) return current;
+        const next = new Set(current);
+        next.delete(documentId);
+        return next;
+      });
+      setBulkMenuOpen(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not remove document');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function addSelectedToCollection(collectionId: number) {
+    const documentIds = Array.from(selectedDocumentIds);
+    if (documentIds.length === 0 || saving) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const updates = await Promise.all(documentIds.map((documentId) => addBookshelfCollectionItem(collectionId, documentId)));
+      const collection = updates.at(-1);
+      if (collection) {
+        setCollections((current) => current.map((item) => (item.id === collection.id ? collection : item)));
+      }
+      setBulkMenuOpen(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not add selected documents');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function removeSelectedFromActiveCollection() {
+    if (selectedDocumentIds.size === 0 || saving) return;
+    const documentIds = Array.from(selectedDocumentIds);
+    setSaving(true);
+    setError(null);
+    try {
+      if (activeCollection) {
+        const updates = await Promise.all(documentIds.map((documentId) => removeBookshelfCollectionItem(activeCollection.id, documentId)));
+        const collection = updates.at(-1);
+        if (collection) {
+          setCollections((current) => current.map((item) => (item.id === collection.id ? collection : item)));
+        }
+      } else if (activeView === 'favorites') {
+        const updates = await Promise.all(documentIds.map((documentId) => updateDocumentBookshelf(documentId, { favorited: false })));
+        setEntries((current) => mergeBookshelfEntryUpdates(current, updates));
+      } else {
+        const updates = await Promise.all(documentIds.map((documentId) => updateDocumentBookshelf(documentId, { status: 'archived' })));
+        setEntries((current) => mergeBookshelfEntryUpdates(current, updates));
+      }
+      setSelectedDocumentIds(new Set());
+      setLastSelectedDocumentId(null);
+      setBulkMenuOpen(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not remove selected documents');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function selectBookshelfRow(entry: BookshelfEntry, event: MouseEvent<HTMLDivElement>, forceSelect = false) {
+    const target = event.target as HTMLElement;
+    if (target.closest('a, button, select')) return;
+    const documentId = entry.document.id;
+    if (event.shiftKey && lastSelectedDocumentId !== null) {
+      event.preventDefault();
+      const startIndex = tableRows.findIndex((row) => row.document.id === lastSelectedDocumentId);
+      const endIndex = tableRows.findIndex((row) => row.document.id === documentId);
+      if (startIndex !== -1 && endIndex !== -1) {
+        const [start, end] = startIndex < endIndex ? [startIndex, endIndex] : [endIndex, startIndex];
+        setSelectedDocumentIds((current) => {
+          const next = new Set(current);
+          tableRows.slice(start, end + 1).forEach((row) => next.add(row.document.id));
+          return next;
+        });
+        setLastSelectedDocumentId(documentId);
+        return;
+      }
+    }
+    if (!forceSelect && !event.metaKey && !event.ctrlKey) return;
+    setSelectedDocumentIds((current) => {
+      if (event.metaKey || event.ctrlKey) {
+        const next = new Set(current);
+        if (next.has(documentId)) {
+          next.delete(documentId);
+        } else {
+          next.add(documentId);
+        }
+        return next;
+      }
+      return new Set([documentId]);
+    });
+    setLastSelectedDocumentId(documentId);
+    if (forceSelect) setBulkMenuOpen(true);
+  }
+
+  function openBookshelfDrawer(entry: BookshelfEntry) {
+    setDrawerEntry(entry);
   }
 
   return (
@@ -772,44 +1059,54 @@ function BookshelfView({ onDiscover }: { onDiscover: () => void }) {
           ))}
         </aside>
 
-        <div className="bookshelf-table-panel">
+        <div className="bookshelf-table-panel" ref={bookshelfPanelRef}>
           <div className="bookshelf-toolbar">
             <div className="bookshelf-toolbar-actions">
               <button className="bookshelf-add-filter" type="button">+ Add filter</button>
               {activeCollection && (
-                <button className="bookshelf-delete-collection" type="button" onClick={deleteActiveCollection} disabled={saving}>
-                  {confirmDeleteCollectionId === activeCollection.id ? 'Confirm delete' : 'Delete collection'}
-                </button>
+                <>
+                  <button className="bookshelf-add-filter" type="button" onClick={() => setAddingCollectionDocs((value) => !value)}>
+                    {addingCollectionDocs ? 'Done adding' : '+ Add documents'}
+                  </button>
+                  <button className="bookshelf-delete-collection" type="button" onClick={deleteActiveCollection} disabled={saving}>
+                    {confirmDeleteCollectionId === activeCollection.id ? 'Confirm delete' : 'Delete collection'}
+                  </button>
+                </>
               )}
             </div>
+            {selectedDocumentIds.size > 0 && bulkMenuOpen && (
+              <div className="bookshelf-bulk-menu">
+                <span>{selectedDocumentIds.size} selected</span>
+                {collections.length > (activeCollection ? 1 : 0) && (
+                  <select
+                    value=""
+                    onChange={(event) => {
+                      const collectionId = Number(event.target.value);
+                      if (collectionId) void addSelectedToCollection(collectionId);
+                    }}
+                    disabled={saving}
+                    aria-label="Add selected documents to collection"
+                  >
+                    <option value="">Add to playlist...</option>
+                    {collections
+                      .filter((collection) => collection.id !== activeCollection?.id)
+                      .map((collection) => (
+                        <option key={collection.id} value={collection.id}>{collection.name}</option>
+                      ))}
+                  </select>
+                )}
+                <button type="button" onClick={removeSelectedFromActiveCollection} disabled={saving}>
+                  <Trash2 size={13} />
+                  Remove
+                </button>
+                <button type="button" onClick={() => setBulkMenuOpen(false)}>
+                  Done
+                </button>
+              </div>
+            )}
           </div>
 
-          {addingLink && (
-            <form className="bookshelf-add-link bookshelf-add-link-compact" onSubmit={submitLink}>
-              <input value={linkUrl} onChange={(event) => setLinkUrl(event.target.value)} placeholder="Paste a URL..." />
-              <input value={linkTitle} onChange={(event) => setLinkTitle(event.target.value)} placeholder="Title override" />
-              <Button type="submit" disabled={saving || !linkUrl.trim()} borderRadius="0">Save</Button>
-            </form>
-          )}
-
-          {error && <div className="error">{error}</div>}
-          {loading && <div className="empty-state">Loading bookshelf...</div>}
-          {!loading && (
-            <BookshelfTable
-              rows={tableRows}
-              collections={collections}
-            />
-          )}
-          {!loading && tableRows.length === 0 && (
-            <div className="bookshelf-empty-cta">
-              <h3>No rows yet</h3>
-              <button className="bookshelf-discover-cta" type="button" onClick={onDiscover}>
-                <Search size={15} />
-                {discoverLabel}
-              </button>
-            </div>
-          )}
-          {activeCollection && (
+          {activeCollection && addingCollectionDocs && (
             <form className="bookshelf-collection-search" onSubmit={submitCollectionSearch}>
               <label htmlFor="bookshelf-collection-search">Add documents</label>
               <div>
@@ -849,8 +1146,56 @@ function BookshelfView({ onDiscover }: { onDiscover: () => void }) {
               )}
             </form>
           )}
+
+          {addingLink && (
+            <form className="bookshelf-add-link bookshelf-add-link-compact" onSubmit={submitLink}>
+              <input value={linkUrl} onChange={(event) => setLinkUrl(event.target.value)} placeholder="Paste a URL..." />
+              <input value={linkTitle} onChange={(event) => setLinkTitle(event.target.value)} placeholder="Title override" />
+              <Button type="submit" disabled={saving || !linkUrl.trim()} borderRadius="0">Save</Button>
+            </form>
+          )}
+
+          {error && <div className="error">{error}</div>}
+          <BookshelfTable
+            rows={tableRows}
+            selectedDocumentIds={selectedDocumentIds}
+            selectionEnabled
+            onRowClick={selectBookshelfRow}
+            onOpenDetail={openBookshelfDrawer}
+            onRemoveFromCurrent={removeDocumentFromActiveView}
+          />
+          {tableRows.length === 0 && (
+            <div className="bookshelf-empty-cta">
+              <h3>No rows yet</h3>
+              <button className="bookshelf-discover-cta" type="button" onClick={activeCollection ? () => setAddingCollectionDocs(true) : onDiscover}>
+                <Search size={15} />
+                {discoverLabel}
+              </button>
+            </div>
+          )}
         </div>
       </div>
+      {drawerEntry && (
+        <BookshelfDetailDrawer
+          entry={drawerEntry}
+          detail={drawerDetail}
+          collections={collections}
+          loading={drawerLoading}
+          error={drawerError}
+          drawerRef={drawerRef}
+          onEntryChange={(entry) => {
+            setDrawerEntry(entry);
+            setEntries((current) => current.map((item) => (item.document.id === entry.document.id ? entry : item)));
+            setCollections((current) =>
+              current.map((collection) => ({
+                ...collection,
+                items: collection.items.map((item) => (item.document.id === entry.document.id ? entry : item)),
+              })),
+            );
+          }}
+          onClose={() => setDrawerEntry(null)}
+        />
+      )}
     </section>
   );
 }
@@ -876,19 +1221,202 @@ function notePreview(entry: BookshelfEntry): string {
   return text.split('\n')[0];
 }
 
-function collectionsForEntry(entry: BookshelfEntry, collections: BookshelfCollection[]): BookshelfCollection[] {
-  return collections.filter((collection) => collection.items.some((item) => item.document.id === entry.document.id));
+function mergeBookshelfEntryUpdates(current: BookshelfEntry[], updates: BookshelfEntry[]): BookshelfEntry[] {
+  const byDocumentId = new Map(updates.map((entry) => [entry.document.id, entry]));
+  return current.map((entry) => byDocumentId.get(entry.document.id) ?? entry);
 }
 
-function discoverLabelForBookshelfView(activeView: BookshelfViewKey, collections: BookshelfCollection[]): string {
-  if (activeView === 'favorites') return 'Discover favorites';
-  if (activeView === 'reading-log') return 'Discover something to read';
-  if (activeView.startsWith('collection:')) {
-    const collectionId = Number(activeView.slice('collection:'.length));
-    const collectionName = collections.find((collection) => collection.id === collectionId)?.name;
-    return collectionName ? `Discover ${collectionName}` : 'Discover documents';
+function BookshelfDetailDrawer({
+  entry,
+  detail,
+  collections,
+  loading,
+  error,
+  drawerRef,
+  onEntryChange,
+  onClose,
+}: {
+  entry: BookshelfEntry;
+  detail: DocumentDetail | null;
+  collections: BookshelfCollection[];
+  loading: boolean;
+  error: string | null;
+  drawerRef: React.RefObject<HTMLDivElement | null>;
+  onEntryChange: (entry: BookshelfEntry) => void;
+  onClose: () => void;
+}) {
+  const document = detail ?? entry.document;
+  const containingCollections = collections.filter((collection) =>
+    collection.items.some((item) => item.document.id === entry.document.id),
+  );
+  const [noteDraft, setNoteDraft] = useState(entry.note ?? entry.intent_note ?? '');
+  const [tagDraftOpen, setTagDraftOpen] = useState(false);
+  const [tagDraft, setTagDraft] = useState('');
+  const [savingNote, setSavingNote] = useState(false);
+  const [savingTags, setSavingTags] = useState(false);
+  const [referenceLimit, setReferenceLimit] = useState(5);
+  const [referencedByLimit, setReferencedByLimit] = useState(5);
+
+  useEffect(() => {
+    setNoteDraft(entry.note ?? entry.intent_note ?? '');
+    setTagDraft('');
+    setTagDraftOpen(false);
+  }, [entry.document.id]);
+
+  useEffect(() => {
+    const nextNote = noteDraft.trim();
+    const currentNote = (entry.note ?? entry.intent_note ?? '').trim();
+    if (nextNote === currentNote) return;
+    const timeout = window.setTimeout(() => {
+      setSavingNote(true);
+      updateDocumentBookshelf(entry.document.id, { note: noteDraft })
+        .then(onEntryChange)
+        .finally(() => setSavingNote(false));
+    }, 450);
+    return () => window.clearTimeout(timeout);
+  }, [entry.document.id, entry.note, entry.intent_note, noteDraft, onEntryChange]);
+
+  async function addTag(event: FormEvent) {
+    event.preventDefault();
+    const tag = tagDraft.trim();
+    if (!tag || entry.tags.includes(tag)) {
+      setTagDraft('');
+      setTagDraftOpen(false);
+      return;
+    }
+    setSavingTags(true);
+    try {
+      const updated = await updateDocumentBookshelf(entry.document.id, { tags: [...entry.tags, tag] });
+      onEntryChange(updated);
+      setTagDraft('');
+      setTagDraftOpen(false);
+    } finally {
+      setSavingTags(false);
+    }
   }
-  return 'Discover read next';
+
+  return (
+    <aside ref={drawerRef} className="bookshelf-detail-drawer" aria-label="Bookshelf document details">
+      <div className="bookshelf-detail-header">
+        <div>
+          <span>{document.source_domain}</span>
+          <h3>
+            {document.title ?? document.url}
+            <a href={document.url} aria-label="Open document">
+              <ArrowUpRight size={15} />
+            </a>
+          </h3>
+        </div>
+        <button type="button" onClick={onClose} aria-label="Close details">×</button>
+      </div>
+
+      <div className="bookshelf-detail-actions">
+        {containingCollections.map((collection) => (
+          <span key={collection.id}>{collection.name}</span>
+        ))}
+        {entry.favorited && <span>favorite</span>}
+      </div>
+
+      {loading && <div className="bookshelf-detail-muted">Loading details...</div>}
+      {error && <div className="error">{error}</div>}
+
+      <section className="bookshelf-detail-section">
+        <h4>Summary</h4>
+        <p>{document.summary || 'No summary yet.'}</p>
+      </section>
+
+      <section className="bookshelf-detail-section">
+        <div className="bookshelf-detail-section-heading">
+          <h4>Notes</h4>
+          {savingNote && <span>Saving</span>}
+        </div>
+        <textarea
+          className="bookshelf-detail-note-input"
+          value={noteDraft}
+          onChange={(event) => setNoteDraft(event.target.value)}
+          placeholder="Add a note..."
+        />
+      </section>
+
+      <section className="bookshelf-detail-section">
+        <div className="bookshelf-detail-section-heading">
+          <h4>Tags</h4>
+          <button type="button" className="bookshelf-detail-add-tag" onClick={() => setTagDraftOpen((value) => !value)}>
+            Add tag
+          </button>
+        </div>
+        {tagDraftOpen && (
+          <form className="bookshelf-detail-tag-form" onSubmit={addTag}>
+            <input
+              value={tagDraft}
+              onChange={(event) => setTagDraft(event.target.value)}
+              placeholder="New tag"
+              disabled={savingTags}
+              autoFocus
+            />
+          </form>
+        )}
+        {entry.tags.length > 0 || document.topics.length > 0 ? (
+          <div className="bookshelf-detail-tags">
+            {[...entry.tags, ...document.topics.filter((topic) => !entry.tags.includes(topic))].map((tag) => (
+              <span key={tag}>{tag}</span>
+            ))}
+          </div>
+        ) : (
+          <p>No tags yet.</p>
+        )}
+      </section>
+
+      <div className="bookshelf-detail-reference-grid">
+        <section className="bookshelf-detail-section">
+          <h4>References</h4>
+          {detail?.outgoing_links.length ? (
+            <>
+              <div className="bookshelf-detail-link-list">
+                {detail.outgoing_links.slice(0, referenceLimit).map((link, index) => (
+                  <a key={`${link.target_url}-${index}`} href={link.target_url}>
+                    <strong>{link.anchor_text || link.target_domain || link.target_url}</strong>
+                    <small>{link.target_domain || link.target_url}</small>
+                    {link.context && <span>{link.context}</span>}
+                  </a>
+                ))}
+              </div>
+              {referenceLimit < detail.outgoing_links.length && (
+                <button className="bookshelf-detail-more" type="button" onClick={() => setReferenceLimit((value) => value + 5)}>
+                  More references
+                </button>
+              )}
+            </>
+          ) : (
+            <p>No outgoing references indexed.</p>
+          )}
+        </section>
+
+        <section className="bookshelf-detail-section">
+          <h4>Referenced By</h4>
+          {detail?.incoming_links.length ? (
+            <>
+              <div className="bookshelf-detail-link-list">
+                {detail.incoming_links.slice(0, referencedByLimit).map((link, index) => (
+                  <button key={`${link.source_document_id}-${index}`} type="button">
+                    <strong>{link.anchor_text || `Document ${link.source_document_id}`}</strong>
+                    <small>{link.target_url}</small>
+                  </button>
+                ))}
+              </div>
+              {referencedByLimit < detail.incoming_links.length && (
+                <button className="bookshelf-detail-more" type="button" onClick={() => setReferencedByLimit((value) => value + 5)}>
+                  More referenced by
+                </button>
+              )}
+            </>
+          ) : (
+            <p>No incoming references indexed.</p>
+          )}
+        </section>
+      </div>
+    </aside>
+  );
 }
 
 function entryDate(entry: BookshelfEntry): string {
@@ -897,58 +1425,125 @@ function entryDate(entry: BookshelfEntry): string {
   return new Date(value).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
-function statusLabel(status: BookshelfStatus): string {
-  if (status === 'saved') return 'Read next';
-  if (status === 'read') return 'Read';
-  return 'Removed';
+function defaultDirectorySortDirection(sort: DirectorySourceSort): SortDirection {
+  return sort === 'source' ? 'asc' : 'desc';
+}
+
+function directorySortLabel(label: string, sort: DirectorySourceSort, activeSort: DirectorySourceSort, direction: SortDirection): string {
+  if (sort !== activeSort) return label;
+  return `${label} ${direction === 'asc' ? '↑' : '↓'}`;
 }
 
 function BookshelfTable({
   rows,
-  collections,
+  selectedDocumentIds,
+  selectionEnabled,
+  onRowClick,
+  onOpenDetail,
+  onRemoveFromCurrent,
 }: {
   rows: BookshelfEntry[];
-  collections: BookshelfCollection[];
+  selectedDocumentIds: Set<number>;
+  selectionEnabled: boolean;
+  onRowClick: (entry: BookshelfEntry, event: MouseEvent<HTMLDivElement>, forceSelect?: boolean) => void;
+  onOpenDetail: (entry: BookshelfEntry) => void;
+  onRemoveFromCurrent: (documentId: number) => void;
 }) {
+  const [openActionDocumentId, setOpenActionDocumentId] = useState<number | null>(null);
+  const clickTimerRef = useRef<number | null>(null);
+
+  function clearClickTimer() {
+    if (clickTimerRef.current !== null) {
+      window.clearTimeout(clickTimerRef.current);
+      clickTimerRef.current = null;
+    }
+  }
+
   return (
     <div className="bookshelf-table" role="table" aria-label="Bookshelf documents">
       <div className="bookshelf-table-row bookshelf-table-head" role="row">
-        <span />
         <span>Title</span>
-        <span>Status</span>
         <span>Tags</span>
-        <span>Collections</span>
         <span>Notes</span>
         <span>Date</span>
+        <span />
         <span />
       </div>
       {rows.map((entry) => {
         const document = entry.document;
-        const entryCollections = collectionsForEntry(entry, collections);
+        const isSelected = selectedDocumentIds.has(document.id);
         return (
           <div
             key={document.id}
-            className="bookshelf-table-row"
+            className={isSelected ? 'bookshelf-table-row bookshelf-table-row-selected' : 'bookshelf-table-row'}
             role="row"
+            aria-selected={selectionEnabled ? isSelected : undefined}
+            onClick={(event) => {
+              const target = event.target as HTMLElement;
+              if (target.closest('a, button, select')) return;
+              if (event.metaKey || event.ctrlKey || event.shiftKey) {
+                onRowClick(entry, event);
+                return;
+              }
+              clearClickTimer();
+              clickTimerRef.current = window.setTimeout(() => {
+                onOpenDetail(entry);
+                clickTimerRef.current = null;
+              }, 180);
+            }}
+            onMouseDown={(event) => {
+              if (event.detail > 1) event.preventDefault();
+            }}
+            onDoubleClick={(event) => {
+              event.preventDefault();
+              clearClickTimer();
+              onRowClick(entry, event, true);
+            }}
           >
-            <span className={entry.favorited ? 'bookshelf-fav bookshelf-fav-on' : 'bookshelf-fav'}>
-              {entry.favorited ? '♥' : '♡'}
-            </span>
             <span className="bookshelf-table-title">
-              <strong>{document.title ?? document.url}</strong>
+              <strong>
+                {document.title ?? document.url}
+                <a href={document.url} aria-label="Open document" onClick={(event) => event.stopPropagation()}>
+                  <ArrowUpRight size={14} />
+                </a>
+              </strong>
               <small>{document.source_domain}</small>
             </span>
-            <span>{statusLabel(entry.status)}</span>
             <span className="bookshelf-table-tags">{entry.tags.slice(0, 3).join(', ')}</span>
-            <span>{entryCollections.map((collection) => collection.name).join(', ')}</span>
             <span className={entry.note || entry.intent_note ? 'bookshelf-note-preview' : 'bookshelf-note-empty'}>
               {notePreview(entry)}
             </span>
             <span>{entryDate(entry)}</span>
-            <span>
-              <a href={document.url} aria-label="Open document">
-                <ArrowUpRight size={15} />
-              </a>
+            <span className={entry.favorited ? 'bookshelf-fav bookshelf-fav-on' : 'bookshelf-fav'}>
+              {entry.favorited ? '♥' : '♡'}
+            </span>
+            <span className="bookshelf-row-actions">
+              <button
+                type="button"
+                aria-label="Document actions"
+                aria-expanded={openActionDocumentId === document.id}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  setOpenActionDocumentId((current) => (current === document.id ? null : document.id));
+                }}
+              >
+                <MoreVertical size={14} />
+              </button>
+              {openActionDocumentId === document.id && (
+                <div className="bookshelf-row-menu">
+                  <button
+                    type="button"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onRemoveFromCurrent(document.id);
+                      setOpenActionDocumentId(null);
+                    }}
+                  >
+                    <Trash2 size={13} />
+                    Remove
+                  </button>
+                </div>
+              )}
             </span>
           </div>
         );
@@ -957,30 +1552,58 @@ function BookshelfTable({
   );
 }
 
-function DirectoryView({ target, onOpenProfile }: { target: ProfileTarget; onOpenProfile: (sourceId: number, domain: string) => void }) {
+function DirectoryView({
+  target,
+  onOpenProfile,
+  onDirectoryRoot,
+}: {
+  target: ProfileTarget;
+  onOpenProfile: (sourceId: number, domain: string) => void;
+  onDirectoryRoot: () => void;
+}) {
   const [query, setQuery] = useState(target?.domain ?? '');
   const [selectedSource, setSelectedSource] = useState<AdminSource | null>(null);
-  const [suggestions, setSuggestions] = useState<AdminSource[]>([]);
-  const [suggestionsOpen, setSuggestionsOpen] = useState(false);
+  const [directoryPage, setDirectoryPage] = useState<Page<DirectorySource>>(emptyPage);
+  const [directorySort, setDirectorySort] = useState<DirectorySourceSort>('inbound');
+  const [directorySortDirection, setDirectorySortDirection] = useState<SortDirection>('desc');
   const [documentsPage, setDocumentsPage] = useState<Page<Document>>(emptyPage);
   const [profileAnalysis, setProfileAnalysis] = useState<SourceProfileAnalysis | null>(null);
   const [selected, setSelected] = useState<ProfileTarget>(target);
   const [documentPageState, setDocumentPageState] = useState<PageState>({ limit: 50, offset: 0 });
+  const [directoryPageState, setDirectoryPageState] = useState<PageState>({ limit: 50, offset: 0 });
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const suppressSuggestionsRef = useRef(false);
+  const didLoadDirectoryRef = useRef(false);
 
   useEffect(() => {
     setSelected(target);
     if (target) setQuery(target.domain);
   }, [target?.sourceId, target?.domain]);
 
-  async function refresh(nextQuery = query, nextSelected = selected, nextPage = documentPageState) {
-    setLoading(true);
+  async function refresh(
+    nextQuery = query,
+    nextSelected = selected,
+    nextPage = documentPageState,
+    nextDirectoryPage = directoryPageState,
+    nextSort = directorySort,
+    nextSortDirection = directorySortDirection,
+  ) {
+    const firstLoad = !didLoadDirectoryRef.current;
+    setLoading(firstLoad);
+    setRefreshing(!firstLoad);
     setError(null);
     try {
       const normalizedQuery = nextQuery.trim();
-      if (!nextSelected && !normalizedQuery) {
+      if (!nextSelected) {
+        const tablePage = await getDirectorySources({
+          status: 'indexed',
+          q: normalizedQuery,
+          sort: nextSort,
+          direction: nextSortDirection,
+          ...nextDirectoryPage,
+        });
+        setDirectoryPage(tablePage);
         setSelectedSource(null);
         setSelected(null);
         setDocumentsPage(emptyPage<Document>());
@@ -989,7 +1612,7 @@ function DirectoryView({ target, onOpenProfile }: { target: ProfileTarget; onOpe
       }
       const sources = await getAdminSources({ status: 'indexed', q: normalizedQuery, limit: 25 });
       const source =
-        (nextSelected && sources.items.find((item) => item.id === nextSelected.sourceId)) ??
+        (nextSelected?.sourceId ? sources.items.find((item) => item.id === nextSelected.sourceId) : null) ??
         sources.items.find((item) => item.canonical_domain === normalizedQuery.toLowerCase()) ??
         (normalizedQuery ? sources.items[0] : null) ??
         null;
@@ -1008,68 +1631,51 @@ function DirectoryView({ target, onOpenProfile }: { target: ProfileTarget; onOpe
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Directory failed');
     } finally {
+      didLoadDirectoryRef.current = true;
       setLoading(false);
+      setRefreshing(false);
     }
   }
 
   useEffect(() => {
     const nextPage = { limit: 50, offset: 0 };
     setDocumentPageState(nextPage);
-    refresh(target?.domain ?? '', target, nextPage);
+    const nextDirectoryPage = { limit: directoryPageState.limit, offset: 0 };
+    setDirectoryPageState(nextDirectoryPage);
+    refresh(target?.domain ?? '', target, nextPage, nextDirectoryPage);
   }, [target?.sourceId, target?.domain]);
 
   useEffect(() => {
-    const normalized = query.trim();
-    if (suppressSuggestionsRef.current) {
-      suppressSuggestionsRef.current = false;
-      setSuggestionsOpen(false);
-      return;
-    }
-    if (!normalized) {
-      setSuggestions([]);
-      setSuggestionsOpen(false);
-      return;
-    }
-    let mounted = true;
-    getAdminSources({ status: 'indexed', q: normalized, limit: 8 })
-      .then((page) => {
-        if (!mounted) return;
-        setSuggestions(page.items);
-        setSuggestionsOpen(true);
-      })
-      .catch(() => {
-        if (!mounted) return;
-        setSuggestions([]);
-        setSuggestionsOpen(false);
-      });
-    return () => {
-      mounted = false;
-    };
-  }, [query]);
+    if (selected) return;
+    const timeout = window.setTimeout(() => {
+      const nextDirectoryPage = { limit: directoryPageState.limit, offset: 0 };
+      setDirectoryPageState(nextDirectoryPage);
+      refresh(query, null, documentPageState, nextDirectoryPage);
+    }, 160);
+    return () => window.clearTimeout(timeout);
+  }, [query, selected?.domain]);
 
   function submit(event: FormEvent) {
     event.preventDefault();
     const nextPage = { limit: documentPageState.limit, offset: 0 };
+    const nextDirectoryPage = { limit: directoryPageState.limit, offset: 0 };
     setDocumentPageState(nextPage);
-    setSuggestionsOpen(false);
-    refresh(query, null, nextPage);
+    setDirectoryPageState(nextDirectoryPage);
+    refresh(query, null, nextPage, nextDirectoryPage);
   }
 
   function updateQuery(value: string) {
     setQuery(value);
-    setSuggestionsOpen(Boolean(value.trim()));
   }
 
-  function selectSuggestion(source: AdminSource) {
+  function openSourceProfile(source: Pick<AdminSource, 'id' | 'canonical_domain'>) {
     const nextPage = { limit: documentPageState.limit, offset: 0 };
     const nextProfile = { sourceId: source.id, domain: source.canonical_domain };
-    suppressSuggestionsRef.current = true;
     setQuery(source.canonical_domain);
     setSelected(nextProfile);
-    setSelectedSource(source);
     setDocumentPageState(nextPage);
-    setSuggestionsOpen(false);
     refresh(source.canonical_domain, nextProfile, nextPage);
+    onOpenProfile(source.id, source.canonical_domain);
   }
 
   function pageProfileDocuments(nextPage: PageState) {
@@ -1077,62 +1683,117 @@ function DirectoryView({ target, onOpenProfile }: { target: ProfileTarget; onOpe
     refresh(selected?.domain ?? query, selected, nextPage);
   }
 
+  function updateDirectorySort(nextSort: DirectorySourceSort) {
+    const nextPage = { limit: directoryPageState.limit, offset: 0 };
+    const nextDirection: SortDirection = nextSort === directorySort ? (directorySortDirection === 'desc' ? 'asc' : 'desc') : defaultDirectorySortDirection(nextSort);
+    setDirectorySort(nextSort);
+    setDirectorySortDirection(nextDirection);
+    setDirectoryPageState(nextPage);
+    refresh(query, selected, documentPageState, nextPage, nextSort, nextDirection);
+  }
+
+  function pageDirectory(nextPage: PageState) {
+    setDirectoryPageState(nextPage);
+    refresh(query, selected, documentPageState, nextPage);
+  }
+
+  function selectDirectorySource(source: DirectorySource) {
+    openSourceProfile({
+      id: source.id,
+      canonical_domain: source.canonical_domain,
+    });
+  }
+
+  function showDirectoryRoot() {
+    setSelected(null);
+    setSelectedSource(null);
+    setProfileAnalysis(null);
+    setDocumentsPage(emptyPage<Document>());
+    setQuery('');
+    onDirectoryRoot();
+    if (directoryPage.items.length === 0) {
+      refresh('', null, documentPageState, { ...directoryPageState, offset: 0 });
+    }
+  }
+
   return (
     <Box as="section" className="directory-view">
-      <CorpusSearchForm
-        className="search-box"
-        value={query}
-        onChange={updateQuery}
-        onSubmit={submit}
-        placeholder={loading ? 'Loading...' : 'Find a person or domain...'}
-        disabled={loading || !query.trim()}
-      >
-        {suggestionsOpen && suggestions.length > 0 && (
-          <div className="directory-suggestions">
-            {suggestions.map((source) => (
-              <button key={source.id} type="button" onClick={() => selectSuggestion(source)}>
-                <span>{source.canonical_domain}</span>
-                <small>{source.essay_count} essays</small>
-              </button>
-            ))}
-          </div>
-        )}
-      </CorpusSearchForm>
+      {selected ? (
+        <button className="directory-back directory-back-top" type="button" onClick={showDirectoryRoot} aria-label="Back to sources">
+          ←
+        </button>
+      ) : (
+        <CorpusSearchForm
+          className="search-box"
+          value={query}
+          onChange={updateQuery}
+          onSubmit={submit}
+          placeholder={loading ? 'Loading...' : 'Filter sources...'}
+          disabled={loading}
+        />
+      )}
 
       {error && <div className="error">{error}</div>}
       {loading && <div className="empty-state">Loading...</div>}
 
-      {!loading && (
-        <div className="profile-panel">
-            {selected ? (
-              <>
-                <div className="profile-heading">
-                  <div>
-                    <h3>{profileAnalysis?.display_name || selectedSource?.canonical_domain || selected.domain}</h3>
-                    {profileAnalysis?.display_name && profileAnalysis.display_name !== selected.domain && <p>{selectedSource?.canonical_domain ?? selected.domain}</p>}
-                  </div>
-                  <a href={selectedSource?.url ?? `https://${selected.domain}`}>
-                    <ArrowUpRight size={16} />
+      {!loading && !selected && (
+        <div className="directory-table-panel">
+          <div className={refreshing ? 'directory-table directory-table-refreshing' : 'directory-table'}>
+            <div className="directory-table-row directory-table-head" role="row">
+              <button type="button" onClick={() => updateDirectorySort('source')}>{directorySortLabel('Source', 'source', directorySort, directorySortDirection)}</button>
+              <button type="button" onClick={() => updateDirectorySort('inbound')}>{directorySortLabel('Links', 'inbound', directorySort, directorySortDirection)}</button>
+              <button type="button" onClick={() => updateDirectorySort('essays')}>{directorySortLabel('Corpus', 'essays', directorySort, directorySortDirection)}</button>
+            </div>
+            {directoryPage.items.map((source) => (
+              <div key={source.id} className="directory-table-row" role="button" tabIndex={0} onClick={() => selectDirectorySource(source)} onKeyDown={(event) => {
+                if (event.key === 'Enter' || event.key === ' ') selectDirectorySource(source);
+              }}>
+                <span className="directory-source-cell">
+                  <strong>{source.canonical_domain}</strong>
+                  <a href={source.url} aria-label="Open source" onClick={(event) => event.stopPropagation()}>
+                    <ArrowUpRight size={15} />
                   </a>
-                </div>
-                <ProfileAnalysisCard analysis={profileAnalysis} />
-                <div className="profile-documents">
-                  {documentsPage.items.map((document) => (
-                    <DocumentCard
-                      key={document.id}
-                      document={document}
-                      reason={document.summary ? 'From this profile.' : 'Indexed essay from this profile.'}
-                      onOpenProfile={onOpenProfile}
-                      compact
-                    />
-                  ))}
-                </div>
-                <ProfilePagination page={documentsPage} onChange={pageProfileDocuments} />
-              </>
-            ) : (
-              null
-            )}
+                </span>
+                <span className="directory-stat-pair">
+                  <strong>{source.inbound_count}</strong>
+                  <small>{source.outbound_count} out</small>
+                </span>
+                <span className="directory-stat-pair">
+                  <strong>{source.essay_count}</strong>
+                  <small>{source.document_count} docs</small>
+                </span>
+              </div>
+            ))}
           </div>
+          <ProfilePagination page={directoryPage} onChange={pageDirectory} />
+        </div>
+      )}
+
+      {!loading && selected && (
+        <div className="profile-panel directory-profile-page">
+          <div className="profile-heading">
+            <div>
+              <h3>{profileAnalysis?.display_name || selectedSource?.canonical_domain || selected.domain}</h3>
+              {profileAnalysis?.display_name && profileAnalysis.display_name !== selected.domain && <p>{selectedSource?.canonical_domain ?? selected.domain}</p>}
+            </div>
+            <a href={selectedSource?.url ?? `https://${selected.domain}`}>
+              <ArrowUpRight size={16} />
+            </a>
+          </div>
+          <ProfileAnalysisCard analysis={profileAnalysis} />
+          <div className="profile-documents">
+            {documentsPage.items.map((document) => (
+              <DocumentCard
+                key={document.id}
+                document={document}
+                reason={document.summary ? 'From this profile.' : 'Indexed essay from this profile.'}
+                onOpenProfile={onOpenProfile}
+                compact
+              />
+            ))}
+          </div>
+          <ProfilePagination page={documentsPage} onChange={pageProfileDocuments} />
+        </div>
       )}
     </Box>
   );
@@ -1726,13 +2387,39 @@ function formatDate(value: string | null | undefined) {
 
 function IrisApp({ currentUser, onSignOut }: { currentUser: IrisUser | null; onSignOut: () => void }) {
   const [view, setView] = useState<View>(initialView);
-  const [profileTarget, setProfileTarget] = useState<ProfileTarget>(null);
+  const [profileTarget, setProfileTarget] = useState<ProfileTarget>(() =>
+    typeof window === 'undefined' ? null : profileTargetFromPath(window.location.pathname),
+  );
   const [settingsOpen, setSettingsOpen] = useState(false);
   const settingsRef = useRef<HTMLDivElement | null>(null);
+  const applyingPopState = useRef(false);
 
   useEffect(() => {
     window.localStorage.setItem(VIEW_STORAGE_KEY, view);
-  }, [view]);
+    const nextPath =
+      view === 'directory' && profileTarget?.domain
+        ? `/directory/${encodeURIComponent(profileTarget.domain)}`
+        : viewPaths[view];
+    if (window.location.pathname !== nextPath) {
+      if (applyingPopState.current) {
+        window.history.replaceState(null, '', nextPath);
+      } else {
+        window.history.pushState(null, '', nextPath);
+      }
+    }
+    applyingPopState.current = false;
+  }, [view, profileTarget?.domain]);
+
+  useEffect(() => {
+    function handlePopState() {
+      const nextView = viewFromPath(window.location.pathname) ?? 'search';
+      setProfileTarget(profileTargetFromPath(window.location.pathname));
+      applyingPopState.current = true;
+      setView(nextView);
+    }
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
 
   useEffect(() => {
     if (view === 'admin' && !currentUser?.is_admin) {
@@ -1753,6 +2440,11 @@ function IrisApp({ currentUser, onSignOut }: { currentUser: IrisUser | null; onS
 
   function openProfile(sourceId: number, domain: string) {
     setProfileTarget({ sourceId, domain });
+    setView('directory');
+  }
+
+  function openDirectoryRoot() {
+    setProfileTarget(null);
     setView('directory');
   }
 
@@ -1777,7 +2469,13 @@ function IrisApp({ currentUser, onSignOut }: { currentUser: IrisUser | null; onS
             <Button
               key={item.view}
               type="button"
-              onClick={() => setView(item.view)}
+              onClick={() => {
+                if (item.view === 'directory') {
+                  openDirectoryRoot();
+                } else {
+                  setView(item.view);
+                }
+              }}
               variant="ghost"
               borderRadius="0"
               justifyContent="flex-start"
@@ -1803,7 +2501,7 @@ function IrisApp({ currentUser, onSignOut }: { currentUser: IrisUser | null; onS
               <div className="settings-menu">
                 <div className="settings-menu-row settings-menu-muted">
                   <UserCircle size={16} />
-                  <span>{currentUser.email || currentUser.display_name || currentUser.slug}</span>
+                  <span>{currentUser.email || currentUser.display_name}</span>
                 </div>
                 <div className="settings-menu-divider" />
                 <button className="settings-menu-row" type="button" onClick={onSignOut}>
@@ -1822,7 +2520,7 @@ function IrisApp({ currentUser, onSignOut }: { currentUser: IrisUser | null; onS
               <span>Settings</span>
             </button>
             <div className="sidebar-settings-meta">
-              {currentUser.display_name || currentUser.email || currentUser.slug}
+              {currentUser.display_name || currentUser.email}
             </div>
           </div>
         )}
@@ -1830,7 +2528,7 @@ function IrisApp({ currentUser, onSignOut }: { currentUser: IrisUser | null; onS
       <Box className={view === 'explore' || view === 'graph' ? 'workspace workspace-fullscreen' : view === 'search' ? 'workspace workspace-search' : 'workspace'}>
         {view === 'search' && <SearchView onOpenProfile={openProfile} />}
         {view === 'bookshelf' && <BookshelfView onDiscover={() => setView('search')} />}
-        {view === 'directory' && <DirectoryView target={profileTarget} onOpenProfile={openProfile} />}
+        {view === 'directory' && <DirectoryView target={profileTarget} onOpenProfile={openProfile} onDirectoryRoot={openDirectoryRoot} />}
         {view === 'explore' && <EmbeddingExplorer />}
         {view === 'graph' && <GraphExplorer onOpenProfile={openProfile} />}
         {view === 'admin' && currentUser?.is_admin && <AdminView />}
@@ -1909,7 +2607,7 @@ export default function App() {
   if (!firebaseEnabled) return <IrisApp currentUser={null} onSignOut={() => {}} />;
   if (!authReady) return <div className="auth-shell auth-shell-center">Loading...</div>;
   if (!firebaseUser) return <AuthScreen error={authError} signingIn={signingIn} onSignIn={signIn} />;
-  if (!currentUser && !authError) return <div className="auth-shell auth-shell-center">Loading account...</div>;
+  if (!currentUser && !authError) return <div className="auth-shell auth-shell-center">Loading...</div>;
   if (authError) return <AuthScreen error={authError} signingIn={signingIn} onSignIn={signIn} />;
   return <IrisApp currentUser={currentUser} onSignOut={handleSignOut} />;
 }

@@ -57,7 +57,7 @@ def test_default_local_user_creation_is_idempotent(session):
     second = get_or_create_local_user()
 
     assert first.id == second.id
-    assert first.slug == "local"
+    assert first.email == "local@iris.local"
     assert session.query(User).count() == 1
 
 

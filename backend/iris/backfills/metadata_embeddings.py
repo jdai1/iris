@@ -12,7 +12,7 @@ from iris.dao import maintenance as maintenance_dao
 from iris.dao import reporting as reporting_dao
 from iris.schemas.backfills import BackfillDocumentInput, BackfillDocumentOutput, MetadataEmbeddingBackfillResult
 from iris.services.ingestion.document_classifier import analyze_document_async
-from iris.services.ingestion.embedding import document_embedding_text, dumps_embedding, embed_text_async
+from iris.services.ingestion.embedding import document_embedding_text, embed_text_async
 
 
 def log(message: str) -> None:
@@ -198,7 +198,7 @@ async def _process_document(
                 topics=analysis.topics,
                 extracted_text=item.extracted_text,
             )
-            embedding = dumps_embedding(await embed_text_async(text, prefer_openai=openai_embeddings))
+            embedding = await embed_text_async(text, prefer_openai=openai_embeddings)
         log(
             f"done {item.index}/{item.total} doc={item.document_id} "
             f"type {item.document_type}->{analysis.document_type} "

@@ -31,7 +31,7 @@ from iris.services.common.config import (
 from iris.services.indexing.indexer import plan_sources, autopilot
 from iris.services.ingestion.crawler import Crawler
 from iris.services.ingestion.document_classifier import analyze_document, classify_document
-from iris.services.ingestion.embedding import document_embedding_text, dumps_embedding, embed_text
+from iris.services.ingestion.embedding import document_embedding_text, embed_text
 from iris.services.ingestion.source_classifier import (
     classify_source_homepage,
     classify_source_url,
@@ -225,9 +225,7 @@ def cmd_embed_documents(args: argparse.Namespace) -> None:
                 topics=document.topics,
                 extracted_text=document.extracted_text,
             )
-            document.embedding = dumps_embedding(
-                embed_text(text, prefer_openai=args.openai)
-            )
+            documents_dao.update_document_embedding(document, embed_text(text, prefer_openai=args.openai))
             if idx % 10 == 0:
                 db.flush()
                 print(f"embedded={idx}/{len(documents)}")

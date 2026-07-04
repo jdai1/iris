@@ -20,7 +20,7 @@ from iris.schemas.enums import (
 )
 from iris.schemas.indexing import SourcePriority, SourcePriorityPayload
 from iris.services.common.url_utils import root_url_for_domain
-from iris.services.ingestion.embedding import document_embedding_text, dumps_embedding, embed_text
+from iris.services.ingestion.embedding import document_embedding_text, embed_text
 
 
 logger = logging.getLogger("iris.indexer")
@@ -408,9 +408,7 @@ def embed_source_documents(source: Source, *, openai: bool | None = None) -> int
             topics=document.topics,
             extracted_text=document.extracted_text,
         )
-        indexing_dao.set_document_embedding(
-            document, dumps_embedding(embed_text(text, prefer_openai=openai))
-        )
+        indexing_dao.set_document_embedding(document, embed_text(text, prefer_openai=openai))
     return len(documents)
 
 

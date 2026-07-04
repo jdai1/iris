@@ -42,7 +42,7 @@ class BackfillDocumentOutput:
 
     item: BackfillDocumentInput
     analysis: DocumentAnalysis | None
-    embedding: str | None
+    embedding: list[float] | None
     changed: bool
     failed: bool
     error: str | None

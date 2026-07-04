@@ -13,7 +13,11 @@ import type {
   BookshelfLinkCreate,
   BookshelfStatus,
   BookshelfUpdate,
+  DirectorySource,
+  DirectorySourceSort,
+  SortDirection,
   Document,
+  DocumentDetail,
   EmbeddingMap,
   EmbeddingNeighbor,
   GraphResponse,
@@ -86,7 +90,22 @@ function cachedRequest<T>(key: string, path: string): Promise<T> {
   return promise;
 }
 
+function clearCachePrefix(prefix: string) {
+  for (const key of apiCache.keys()) {
+    if (key.startsWith(prefix)) apiCache.delete(key);
+  }
+}
+
+function clearBookshelfCache() {
+  clearCachePrefix('bookshelf:');
+}
+
+function clearConversationCache() {
+  clearCachePrefix('agent-conversations:');
+}
+
 export function chatSearch(message: string, conversationId?: number): Promise<AgentChatResponse> {
+  clearConversationCache();
   return request<AgentChatResponse>('/api/agent-chat', {
     method: 'POST',
     body: JSON.stringify({ message, conversation_id: conversationId }),
@@ -99,6 +118,7 @@ export async function streamChatSearch(
   onEvent: (event: AgentStreamEvent) => void,
   signal?: AbortSignal,
 ): Promise<void> {
+  clearConversationCache();
   const response = await fetch(`${API_BASE}/api/agent-chat/stream`, {
     method: 'POST',
     headers: await requestHeaders(),
@@ -128,6 +148,7 @@ export async function streamChatSearch(
 
   const parsed = parseSseChunk(buffer);
   if (parsed) onEvent(parsed);
+  clearConversationCache();
 }
 
 function parseSseChunk(chunk: string): AgentStreamEvent | null {
@@ -140,12 +161,19 @@ function parseSseChunk(chunk: string): AgentStreamEvent | null {
   return { event, data } as AgentStreamEvent;
 }
 
-export function getAgentConversations(): Promise<AgentConversationSummary[]> {
-  return request<AgentConversationSummary[]>('/api/agent-conversations?limit=20');
+export function getAgentConversations(params: { limit?: number; offset?: number; q?: string } = {}): Promise<AgentConversationSummary[]> {
+  const search = new URLSearchParams();
+  search.set('limit', String(params.limit ?? 100));
+  search.set('offset', String(params.offset ?? 0));
+  if (params.q?.trim()) search.set('q', params.q.trim());
+  return cachedRequest<AgentConversationSummary[]>(
+    `agent-conversations:${search.toString()}`,
+    `/api/agent-conversations?${search.toString()}`,
+  );
 }
 
 export function getAgentConversation(conversationId: number): Promise<AgentConversation> {
-  return request<AgentConversation>(`/api/agent-conversations/${conversationId}`);
+  return cachedRequest<AgentConversation>(`agent-conversations:detail:${conversationId}`, `/api/agent-conversations/${conversationId}`);
 }
 
 export function searchCorpus(query: string, limit = 50): Promise<SearchResponse> {
@@ -155,15 +183,27 @@ export function searchCorpus(query: string, limit = 50): Promise<SearchResponse>
   return request<SearchResponse>(`/api/search?${search.toString()}`);
 }
 
+export function searchDocuments(query: string, limit = 8): Promise<SearchResponse> {
+  const search = new URLSearchParams();
+  search.set('q', query);
+  search.set('limit', String(limit));
+  return request<SearchResponse>(`/api/documents/search?${search.toString()}`);
+}
+
+export function getDocument(documentId: number): Promise<DocumentDetail> {
+  return cachedRequest<DocumentDetail>(`document:${documentId}`, `/api/documents/${documentId}`);
+}
+
 export function getBookshelf(params: { status?: BookshelfStatus | 'favorite'; limit?: number; offset?: number } = {}): Promise<Page<BookshelfEntry>> {
   const search = new URLSearchParams();
   search.set('limit', String(params.limit ?? 100));
   search.set('offset', String(params.offset ?? 0));
   if (params.status) search.set('status', params.status);
-  return request<Page<BookshelfEntry>>(`/api/bookshelf?${search.toString()}`);
+  return cachedRequest<Page<BookshelfEntry>>(`bookshelf:entries:${search.toString()}`, `/api/bookshelf?${search.toString()}`);
 }
 
 export function updateDocumentBookshelf(documentId: number, payload: BookshelfUpdate): Promise<BookshelfEntry> {
+  clearBookshelfCache();
   return request<BookshelfEntry>(`/api/documents/${documentId}/bookshelf`, {
     method: 'PATCH',
     body: JSON.stringify(payload),
@@ -171,6 +211,7 @@ export function updateDocumentBookshelf(documentId: number, payload: BookshelfUp
 }
 
 export function createBookshelfLink(payload: BookshelfLinkCreate): Promise<BookshelfEntry> {
+  clearBookshelfCache();
   return request<BookshelfEntry>('/api/bookshelf/links', {
     method: 'POST',
     body: JSON.stringify(payload),
@@ -178,10 +219,11 @@ export function createBookshelfLink(payload: BookshelfLinkCreate): Promise<Books
 }
 
 export function getBookshelfCollections(): Promise<BookshelfCollection[]> {
-  return request<BookshelfCollection[]>('/api/bookshelf/collections');
+  return cachedRequest<BookshelfCollection[]>('bookshelf:collections', '/api/bookshelf/collections');
 }
 
 export function createBookshelfCollection(payload: { name: string; description?: string | null; visibility?: BookshelfCollectionVisibility }): Promise<BookshelfCollection> {
+  clearBookshelfCache();
   return request<BookshelfCollection>('/api/bookshelf/collections', {
     method: 'POST',
     body: JSON.stringify(payload),
@@ -189,6 +231,7 @@ export function createBookshelfCollection(payload: { name: string; description?:
 }
 
 export function updateBookshelfCollection(collectionId: number, payload: { name?: string | null; description?: string | null; visibility?: BookshelfCollectionVisibility | null }): Promise<BookshelfCollection> {
+  clearBookshelfCache();
   return request<BookshelfCollection>(`/api/bookshelf/collections/${collectionId}`, {
     method: 'PATCH',
     body: JSON.stringify(payload),
@@ -196,15 +239,24 @@ export function updateBookshelfCollection(collectionId: number, payload: { name?
 }
 
 export function deleteBookshelfCollection(collectionId: number): Promise<void> {
+  clearBookshelfCache();
   return request<void>(`/api/bookshelf/collections/${collectionId}`, {
     method: 'DELETE',
   });
 }
 
 export function addBookshelfCollectionItem(collectionId: number, documentId: number): Promise<BookshelfCollection> {
+  clearBookshelfCache();
   return request<BookshelfCollection>(`/api/bookshelf/collections/${collectionId}/items`, {
     method: 'POST',
     body: JSON.stringify({ document_id: documentId }),
+  });
+}
+
+export function removeBookshelfCollectionItem(collectionId: number, documentId: number): Promise<BookshelfCollection> {
+  clearBookshelfCache();
+  return request<BookshelfCollection>(`/api/bookshelf/collections/${collectionId}/items/${documentId}`, {
+    method: 'DELETE',
   });
 }
 
@@ -219,15 +271,23 @@ export function getEmbeddingNeighbors(documentId: number, limit = 5): Promise<Em
   return request<EmbeddingNeighbor[]>(`/api/documents/${documentId}/embedding-neighbors?limit=${limit}`);
 }
 
-export function getGraph(params: { mode?: 'sources' | 'documents'; limit?: number; domain?: string; sourceId?: number; documentId?: number } = {}): Promise<GraphResponse> {
+export function getGraph(params: { mode?: 'sources' | 'documents'; limit?: number; domain?: string; sourceId?: number; documentId?: number; depth?: number } = {}): Promise<GraphResponse> {
   const search = new URLSearchParams();
   search.set('mode', params.mode ?? 'documents');
   search.set('limit', String(params.limit ?? 140));
   if (params.domain) search.set('domain', params.domain);
   if (params.sourceId) search.set('source_id', String(params.sourceId));
   if (params.documentId) search.set('document_id', String(params.documentId));
+  if (params.depth) search.set('depth', String(params.depth));
   const path = `/api/graph?${search.toString()}`;
   return cachedRequest<GraphResponse>(`graph:${search.toString()}`, path);
+}
+
+export function searchGraphSources(q: string, limit = 12): Promise<AdminSource[]> {
+  const search = new URLSearchParams();
+  search.set('q', q);
+  search.set('limit', String(limit));
+  return request<AdminSource[]>(`/api/graph/sources/search?${search.toString()}`);
 }
 
 export function getAdminOverview(): Promise<AdminOverview> {
@@ -241,6 +301,17 @@ export function getAdminSources(params: { status?: string; q?: string; limit?: n
   if (params.status && params.status !== 'all') search.set('status', params.status);
   if (params.q) search.set('q', params.q);
   return request<Page<AdminSource>>(`/api/admin/sources?${search.toString()}`);
+}
+
+export function getDirectorySources(params: { status?: string; q?: string; sort?: DirectorySourceSort; direction?: SortDirection; limit?: number; offset?: number } = {}): Promise<Page<DirectorySource>> {
+  const search = new URLSearchParams();
+  search.set('limit', String(params.limit ?? 50));
+  search.set('offset', String(params.offset ?? 0));
+  search.set('sort', params.sort ?? 'inbound');
+  search.set('direction', params.direction ?? 'desc');
+  if (params.status && params.status !== 'all') search.set('status', params.status);
+  if (params.q) search.set('q', params.q);
+  return request<Page<DirectorySource>>(`/api/directory/sources?${search.toString()}`);
 }
 
 export function getAdminDocuments(params: { limit?: number; offset?: number; sourceId?: number; documentType?: string; crawlJobId?: number; indexRunId?: number } = {}): Promise<Page<Document>> {

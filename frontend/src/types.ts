@@ -11,9 +11,8 @@ export interface Source {
 
 export interface User {
   id: number;
-  slug: string;
   firebase_uid: string | null;
-  email: string | null;
+  email: string;
   display_name: string | null;
   photo_url: string | null;
   is_admin: boolean;
@@ -31,6 +30,28 @@ export interface Document {
   published_at: string | null;
   summary: string | null;
   topics: string[];
+  bookshelf_status?: BookshelfStatus | null;
+  bookshelf_favorited?: boolean;
+}
+
+export interface DocumentOutgoingLink {
+  target_url: string;
+  target_domain: string | null;
+  target_document_id: number | null;
+  anchor_text: string | null;
+  context: string | null;
+}
+
+export interface DocumentIncomingLink {
+  source_document_id: number;
+  target_url: string;
+  anchor_text: string | null;
+}
+
+export interface DocumentDetail extends Document {
+  extracted_text: string | null;
+  outgoing_links: DocumentOutgoingLink[];
+  incoming_links: DocumentIncomingLink[];
 }
 
 export interface SearchResult {
@@ -294,6 +315,24 @@ export interface AdminSource {
     finished_at: string | null;
     error: string | null;
   } | null;
+}
+
+export type DirectorySourceSort = 'source' | 'inbound' | 'outbound' | 'documents' | 'essays' | 'recent';
+export type SortDirection = 'asc' | 'desc';
+
+export interface DirectorySource {
+  id: number;
+  canonical_domain: string;
+  url: string;
+  name: string | null;
+  status: string;
+  description: string | null;
+  first_seen_at: string;
+  last_checked_at: string | null;
+  document_count: number;
+  essay_count: number;
+  inbound_count: number;
+  outbound_count: number;
 }
 
 export interface AdminCrawlJob {
