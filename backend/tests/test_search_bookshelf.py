@@ -126,6 +126,10 @@ def test_agent_instructions_cover_multi_query_precision_and_no_duplicate_cards()
     assert "try 2-4 distinct standalone query formulations" in AGENT_INSTRUCTIONS
     assert "Returning no document_ids is better" in AGENT_INSTRUCTIONS
     assert "Do not repeat the same document" in AGENT_INSTRUCTIONS
+    assert "Treat explicit modifiers, subtypes, roles, audiences, and requested angles as hard constraints" in AGENT_INSTRUCTIONS
+    assert "opposite perspective" in AGENT_INSTRUCTIONS
+    assert "inspect its metadata before citing it" in AGENT_INSTRUCTIONS
+    assert "Your final document_ids are the relevance filter" in AGENT_INSTRUCTIONS
 
 
 def test_bookshelf_lists_saved_entries_and_excludes_archived(session):
