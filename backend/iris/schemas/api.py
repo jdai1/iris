@@ -143,6 +143,50 @@ class SearchSchema(BaseModel):
     results: list[SearchResultSchema]
 
 
+class EvalQuestionSchema(BaseModel):
+    id: str
+    domain: str
+    query: str
+    intent: str
+    tags: list[str]
+    difficulty: str
+    must_have_terms: list[str] | None = None
+
+
+class EvalMetricsSchema(BaseModel):
+    result_count: int
+    top_score: float
+    top3_average_score: float
+    query_term_coverage: float
+    top_result_coverage: float
+    top5_source_count: int
+    has_substantive_summary: bool
+
+
+class EvalResultDocumentSchema(BaseModel):
+    document_id: int
+    title: str
+    source: str
+    url: str
+    score: float
+    reason: str
+    summary: str
+    topics: list[str]
+
+
+class EvalResultSchema(BaseModel):
+    question: EvalQuestionSchema
+    verdict: str
+    metrics: EvalMetricsSchema
+    answer: str
+    results: list[EvalResultDocumentSchema]
+
+
+class EvalReportSchema(BaseModel):
+    generated_from: str
+    results: list[EvalResultSchema]
+
+
 class AgentChatSchema(BaseModel):
     conversation_id: int
     user_message_id: int
