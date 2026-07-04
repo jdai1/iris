@@ -25,6 +25,8 @@ from iris.schemas.enums import AgentStepKind, AgentToolName, DocumentType
 from iris.schemas.retrieval import AgentChatResult, AgentChatStreamEvent, AgentSearchOutput, AgentStep, AgentToolRun, RankedDocument
 
 AGENT_RESULT_SAFETY_CAP = 20
+AGENT_RESULT_MIN_SCORE = 0.12
+AGENT_RESULT_STRONG_SCORE = 0.22
 AGENT_INSTRUCTIONS = (
     "You answer in English over a personal corpus of indexed blogs and essays. "
     "You have retrieval tools plus metadata tools: keyword_search, semantic_search, tag_search, category_search, "
@@ -37,12 +39,16 @@ AGENT_INSTRUCTIONS = (
     "The tool query must preserve the user's specific subject, domain, and constraints from prior turns. "
     "Do not broaden a specific subject into generic software, technical writing, productivity, or engineering unless the user asks for that broadening. "
     "Use the resolved standalone intent as the tool query, not necessarily the literal latest message. "
+    "When recall matters or initial hits are thin or noisy, try 2-4 distinct standalone query formulations before answering. "
+    "Keep alternate queries narrow and anchored to the user's intent rather than using generic category searches as filler. "
     "Ask a clarifying question only when the full conversation still does not contain a workable search intent. "
     "If the user asks about a previously recommended document, use its document_id from context and call get_document_metadata before answering. "
     "Use get_source_metadata when the user asks about a blog/source rather than one post. "
     "When the user gives a clear corpus search request, call at least one retrieval tool before answering. "
-    "Use more than one tool when it improves recall or disambiguation. "
+    "Use more than one tool or query when it improves recall or disambiguation. "
     "Only cite documents returned by tools. Return document_ids only for documents that are clearly relevant enough to show as link cards. "
+    "Returning no document_ids is better than showing loosely related or generic cards. "
+    "Do not repeat the same document, URL, or duplicate content in document_ids. "
     "Choose the number of document_ids based on relevance; return none when no retrieved document is relevant enough."
 )
 
@@ -59,6 +65,7 @@ def _keyword_score(query_terms: set[str], document: Document) -> float:
             document.author,
             document.summary,
             " ".join(document.topics or []),
+            str(document.category.value if hasattr(document.category, "value") else document.category),
             document.extracted_text[:3000] if document.extracted_text else "",
             document.source.name,
             document.source.canonical_domain,
@@ -102,7 +109,7 @@ def search_documents(query: str, limit: int = 12, persist: bool = True) -> tuple
     ranked.sort(key=lambda item: item.score, reverse=True)
     candidate_pool = ranked[: max(limit * 3, 24)]
     candidate_pool = _rerank_candidates(query, candidate_pool)
-    ranked = _expand_with_graph_neighbors(candidate_pool[:limit], limit)
+    ranked = _dedupe_ranked_documents(_expand_with_graph_neighbors(candidate_pool[:limit], limit))
 
     return None, ranked[:limit]
 
@@ -524,6 +531,9 @@ def _rank_agent_documents(tool_runs: list[AgentToolRun], chosen_ids: list[int], 
         row = rows_by_id.get(document_id)
         if not row or document_id in seen:
             continue
+        if not _agent_result_has_enough_evidence(row, query):
+            seen.add(document_id)
+            continue
         ranked.append(
             RankedDocument(
                 document=row.document,
@@ -533,7 +543,42 @@ def _rank_agent_documents(tool_runs: list[AgentToolRun], chosen_ids: list[int], 
         )
         seen.add(document_id)
 
-    return ranked[:limit]
+    return _dedupe_ranked_documents(ranked)[:limit]
+
+
+def _agent_result_has_enough_evidence(row: RankedDocument, query: str) -> bool:
+    if row.score >= AGENT_RESULT_STRONG_SCORE:
+        return True
+    if row.score < AGENT_RESULT_MIN_SCORE:
+        return False
+    query_terms = _terms(query)
+    if not query_terms:
+        return False
+    if _keyword_score(query_terms, row.document) > 0:
+        return True
+    return bool(query_terms & _terms(row.reason))
+
+
+def _dedupe_ranked_documents(rows: list[RankedDocument]) -> list[RankedDocument]:
+    seen_ids: set[int] = set()
+    seen_identities: set[str] = set()
+    deduped: list[RankedDocument] = []
+    for row in rows:
+        identity = _document_identity(row.document)
+        if row.document.id in seen_ids or identity in seen_identities:
+            continue
+        seen_ids.add(row.document.id)
+        seen_identities.add(identity)
+        deduped.append(row)
+    return deduped
+
+
+def _document_identity(document: Document) -> str:
+    if document.content_hash:
+        return f"content:{document.content_hash}"
+    if document.url:
+        return f"url:{document.url.split('#', 1)[0].rstrip('/').lower()}"
+    return f"id:{document.id}"
 
 
 def _agent_sdk_steps(tool_runs: list[AgentToolRun], ranked: list[RankedDocument]) -> list[AgentStep]:
@@ -579,7 +624,7 @@ def _merge_tool_outputs(tool_outputs: list[tuple[str, list[RankedDocument]]], qu
     ]
     adjusted.sort(key=lambda item: item.score, reverse=True)
     candidate_pool = _rerank_candidates(query, adjusted[: max(limit * 3, 24)])
-    return _expand_with_graph_neighbors(candidate_pool[:limit], limit)[:limit]
+    return _dedupe_ranked_documents(_expand_with_graph_neighbors(candidate_pool[:limit], limit))[:limit]
 
 
 def _keyword_search(query_terms: set[str], documents: list[Document], *, limit: int) -> list[RankedDocument]:
