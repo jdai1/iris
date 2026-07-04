@@ -74,7 +74,7 @@ def test_langfuse_openai_agents_instrumentation_noops_without_keys(monkeypatch):
     instrument_openai_agents()
 
 
-def test_agent_result_harness_prefers_no_results_over_weak_irrelevant_cards(session):
+def test_agent_result_harness_respects_agent_no_result_decision(session):
     source = get_or_create_source("https://agent-search.test", status="indexed")
     document = add_doc(session, source, "Cooking", "recipes fermentation kitchen vegetables")
     tool_runs = [
@@ -85,7 +85,7 @@ def test_agent_result_harness_prefers_no_results_over_weak_irrelevant_cards(sess
         )
     ]
 
-    results = _rank_agent_documents(tool_runs, [document.id], "founder mode company scaling", limit=5)
+    results = _rank_agent_documents(tool_runs, [], "founder mode company scaling", limit=5)
 
     assert results == []
 

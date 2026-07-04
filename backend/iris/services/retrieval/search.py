@@ -25,8 +25,6 @@ from iris.schemas.enums import AgentStepKind, AgentToolName, DocumentType
 from iris.schemas.retrieval import AgentChatResult, AgentChatStreamEvent, AgentSearchOutput, AgentStep, AgentToolRun, RankedDocument
 
 AGENT_RESULT_SAFETY_CAP = 20
-AGENT_RESULT_MIN_SCORE = 0.12
-AGENT_RESULT_STRONG_SCORE = 0.22
 AGENT_INSTRUCTIONS = (
     "You answer in English over a personal corpus of indexed blogs and essays. "
     "You have retrieval tools plus metadata tools: keyword_search, semantic_search, tag_search, category_search, "
@@ -531,9 +529,6 @@ def _rank_agent_documents(tool_runs: list[AgentToolRun], chosen_ids: list[int], 
         row = rows_by_id.get(document_id)
         if not row or document_id in seen:
             continue
-        if not _agent_result_has_enough_evidence(row, query):
-            seen.add(document_id)
-            continue
         ranked.append(
             RankedDocument(
                 document=row.document,
@@ -544,19 +539,6 @@ def _rank_agent_documents(tool_runs: list[AgentToolRun], chosen_ids: list[int], 
         seen.add(document_id)
 
     return _dedupe_ranked_documents(ranked)[:limit]
-
-
-def _agent_result_has_enough_evidence(row: RankedDocument, query: str) -> bool:
-    if row.score >= AGENT_RESULT_STRONG_SCORE:
-        return True
-    if row.score < AGENT_RESULT_MIN_SCORE:
-        return False
-    query_terms = _terms(query)
-    if not query_terms:
-        return False
-    if _keyword_score(query_terms, row.document) > 0:
-        return True
-    return bool(query_terms & _terms(row.reason))
 
 
 def _dedupe_ranked_documents(rows: list[RankedDocument]) -> list[RankedDocument]:
