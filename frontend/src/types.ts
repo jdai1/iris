@@ -66,6 +66,53 @@ export interface SearchResponse {
   results: SearchResult[];
 }
 
+export interface EvalQuestion {
+  id: string;
+  domain: string;
+  query: string;
+  intent?: string;
+  tags: string[];
+  difficulty: string;
+  must_have_terms: string[] | null;
+  expected_results?: Array<Record<string, unknown>> | null;
+}
+
+export interface EvalMetrics {
+  result_count: number;
+  top_score: number;
+  top3_average_score: number;
+  query_term_coverage: number;
+  top_result_coverage: number;
+  top5_source_count: number;
+  has_substantive_summary: boolean;
+  expected_match_count?: number;
+  expected_top_rank?: number | null;
+}
+
+export interface EvalResultDocument {
+  document_id: number;
+  title: string;
+  source: string;
+  url: string;
+  score: number;
+  reason: string;
+  summary: string;
+  topics: string[];
+}
+
+export interface EvalResult {
+  question: EvalQuestion;
+  verdict: 'strong' | 'partial' | 'weak' | 'no_results' | string;
+  metrics: EvalMetrics;
+  answer: string;
+  results: EvalResultDocument[];
+}
+
+export interface EvalReport {
+  generated_from: string;
+  results: EvalResult[];
+}
+
 export interface AgentStep {
   kind: string;
   title: string;

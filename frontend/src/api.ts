@@ -18,6 +18,7 @@ import type {
   SortDirection,
   Document,
   DocumentDetail,
+  EvalReport,
   EmbeddingMap,
   EmbeddingNeighbor,
   GraphResponse,
@@ -192,6 +193,10 @@ export function searchDocuments(query: string, limit = 8): Promise<SearchRespons
 
 export function getDocument(documentId: number): Promise<DocumentDetail> {
   return cachedRequest<DocumentDetail>(`document:${documentId}`, `/api/documents/${documentId}`);
+}
+
+export function getLatestEvalReport(): Promise<EvalReport> {
+  return cachedRequest<EvalReport>('evals:latest', '/api/evals/latest');
 }
 
 export function getBookshelf(params: { status?: BookshelfStatus | 'favorite'; limit?: number; offset?: number } = {}): Promise<Page<BookshelfEntry>> {
