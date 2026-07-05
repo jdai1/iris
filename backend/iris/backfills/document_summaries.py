@@ -55,6 +55,14 @@ def log(message: str) -> None:
     print(message, flush=True)
 
 
+def progress_bar(completed: int, total: int, *, width: int = 24) -> str:
+    """Return a compact textual progress bar for terminal backfills."""
+    if total <= 0:
+        return "[" + "-" * width + "]"
+    filled = round(width * min(completed, total) / total)
+    return "[" + "#" * filled + "-" * (width - filled) + "]"
+
+
 def backfill_document_summaries(
     *,
     source_domain: str | None = None,
@@ -146,8 +154,10 @@ async def _run_summary_workers(
     for task in asyncio.as_completed(tasks):
         outputs.append(await task)
         completed += 1
-        if completed % 10 == 0 or completed == len(tasks):
-            log(f"worker progress completed={completed}/{len(tasks)} active_documents={max(1, active_documents)}")
+        log(
+            f"worker progress {progress_bar(completed, len(tasks))} "
+            f"{completed}/{len(tasks)} active_documents={max(1, active_documents)}"
+        )
     return outputs
 
 
