@@ -138,6 +138,9 @@ def _document_analysis_response_format() -> dict[str, object]:
             "properties": {
                 "title": {"type": ["string", "null"]},
                 "summary": {"type": "string"},
+                "one_liner": {"type": ["string", "null"]},
+                "audience": {"type": ["string", "null"]},
+                "takeaways": {"type": "array", "items": {"type": "string"}},
                 "topics": {"type": "array", "items": {"type": "string"}},
                 "category_slug": {"type": ["string", "null"], "enum": [*DOCUMENT_CATEGORY_SLUGS, None]},
                 "document_type": {
@@ -151,7 +154,16 @@ def _document_analysis_response_format() -> dict[str, object]:
                     ],
                 },
             },
-            "required": ["title", "summary", "topics", "category_slug", "document_type"],
+            "required": [
+                "title",
+                "summary",
+                "one_liner",
+                "audience",
+                "takeaways",
+                "topics",
+                "category_slug",
+                "document_type",
+            ],
         },
     }
 
@@ -464,14 +476,27 @@ def _document_analysis_payload(
             "collection pages unless the content is clearly one standalone article. If a collection embeds or "
             "previews a full child post, still classify the parent page as collection and title it from the "
             "parent page label or heading. Use text_start_lines to identify nav/page labels before child content. "
-            "Write a slightly more comprehensive 2-4 sentence summary in a lively, descriptive voice: specific, "
-            "slightly playful, and useful for recognizing the piece later. Avoid bland labels like "
-            "'This article discusses...'. Name the central move, tension, or unusual angle when visible. "
+            "Write summary as a short objective paragraph only, with no bullets or section labels. "
+            "Start with the concrete subject or action, such as 'Discusses how to...', 'Explains why...', "
+            "or 'Describes the author's approach to...'. Do not start with generic labels like "
+            "'This page', 'This article', 'This essay', 'A substantive essay', or 'A standalone essay'. "
+            "Write one_liner as a short, pitch-like description of the piece, not a title and not a slogan. "
+            "Use plain forms like 'A concrete guide to...', 'Describes why...', or 'Explains how...'. "
+            "It should be very short and parsable while naming the central subject and useful angle. "
+            "Write audience as the primary intended audience in one concise phrase or sentence, with a secondary "
+            "audience only if clearly visible. "
+            "Write takeaways as 1-3 short, concrete core lessons for the reader, not commentary about the article's style. "
+            "Use examples from the piece to infer the lesson, but do not cite examples inline or add parenthetical examples. "
+            "Keep takeaways high-level and compact, such as 'Blogging can create jobs and collaborations even with modest traffic.' "
+            "Write summary, one_liner, audience, and takeaways in English. "
+            "Do not include topics, categories, metadata labels, or a 'Topics:' section inside summary, one_liner, audience, or takeaways. "
+            "The summary should describe what is actually inside the page, including the article's concrete "
+            "subject matter and the story or throughline the author is developing. "
+            "The takeaways should capture the most important concrete takeaways, claims, evidence, or examples. "
+            "Do not add unsupported interpretation, evaluation, jokes, flourish, or inferred intent. "
+            "Avoid bland labels like 'This article discusses...'; state the contents directly. "
             "Preserve concrete biographical or affiliation signals when they are explicit, such as schools, "
-            "employers, cities, roles, programs, projects, or first-person experience with an institution. Examples: "
-            "'A cranky but practical note arguing that slow meetings are a tax on momentum, with a bias toward shipping and apologizing later.' "
-            "'A personal field report from burnout country: what broke, what helped, and why productivity advice can become its own little trap.' "
-            "'A link-heavy map of the author's favorite tools and reading trails, more cabinet of curiosities than polished essay.' "
+            "employers, cities, roles, programs, projects, or first-person experience with an institution. "
             "Return 3-8 short semantic topics, not raw keyword spam. "
             "Choose category_slug from this one-word list: ai, software, work, productivity, rationality, "
             "philosophy, money, philanthropy, health, dating, culture, politics, history, science, personal, "
@@ -512,7 +537,7 @@ def _document_analysis_payload(
         ),
         "reasoning": {"effort": "minimal"},
         "text": {"format": _document_analysis_response_format(), "verbosity": "low"},
-        "max_output_tokens": 1200,
+        "max_output_tokens": 1800,
         "store": False,
     }
 
@@ -534,6 +559,9 @@ def _parse_document_analysis_response_data(
     return DocumentAnalysis(
         title=_normalize_title(parsed.get("title"), fallback=metadata_title),
         summary=_normalize_summary(parsed.get("summary"), fallback=fallback_text),
+        one_liner=_normalize_one_liner(parsed.get("one_liner")),
+        audience=_normalize_audience(parsed.get("audience")),
+        takeaways=_normalize_takeaways(parsed.get("takeaways")),
         topics=_normalize_topics(parsed.get("topics")),
         category_slug=_normalize_category_slug(parsed.get("category_slug")),
         document_type=_normalize_document_type(parsed.get("document_type")),
@@ -597,6 +625,30 @@ def _normalize_summary(value: object, *, fallback: str) -> str:
     if not summary:
         summary = _fallback_summary(fallback)
     return summary[:1000]
+
+
+def _normalize_audience(value: object) -> str | None:
+    audience = str(value or "").strip()
+    return audience[:300] or None
+
+
+def _normalize_one_liner(value: object) -> str | None:
+    one_liner = str(value or "").strip()
+    return one_liner[:300] or None
+
+
+def _normalize_takeaways(value: object) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    takeaways: list[str] = []
+    for item in value:
+        takeaway = str(item or "").strip().lstrip("-").strip()
+        if not takeaway:
+            continue
+        takeaways.append(takeaway[:220])
+        if len(takeaways) >= 3:
+            break
+    return takeaways
 
 
 def _normalize_topics(value: object) -> list[str]:

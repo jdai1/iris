@@ -28,6 +28,9 @@ class BackfillDocumentInput:
     title: str | None
     document_type: str
     summary: str | None
+    one_liner: str | None
+    audience: str | None
+    takeaways: list[str]
     topics: list[str]
     category_slug: str | None
     extracted_text: str | None

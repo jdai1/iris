@@ -91,6 +91,9 @@ class DocumentSchema(BaseModel):
     author: str | None
     published_at: datetime | None
     summary: str | None
+    one_liner: str | None = None
+    audience: str | None = None
+    takeaways: list[str] = Field(default_factory=list)
     topics: list[str]
     bookshelf_status: BookshelfStatus | None = None
     bookshelf_favorited: bool = False

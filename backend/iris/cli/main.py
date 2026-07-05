@@ -300,6 +300,20 @@ def cmd_reclassify_documents(args: argparse.Namespace) -> None:
         print(f"checked={len(documents)} changed={changed} dry_run={args.dry_run}")
 
 
+def cmd_backfill_summaries(args: argparse.Namespace) -> None:
+    from iris.backfills.document_summaries import backfill_document_summaries
+
+    with db.session_scope():
+        result = backfill_document_summaries(
+            source_domain=args.source,
+            limit=args.limit,
+            dry_run=args.dry_run,
+            max_attempts=args.max_attempts,
+            active_documents=args.active_documents,
+        )
+        print(f"checked={result.checked} changed={result.changed} failed={result.failed} dry_run={result.dry_run}")
+
+
 def cmd_source_priorities(args: argparse.Namespace) -> None:
     with db.session_scope():
         priorities = plan_sources(
@@ -585,6 +599,14 @@ def build_parser() -> argparse.ArgumentParser:
     reclassify_docs.add_argument("--limit", type=int, default=0)
     reclassify_docs.add_argument("--dry-run", action="store_true")
     reclassify_docs.set_defaults(func=cmd_reclassify_documents)
+
+    backfill_summaries = subparsers.add_parser("backfill-summaries")
+    backfill_summaries.add_argument("--source")
+    backfill_summaries.add_argument("--limit", type=int, default=0)
+    backfill_summaries.add_argument("--dry-run", action="store_true")
+    backfill_summaries.add_argument("--max-attempts", type=int, default=2)
+    backfill_summaries.add_argument("--active-documents", type=int, default=4)
+    backfill_summaries.set_defaults(func=cmd_backfill_summaries)
 
     priorities = subparsers.add_parser("source-priorities")
     priorities.add_argument("--limit", type=int, default=20)

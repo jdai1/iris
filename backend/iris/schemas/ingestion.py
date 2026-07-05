@@ -22,6 +22,9 @@ class ExtractedPage:
     document_type: str
     category_slug: str | None
     links: list[ExtractedLink]
+    one_liner: str | None = None
+    audience: str | None = None
+    takeaways: list[str] | None = None
 
 
 @dataclass(frozen=True)
@@ -37,6 +40,9 @@ class DocumentAnalysis:
     topics: list[str]
     document_type: str
     category_slug: str | None
+    one_liner: str | None = None
+    audience: str | None = None
+    takeaways: list[str] | None = None
 
 
 @dataclass(frozen=True)
