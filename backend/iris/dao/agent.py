@@ -6,6 +6,7 @@ from iris.dao import db
 from iris.dao.user_state import get_or_create_local_user
 from iris.models import AgentConversation, AgentMessage, AgentMessageRole, AgentSearchResult, User
 from iris.schemas.retrieval import AgentChatResult
+from iris.services.common.langfuse_tracing import agent_conversation_session_id, agent_trace_metadata, agent_user_id
 from iris.services.retrieval.search import agentic_chat
 
 
@@ -18,7 +19,18 @@ def create_agent_chat(
 ) -> tuple[AgentConversation, AgentMessage, AgentMessage, AgentChatResult]:
     """Persist one user turn, one assistant turn, and the assistant's citations."""
     conversation, user_message = start_agent_chat(message, user=user, conversation_id=conversation_id)
-    result = agentic_chat(message, limit=limit)
+    trace_user = conversation.user
+    result = agentic_chat(
+        message,
+        limit=limit,
+        session_id=agent_conversation_session_id(conversation.id),
+        user_id=agent_user_id(trace_user.id),
+        trace_metadata=agent_trace_metadata(
+            conversation_id=conversation.id,
+            user_id=trace_user.id,
+            firebase_uid=trace_user.firebase_uid,
+        ),
+    )
     assistant_message = finish_agent_chat(conversation, result)
     return conversation, user_message, assistant_message, result
 

@@ -185,7 +185,20 @@ def test_agent_chat_persists_conversation_and_results(session, monkeypatch):
     )
     session.commit()
 
-    def fake_agentic_chat(message: str, limit: int = 12) -> AgentChatResult:
+    session_ids: list[str | None] = []
+    user_ids: list[str | None] = []
+    trace_metadata_values: list[dict[str, object] | None] = []
+
+    def fake_agentic_chat(
+        message: str,
+        limit: int = 12,
+        session_id: str | None = None,
+        user_id: str | None = None,
+        trace_metadata: dict[str, object] | None = None,
+    ) -> AgentChatResult:
+        session_ids.append(session_id)
+        user_ids.append(user_id)
+        trace_metadata_values.append(trace_metadata)
         return AgentChatResult(
             answer="Use the cited result.",
             results=[RankedDocument(document=document, score=1.0, reason="test sdk result")],
@@ -228,6 +241,16 @@ def test_agent_chat_persists_conversation_and_results(session, monkeypatch):
     )
     assert second.status_code == 200
     assert second.json()["conversation_id"] == first_body["conversation_id"]
+    assert session_ids == [
+        f"search:{first_body['conversation_id']}",
+        f"search:{first_body['conversation_id']}",
+    ]
+    assert trace_metadata_values[0] is not None
+    assert user_ids == [str(trace_metadata_values[0]["iris_user_id"]), str(trace_metadata_values[0]["iris_user_id"])]
+    assert trace_metadata_values[0]["conversation_id"] == first_body["conversation_id"]
+    assert trace_metadata_values[0]["conversation_uuid"] == f"search:{first_body['conversation_id']}"
+    assert trace_metadata_values[0]["user_uuid"] == str(trace_metadata_values[0]["iris_user_id"])
+    assert trace_metadata_values[0]["firebase_uid"] == "agent-user"
 
     conversations = client.get("/api/agent-conversations", headers=headers)
     assert conversations.status_code == 200
@@ -267,7 +290,13 @@ def test_agent_conversations_are_scoped_to_firebase_user(session, monkeypatch):
     def fake_verify(token: str) -> FirebaseIdentity:
         return FirebaseIdentity(uid=token, email=f"{token}@example.com", display_name=token)
 
-    def fake_agentic_chat(message: str, limit: int = 12) -> AgentChatResult:
+    def fake_agentic_chat(
+        message: str,
+        limit: int = 12,
+        session_id: str | None = None,
+        user_id: str | None = None,
+        trace_metadata: dict[str, object] | None = None,
+    ) -> AgentChatResult:
         return AgentChatResult(
             answer="Scoped answer.",
             results=[RankedDocument(document=document, score=1.0, reason="scoped")],

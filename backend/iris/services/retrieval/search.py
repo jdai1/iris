@@ -18,12 +18,33 @@ from iris.services.common.config import (
     USE_LLM_RERANKER,
     openai_api_key,
 )
+from iris.services.common.langfuse_tracing import agent_search_observation, finish_agent_search_observation, instrument_openai_agents
 from iris.services.ingestion.embedding import cosine, embed_text, loads_embedding
 from iris.models import Category, Document, DocumentCategoryAssignment, DocumentTag, Source, Tag
 from iris.schemas.enums import AgentStepKind, AgentToolName, DocumentType
 from iris.schemas.retrieval import AgentChatResult, AgentChatStreamEvent, AgentSearchOutput, AgentStep, AgentToolRun, RankedDocument
 
 AGENT_RESULT_SAFETY_CAP = 20
+AGENT_INSTRUCTIONS = (
+    "You answer in English over a personal corpus of indexed blogs and essays. "
+    "You have retrieval tools plus metadata tools: keyword_search, semantic_search, tag_search, category_search, "
+    "get_document_metadata, and get_source_metadata. "
+    "Do not call retrieval tools for greetings, small talk, vague fragments, or messages where the user's search intent is unclear. "
+    "In those cases, answer conversationally and ask one concise clarifying question. "
+    "Use the supplied conversation context to resolve follow-ups, references like 'that post', and requests about links you already recommended. "
+    "When the current message is a follow-up or instruction to proceed, infer the intended search from the conversation transcript. "
+    "Before calling a retrieval tool, rewrite the user's request into a standalone search query in your head. "
+    "The tool query must preserve the user's specific subject, domain, and constraints from prior turns. "
+    "Do not broaden a specific subject into generic software, technical writing, productivity, or engineering unless the user asks for that broadening. "
+    "Use the resolved standalone intent as the tool query, not necessarily the literal latest message. "
+    "Ask a clarifying question only when the full conversation still does not contain a workable search intent. "
+    "If the user asks about a previously recommended document, use its document_id from context and call get_document_metadata before answering. "
+    "Use get_source_metadata when the user asks about a blog/source rather than one post. "
+    "When the user gives a clear corpus search request, call at least one retrieval tool before answering. "
+    "Use more than one tool when it improves recall or disambiguation. "
+    "Only cite documents returned by tools. Return document_ids only for documents that are clearly relevant enough to show as link cards. "
+    "Choose the number of document_ids based on relevance; return none when no retrieved document is relevant enough."
+)
 
 
 def _terms(text: str) -> set[str]:
@@ -86,15 +107,37 @@ def search_documents(query: str, limit: int = 12, persist: bool = True) -> tuple
     return None, ranked[:limit]
 
 
-def agentic_chat(message: str, limit: int | None = None, conversation_context: str | None = None) -> AgentChatResult:
+def agentic_chat(
+    message: str,
+    limit: int | None = None,
+    conversation_context: str | None = None,
+    session_id: str | None = None,
+    user_id: str | None = None,
+    trace_metadata: Mapping[str, object] | None = None,
+) -> AgentChatResult:
     """Run the OpenAI Agents SDK retrieval loop."""
     if not openai_api_key():
         raise RuntimeError("OpenAI API key is required for agentic chat")
-    return _openai_agentic_chat(message, limit=limit or AGENT_RESULT_SAFETY_CAP, conversation_context=conversation_context)
+    return _openai_agentic_chat(
+        message,
+        limit=limit or AGENT_RESULT_SAFETY_CAP,
+        conversation_context=conversation_context,
+        session_id=session_id,
+        user_id=user_id,
+        trace_metadata=trace_metadata,
+    )
 
 
-async def stream_openai_agentic_chat(message: str, limit: int | None = None, conversation_context: str | None = None):
+async def stream_openai_agentic_chat(
+    message: str,
+    limit: int | None = None,
+    conversation_context: str | None = None,
+    session_id: str | None = None,
+    user_id: str | None = None,
+    trace_metadata: Mapping[str, object] | None = None,
+):
     """Stream an OpenAI Agents SDK-controlled retrieval loop."""
+    instrument_openai_agents()
     from agents import Agent, ModelSettings, Runner, function_tool
 
     max_result_cards = limit or AGENT_RESULT_SAFETY_CAP
@@ -186,26 +229,7 @@ async def stream_openai_agentic_chat(message: str, limit: int | None = None, con
         name="Iris corpus search agent",
         model=AGENT_SEARCH_MODEL,
         output_type=AgentSearchOutput,
-        instructions=(
-            "You answer in English over a personal corpus of indexed blogs and essays. "
-            "You have retrieval tools plus metadata tools: keyword_search, semantic_search, tag_search, category_search, "
-            "get_document_metadata, and get_source_metadata. "
-            "Do not call retrieval tools for greetings, small talk, vague fragments, or messages where the user's search intent is unclear. "
-            "In those cases, answer conversationally and ask one concise clarifying question. "
-            "Use the supplied conversation context to resolve follow-ups, references like 'that post', and requests about links you already recommended. "
-            "When the current message is a follow-up or instruction to proceed, infer the intended search from the conversation transcript. "
-            "Before calling a retrieval tool, rewrite the user's request into a standalone search query in your head. "
-            "The tool query must preserve the user's specific subject, domain, and constraints from prior turns. "
-            "Do not broaden a specific subject into generic software, technical writing, productivity, or engineering unless the user asks for that broadening. "
-            "Use the resolved standalone intent as the tool query, not necessarily the literal latest message. "
-            "Ask a clarifying question only when the full conversation still does not contain a workable search intent. "
-            "If the user asks about a previously recommended document, use its document_id from context and call get_document_metadata before answering. "
-            "Use get_source_metadata when the user asks about a blog/source rather than one post. "
-            "When the user gives a clear corpus search request, call at least one retrieval tool before answering. "
-            "Use more than one tool when it improves recall or disambiguation. "
-            "Only cite documents returned by tools. Return document_ids only for documents that are clearly relevant enough to show as link cards. "
-            "Choose the number of document_ids based on relevance; return none when no retrieved document is relevant enough."
-        ),
+        instructions=AGENT_INSTRUCTIONS,
         model_settings=ModelSettings(tool_choice="auto"),
         tools=[
             keyword_search,
@@ -216,37 +240,65 @@ async def stream_openai_agentic_chat(message: str, limit: int | None = None, con
             get_source_metadata,
         ],
     )
-    run = Runner.run_streamed(agent, _agent_input(message, conversation_context), max_turns=AGENT_SEARCH_MAX_TURNS)
-    emitted_tool_runs = 0
-    async for sdk_event in run.stream_events():
-        event_name = getattr(sdk_event, "name", "")
-        if event_name in {"tool_output", "tool_search_output_created"} and len(tool_runs) > emitted_tool_runs:
+    agent_input = _agent_input(message, conversation_context)
+    with agent_search_observation(
+        mode="stream",
+        message=message,
+        conversation_context=conversation_context,
+        agent_input=agent_input,
+        instructions=AGENT_INSTRUCTIONS,
+        model=AGENT_SEARCH_MODEL,
+        max_turns=AGENT_SEARCH_MAX_TURNS,
+        session_id=session_id,
+        user_id=user_id,
+        trace_metadata=trace_metadata,
+    ) as langfuse_observation:
+        run = Runner.run_streamed(agent, agent_input, max_turns=AGENT_SEARCH_MAX_TURNS)
+        emitted_tool_runs = 0
+        async for sdk_event in run.stream_events():
+            event_name = getattr(sdk_event, "name", "")
+            if event_name in {"tool_output", "tool_search_output_created"} and len(tool_runs) > emitted_tool_runs:
+                for run_item in tool_runs[emitted_tool_runs:]:
+                    step = _tool_step(run_item.tool, run_item.query, run_item.rows)
+                    steps.append(step)
+                    yield AgentChatStreamEvent(event="tool_result", step=step, rows=run_item.rows)
+                emitted_tool_runs = len(tool_runs)
+
+        if len(tool_runs) > emitted_tool_runs:
             for run_item in tool_runs[emitted_tool_runs:]:
                 step = _tool_step(run_item.tool, run_item.query, run_item.rows)
                 steps.append(step)
                 yield AgentChatStreamEvent(event="tool_result", step=step, rows=run_item.rows)
-            emitted_tool_runs = len(tool_runs)
 
-    if len(tool_runs) > emitted_tool_runs:
-        for run_item in tool_runs[emitted_tool_runs:]:
-            step = _tool_step(run_item.tool, run_item.query, run_item.rows)
-            steps.append(step)
-            yield AgentChatStreamEvent(event="tool_result", step=step, rows=run_item.rows)
+        output = run.final_output
+        if isinstance(output, AgentSearchOutput):
+            answer = output.answer
+            chosen_ids = output.document_ids
+        else:
+            answer = str(output or "")
+            chosen_ids = []
 
-    output = run.final_output
-    if isinstance(output, AgentSearchOutput):
-        answer = output.answer
-        chosen_ids = output.document_ids
-    else:
-        answer = str(output or "")
-        chosen_ids = []
-
-    ranked = _rank_agent_documents(tool_runs, chosen_ids, message, max_result_cards)
+        ranked = _rank_agent_documents(tool_runs, chosen_ids, message, max_result_cards)
+        finish_agent_search_observation(
+            langfuse_observation,
+            answer=answer,
+            chosen_ids=chosen_ids,
+            ranked=ranked,
+            tool_runs=tool_runs,
+        )
     yield AgentChatStreamEvent(event="final", result=AgentChatResult(answer=answer, results=ranked, steps=steps))
 
 
-def _openai_agentic_chat(message: str, limit: int = AGENT_RESULT_SAFETY_CAP, conversation_context: str | None = None) -> AgentChatResult:
+def _openai_agentic_chat(
+    message: str,
+    limit: int = AGENT_RESULT_SAFETY_CAP,
+    conversation_context: str | None = None,
+    session_id: str | None = None,
+    user_id: str | None = None,
+    trace_metadata: Mapping[str, object] | None = None,
+) -> AgentChatResult:
     """Let the OpenAI Agents SDK choose retrieval tools and synthesize a grounded answer."""
+    instrument_openai_agents()
     from agents import Agent, ModelSettings, Runner, function_tool
 
     key = openai_api_key()
@@ -336,26 +388,7 @@ def _openai_agentic_chat(message: str, limit: int = AGENT_RESULT_SAFETY_CAP, con
         name="Iris corpus search agent",
         model=AGENT_SEARCH_MODEL,
         output_type=AgentSearchOutput,
-        instructions=(
-            "You answer in English over a personal corpus of indexed blogs and essays. "
-            "You have retrieval tools plus metadata tools: keyword_search, semantic_search, tag_search, category_search, "
-            "get_document_metadata, and get_source_metadata. "
-            "Do not call retrieval tools for greetings, small talk, vague fragments, or messages where the user's search intent is unclear. "
-            "In those cases, answer conversationally and ask one concise clarifying question. "
-            "Use the supplied conversation context to resolve follow-ups, references like 'that post', and requests about links you already recommended. "
-            "When the current message is a follow-up or instruction to proceed, infer the intended search from the conversation transcript. "
-            "Before calling a retrieval tool, rewrite the user's request into a standalone search query in your head. "
-            "The tool query must preserve the user's specific subject, domain, and constraints from prior turns. "
-            "Do not broaden a specific subject into generic software, technical writing, productivity, or engineering unless the user asks for that broadening. "
-            "Use the resolved standalone intent as the tool query, not necessarily the literal latest message. "
-            "Ask a clarifying question only when the full conversation still does not contain a workable search intent. "
-            "If the user asks about a previously recommended document, use its document_id from context and call get_document_metadata before answering. "
-            "Use get_source_metadata when the user asks about a blog/source rather than one post. "
-            "When the user gives a clear corpus search request, call at least one retrieval tool before answering. "
-            "Use more than one tool when it improves recall or disambiguation. "
-            "Only cite documents returned by tools. Return document_ids only for documents that are clearly relevant enough to show as link cards. "
-            "Choose the number of document_ids based on relevance; return none when no retrieved document is relevant enough."
-        ),
+        instructions=AGENT_INSTRUCTIONS,
         model_settings=ModelSettings(tool_choice="auto"),
         tools=[
             keyword_search,
@@ -366,16 +399,36 @@ def _openai_agentic_chat(message: str, limit: int = AGENT_RESULT_SAFETY_CAP, con
             get_source_metadata,
         ],
     )
-    result = Runner.run_sync(agent, _agent_input(message, conversation_context), max_turns=AGENT_SEARCH_MAX_TURNS)
-    output = result.final_output
-    if isinstance(output, AgentSearchOutput):
-        answer = output.answer
-        chosen_ids = output.document_ids
-    else:
-        answer = str(output)
-        chosen_ids = []
+    agent_input = _agent_input(message, conversation_context)
+    with agent_search_observation(
+        mode="sync",
+        message=message,
+        conversation_context=conversation_context,
+        agent_input=agent_input,
+        instructions=AGENT_INSTRUCTIONS,
+        model=AGENT_SEARCH_MODEL,
+        max_turns=AGENT_SEARCH_MAX_TURNS,
+        session_id=session_id,
+        user_id=user_id,
+        trace_metadata=trace_metadata,
+    ) as langfuse_observation:
+        result = Runner.run_sync(agent, agent_input, max_turns=AGENT_SEARCH_MAX_TURNS)
+        output = result.final_output
+        if isinstance(output, AgentSearchOutput):
+            answer = output.answer
+            chosen_ids = output.document_ids
+        else:
+            answer = str(output)
+            chosen_ids = []
 
-    ranked = _rank_agent_documents(tool_runs, chosen_ids, message, limit)
+        ranked = _rank_agent_documents(tool_runs, chosen_ids, message, limit)
+        finish_agent_search_observation(
+            langfuse_observation,
+            answer=answer,
+            chosen_ids=chosen_ids,
+            ranked=ranked,
+            tool_runs=tool_runs,
+        )
     steps = _agent_sdk_steps(tool_runs, ranked)
     return AgentChatResult(answer=answer, results=ranked, steps=steps)
 
