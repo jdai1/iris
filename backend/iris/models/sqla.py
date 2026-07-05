@@ -128,6 +128,9 @@ class Document(Base):
     author: Mapped[str | None] = mapped_column(String(255), nullable=True)
     extracted_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    one_liner: Mapped[str | None] = mapped_column(Text, nullable=True)
+    audience: Mapped[str | None] = mapped_column(Text, nullable=True)
+    takeaways: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
     topics: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
     
     source: Mapped[Source] = relationship(back_populates="documents")

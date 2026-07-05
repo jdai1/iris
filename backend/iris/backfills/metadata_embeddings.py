@@ -46,6 +46,9 @@ def backfill_metadata_and_embeddings(
             title=document.title,
             document_type=str(document.document_type),
             summary=document.summary,
+            one_liner=document.one_liner,
+            audience=document.audience,
+            takeaways=list(document.takeaways or []),
             topics=list(document.topics or []),
             category_slug=None,
             extracted_text=document.extracted_text,
@@ -187,6 +190,9 @@ async def _process_document(
             item.document_type != analysis.document_type
             or item.title != analysis.title
             or (item.summary or "") != analysis.summary
+            or (item.one_liner or "") != (analysis.one_liner or "")
+            or (item.audience or "") != (analysis.audience or "")
+            or item.takeaways != (analysis.takeaways or [])
             or item.topics != analysis.topics
             or item.category_slug != analysis.category_slug
         )

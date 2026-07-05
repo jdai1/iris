@@ -28,6 +28,9 @@ def upsert_document(
     topics: list[str],
     embedding: list[float] | str | None,
     content_hash: str | None,
+    one_liner: str | None = None,
+    audience: str | None = None,
+    takeaways: list[str] | None = None,
 ) -> Document:
     """Insert or update a document row by canonical URL."""
     session = db.current_session()
@@ -48,6 +51,9 @@ def upsert_document(
     document.published_at = published_at
     document.extracted_text = extracted_text
     document.summary = summary
+    document.one_liner = one_liner
+    document.audience = audience
+    document.takeaways = [takeaway for takeaway in takeaways or [] if takeaway]
     document.topics = [topic for topic in topics if topic]
     document.embedding_vector = _store_embedding_vector(coerce_embedding_vector(embedding))
     document.content_hash = content_hash
@@ -61,6 +67,9 @@ def update_document_analysis(document: Document, analysis: DocumentAnalysis) -> 
     document.document_type = analysis.document_type
     document.title = analysis.title
     document.summary = analysis.summary
+    document.one_liner = analysis.one_liner
+    document.audience = analysis.audience
+    document.takeaways = [takeaway for takeaway in analysis.takeaways or [] if takeaway]
     document.topics = [topic for topic in analysis.topics if topic]
     db.current_session().flush()
 

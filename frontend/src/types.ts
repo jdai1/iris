@@ -29,6 +29,9 @@ export interface Document {
   author: string | null;
   published_at: string | null;
   summary: string | null;
+  one_liner: string | null;
+  audience: string | null;
+  takeaways: string[];
   topics: string[];
   bookshelf_status?: BookshelfStatus | null;
   bookshelf_favorited?: boolean;
