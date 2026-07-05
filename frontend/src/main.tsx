@@ -1,7 +1,9 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { ChakraProvider, createSystem, defaultConfig, defineConfig } from '@chakra-ui/react';
+import { Box } from '@chakra-ui/react';
 import App from './App';
+import { EvalResultsView } from './EvalResultsView';
 import './index.css';
 
 const config = defineConfig({
@@ -36,10 +38,22 @@ const config = defineConfig({
 
 const system = createSystem(defaultConfig, config);
 
+function Root() {
+  const pathname = window.location.pathname.replace(/\/+$/, '') || '/';
+  if (pathname === '/dev/evals' || pathname === '/evals') {
+    return (
+      <Box as="main" className="eval-dev-shell">
+        <EvalResultsView />
+      </Box>
+    );
+  }
+  return <App />;
+}
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <ChakraProvider value={system}>
-      <App />
+      <Root />
     </ChakraProvider>
   </StrictMode>,
 );

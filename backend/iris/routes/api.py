@@ -46,6 +46,8 @@ from iris.schemas.api import (
     DocumentOutgoingLinkSchema,
     DocumentSchema,
     DirectorySourceSchema,
+    EvalReportSchema,
+    EvalResultSchema,
     EmbeddingNeighborSchema,
     EmbeddingMapSchema,
     GraphEdgeSchema,
@@ -61,7 +63,7 @@ from iris.schemas.api import (
     UserSchema,
 )
 from iris.services.auth import verify_firebase_token
-from iris.services.common.config import ADMIN_EMAILS, firebase_auth_enabled, openai_api_key
+from iris.services.common.config import ADMIN_EMAILS, ROOT_DIR, firebase_auth_enabled, openai_api_key
 from iris.services.retrieval.search import search_documents, stream_openai_agentic_chat, synthesize_answer
 from iris.services.retrieval.source_profiles import generate_source_profile
 from iris.routes.dumps import dump_bookshelf_collection, dump_bookshelf_entry, dump_crawl_job, dump_document, dump_source, dump_source_profile_analysis
@@ -229,6 +231,20 @@ def search_documents_picker(
         answer="",
         results=_dump_search_results(ranked, user),
     )
+
+
+@app.get("/api/evals/latest", response_model=EvalReportSchema)
+def get_latest_eval_report() -> EvalReportSchema:
+    report_path = ROOT_DIR / "evals" / "reports" / "latest.jsonl"
+    if not report_path.exists():
+        raise HTTPException(status_code=404, detail="No eval report found. Run evals/run.py first.")
+    results: list[EvalResultSchema] = []
+    with report_path.open("r", encoding="utf-8") as handle:
+        for line in handle:
+            stripped = line.strip()
+            if stripped:
+                results.append(EvalResultSchema.model_validate(json.loads(stripped)))
+    return EvalReportSchema(generated_from=str(report_path), results=results)
 
 
 @app.get("/api/admin/overview", response_model=AdminOverviewSchema)

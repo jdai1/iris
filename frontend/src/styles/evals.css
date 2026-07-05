@@ -1,0 +1,201 @@
+.eval-dev-shell {
+  min-height: 100vh;
+  padding: 20px;
+  background: #fff;
+}
+
+.eval-dev-shell > section {
+  max-width: 1680px;
+  margin: 0 auto;
+}
+
+.eval-dev-header {
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 20px;
+  margin-bottom: 16px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid #ededed;
+}
+
+.eval-toolbar {
+  padding: 12px;
+  border: 1px solid #ededed;
+  background: #fff;
+}
+
+.eval-verdict-note {
+  padding: 10px 12px;
+  border: 1px solid #ededed;
+  background: #fbfbfa;
+}
+
+.eval-search-control {
+  flex: 1 1 440px;
+  min-height: 34px;
+  min-width: 260px;
+  padding: 0 10px;
+  border: 1px solid #e2e2df;
+}
+
+.eval-filter-input {
+  min-width: 0;
+  width: 100%;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: #111;
+  font-size: 13px;
+}
+
+.eval-filter-select {
+  min-height: 34px;
+  padding: 0 8px;
+  border: 1px solid #e2e2df;
+  outline: 0;
+  background: #fff;
+  color: #111;
+  font-size: 13px;
+}
+
+.eval-spotcheck-grid {
+  display: grid;
+  grid-template-columns: minmax(320px, 0.42fr) minmax(640px, 1fr);
+  min-height: calc(100vh - 170px);
+  border: 1px solid #ededed;
+  background: #fff;
+}
+
+.eval-question-list {
+  max-height: calc(100vh - 170px);
+  overflow: auto;
+  border-right: 1px solid #ededed;
+}
+
+.eval-detail-panel {
+  max-height: calc(100vh - 170px);
+  overflow: auto;
+}
+
+.eval-inspector-header {
+  padding-bottom: 12px;
+  border-bottom: 1px solid #ededed;
+}
+
+.eval-return-row {
+  display: block;
+  width: 100%;
+  min-height: 34px;
+  padding: 6px 10px;
+  border: 0;
+  border-bottom: 1px solid #f1f1ef;
+  background: #fff;
+  color: #111;
+  text-align: left;
+  cursor: pointer;
+}
+
+.eval-return-row:hover,
+.eval-row-active {
+  background: #f7f7f5;
+}
+
+.eval-row-id {
+  flex: 0 0 54px;
+  overflow: hidden;
+  color: #767676;
+  font-size: 11px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.eval-row-domain {
+  flex: 0 0 72px;
+  color: #8a8a84;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.eval-row-question {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: #111;
+  font-size: 12px;
+  font-weight: 620;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.eval-return-row .chakra-badge {
+  flex: 0 0 auto;
+}
+
+.eval-card-title-link:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.eval-return-card {
+  border-bottom: 1px solid #ededed;
+  padding: 10px 0;
+}
+
+.eval-card-title-link {
+  display: inline-block;
+  color: #111;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.28;
+  text-decoration: none;
+}
+
+.eval-card-rank {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  color: #8a8a84;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.eval-card-reason {
+  color: #555;
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.eval-card-summary {
+  display: -webkit-box;
+  overflow: hidden;
+  color: #767676;
+  font-size: 11px;
+  line-height: 1.38;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.eval-result-link {
+  flex: 0 0 auto;
+  color: #2f2f2f;
+  line-height: 1;
+}
+
+@media (max-width: 1180px) {
+  .eval-spotcheck-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .eval-question-list,
+  .eval-detail-panel {
+    max-height: none;
+    border-right: 0;
+  }
+}
