@@ -6,6 +6,11 @@ from iris.services.ingestion.embedding import dumps_embedding, embed_text
 from iris.models import BookshelfStatus, Document
 from iris.dao.sources import get_or_create_source
 from iris.dao.documents import upsert_document
+from iris.services.common.langfuse_tracing import (
+    agent_search_observation,
+    finish_agent_search_observation,
+    instrument_openai_agents,
+)
 from iris.services.retrieval.search import search_documents
 
 
@@ -33,6 +38,38 @@ def test_search_ranks_relevant_documents(session):
     _search, results = search_documents("why are small teams effective", limit=2)
     assert results
     assert results[0].document.title == "Small teams"
+
+
+def test_langfuse_trace_noops_without_keys(monkeypatch):
+    monkeypatch.delenv("LANGFUSE_PUBLIC_KEY", raising=False)
+    monkeypatch.delenv("LANGFUSE_SECRET_KEY", raising=False)
+
+    with agent_search_observation(
+        mode="sync",
+        message="technical interviews",
+        conversation_context=None,
+        agent_input="technical interviews",
+        instructions="test instructions",
+        model="test-model",
+        max_turns=1,
+        session_id="search:1",
+    ) as observation:
+        assert observation is None
+
+    finish_agent_search_observation(
+        observation,
+        answer="No match.",
+        chosen_ids=[],
+        ranked=[],
+        tool_runs=[],
+    )
+
+
+def test_langfuse_openai_agents_instrumentation_noops_without_keys(monkeypatch):
+    monkeypatch.delenv("LANGFUSE_PUBLIC_KEY", raising=False)
+    monkeypatch.delenv("LANGFUSE_SECRET_KEY", raising=False)
+
+    instrument_openai_agents()
 
 
 def test_bookshelf_lists_saved_entries_and_excludes_archived(session):

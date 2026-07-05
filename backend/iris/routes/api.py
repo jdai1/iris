@@ -62,6 +62,7 @@ from iris.schemas.api import (
 )
 from iris.services.auth import verify_firebase_token
 from iris.services.common.config import ADMIN_EMAILS, firebase_auth_enabled, openai_api_key
+from iris.services.common.langfuse_tracing import agent_conversation_session_id, agent_trace_metadata, agent_user_id
 from iris.services.retrieval.search import search_documents, stream_openai_agentic_chat, synthesize_answer
 from iris.services.retrieval.source_profiles import generate_source_profile
 from iris.routes.dumps import dump_bookshelf_collection, dump_bookshelf_entry, dump_crawl_job, dump_document, dump_source, dump_source_profile_analysis
@@ -517,6 +518,13 @@ async def _agent_chat_stream_events(payload: AgentChatRequestSchema, authorizati
                 payload.message,
                 limit=payload.limit,
                 conversation_context=conversation_context,
+                session_id=agent_conversation_session_id(conversation_id),
+                user_id=agent_user_id(user.id),
+                trace_metadata=agent_trace_metadata(
+                    conversation_id=conversation_id,
+                    user_id=user.id,
+                    firebase_uid=user.firebase_uid,
+                ),
             ):
                 async for chunk in _agent_chat_event_chunks(event, conversation, user_message, payload):
                     yield chunk
