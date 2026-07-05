@@ -185,12 +185,26 @@ def test_extract_can_use_llm_for_ambiguous_documents(monkeypatch):
 
 def test_document_analysis_parser_accepts_structured_output():
     parsed = document_classifier._parse_document_analysis_response(
-        '{"title":"Blog","summary":"A list of writing.","topics":["writing","archive"],"category_slug":"writing","document_type":"collection"}'
+        '{"title":"Blog","summary":"A list of writing.","one_liner":"Archives look passive, but they are maps of taste.","audience":"Readers browsing an archive.","takeaways":["Read the archive","Follow the links"],"topics":["writing","archive"],"category_slug":"writing","document_type":"collection"}'
     )
 
     assert parsed["title"] == "Blog"
     assert parsed["category_slug"] == "writing"
     assert parsed["document_type"] == "collection"
+
+
+def test_document_analysis_summary_composes_takeaway_bullets():
+    assert document_classifier._normalize_summary(
+        "A guide for candidates interviewing for Staff-plus roles.",
+        fallback="fallback",
+    ) == "A guide for candidates interviewing for Staff-plus roles."
+    assert document_classifier._normalize_audience(" Candidates interviewing for Staff-plus roles. ") == (
+        "Candidates interviewing for Staff-plus roles."
+    )
+    assert document_classifier._normalize_one_liner(" X looks like Y, but really Z. ") == "X looks like Y, but really Z."
+    assert document_classifier._normalize_takeaways(
+        ["Clarify the interview format", "- Prepare leadership examples", "Negotiate details", "Extra item"]
+    ) == ["Clarify the interview format", "Prepare leadership examples", "Negotiate details"]
 
 
 def test_ambiguous_document_llm_requires_openai_key(monkeypatch):

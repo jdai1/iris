@@ -585,6 +585,9 @@ def _embedding_map_document(document: Document) -> DocumentSchema:
         author=document.author,
         published_at=document.published_at,
         summary=document.summary,
+        one_liner=document.one_liner,
+        audience=document.audience,
+        takeaways=document.takeaways or [],
         topics=document.topics or [],
     )
 
