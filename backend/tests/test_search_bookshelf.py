@@ -11,10 +11,12 @@ from iris.services.common.langfuse_tracing import (
     finish_agent_search_observation,
     instrument_openai_agents,
 )
-from iris.services.retrieval.search import search_documents
+from iris.schemas.enums import AgentToolName
+from iris.schemas.retrieval import AgentToolRun, RankedDocument
+from iris.services.retrieval.search import AGENT_INSTRUCTIONS, _rank_agent_documents, search_documents
 
 
-def add_doc(session, source, title, text):
+def add_doc(session, source, title, text, *, content_hash=None):
     return upsert_document(
         source=source,
         url=f"https://{source.canonical_domain}/{title.lower().replace(' ', '-')}",
@@ -27,7 +29,7 @@ def add_doc(session, source, title, text):
         summary=text[:240],
         topics=["teams", "software"],
         embedding=dumps_embedding(embed_text(text)),
-        content_hash=title,
+        content_hash=content_hash or title,
     )
 
 
@@ -70,6 +72,64 @@ def test_langfuse_openai_agents_instrumentation_noops_without_keys(monkeypatch):
     monkeypatch.delenv("LANGFUSE_SECRET_KEY", raising=False)
 
     instrument_openai_agents()
+
+
+def test_agent_result_harness_respects_agent_no_result_decision(session):
+    source = get_or_create_source("https://agent-search.test", status="indexed")
+    document = add_doc(session, source, "Cooking", "recipes fermentation kitchen vegetables")
+    tool_runs = [
+        AgentToolRun(
+            tool=AgentToolName.SEMANTIC,
+            query="founder mode company scaling",
+            rows=[RankedDocument(document=document, score=0.05, reason="embedding cosine 0.05")],
+        )
+    ]
+
+    results = _rank_agent_documents(tool_runs, [], "founder mode company scaling", limit=5)
+
+    assert results == []
+
+
+def test_agent_result_harness_dedupes_repeated_results_by_content_hash(session):
+    source = get_or_create_source("https://agent-search.test", status="indexed")
+    first = add_doc(
+        session,
+        source,
+        "Small teams original",
+        "small teams coordination costs software organizations",
+        content_hash="same-small-teams-essay",
+    )
+    duplicate = add_doc(
+        session,
+        source,
+        "Small teams mirror",
+        "small teams coordination costs software organizations",
+        content_hash="same-small-teams-essay",
+    )
+    tool_runs = [
+        AgentToolRun(
+            tool=AgentToolName.KEYWORD,
+            query="small teams coordination",
+            rows=[
+                RankedDocument(document=first, score=0.8, reason="keyword overlap 100%"),
+                RankedDocument(document=duplicate, score=0.78, reason="keyword overlap 100%"),
+            ],
+        )
+    ]
+
+    results = _rank_agent_documents(tool_runs, [first.id, first.id, duplicate.id], "small teams coordination", limit=5)
+
+    assert [row.document.id for row in results] == [first.id]
+
+
+def test_agent_instructions_cover_multi_query_precision_and_no_duplicate_cards():
+    assert "try 2-4 distinct standalone query formulations" in AGENT_INSTRUCTIONS
+    assert "Returning no document_ids is better" in AGENT_INSTRUCTIONS
+    assert "Do not repeat the same document" in AGENT_INSTRUCTIONS
+    assert "Treat explicit modifiers, subtypes, roles, audiences, and requested angles as hard constraints" in AGENT_INSTRUCTIONS
+    assert "opposite perspective" in AGENT_INSTRUCTIONS
+    assert "inspect its metadata before citing it" in AGENT_INSTRUCTIONS
+    assert "Your final document_ids are the relevance filter" in AGENT_INSTRUCTIONS
 
 
 def test_bookshelf_lists_saved_entries_and_excludes_archived(session):
