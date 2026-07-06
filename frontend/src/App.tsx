@@ -87,7 +87,7 @@ const emptyPage = <T,>(): Page<T> => ({
 });
 
 const VIEW_STORAGE_KEY = 'iris.activeView';
-const ACTIVE_CHAT_STORAGE_KEY = 'iris.activeChatId';
+const ACTIVE_CHAT_STORAGE_KEY = 'iris.activeChatUuid';
 const SEARCH_RELOAD_STORAGE_KEY = 'iris.searchReloading';
 const HISTORY_PAGE_SIZE = 15;
 const views: View[] = ['search', 'bookshelf', 'directory', 'explore', 'graph', 'admin'];
@@ -112,8 +112,16 @@ function viewFromPath(pathname: string): View | null {
   const normalized = pathname.replace(/\/+$/, '') || '/';
   if (normalized === '/') return null;
   if (normalized.startsWith('/directory/')) return 'directory';
+  if (normalized.startsWith('/search/')) return 'search';
   const match = views.find((view) => viewPaths[view] === normalized);
   return match ?? null;
+}
+
+function searchConversationUuidFromPath(pathname: string): string | null {
+  const normalized = pathname.replace(/\/+$/, '');
+  if (!normalized.startsWith('/search/')) return null;
+  const uuid = decodeURIComponent(normalized.slice('/search/'.length)).trim();
+  return uuid || null;
 }
 
 function profileTargetFromPath(pathname: string): ProfileTarget {
@@ -129,9 +137,17 @@ function defaultArtifactWidth() {
   return Math.min(900, Math.max(360, Math.round(available / 2)));
 }
 
-function SearchView({ onOpenProfile }: { onOpenProfile: (sourceId: number, domain: string) => void }) {
+function SearchView({
+  routeConversationUuid,
+  onRouteConversationUuidChange,
+  onOpenProfile,
+}: {
+  routeConversationUuid: string | null;
+  onRouteConversationUuidChange: (uuid: string | null) => void;
+  onOpenProfile: (sourceId: number, domain: string) => void;
+}) {
   const [query, setQuery] = useState('');
-  const [conversationId, setConversationId] = useState<number | undefined>();
+  const [conversationUuid, setConversationUuid] = useState<string | undefined>(routeConversationUuid ?? undefined);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [history, setHistory] = useState<AgentConversationSummary[]>([]);
   const [historyQuery, setHistoryQuery] = useState('');
@@ -172,12 +188,21 @@ function SearchView({ onOpenProfile }: { onOpenProfile: (sourceId: number, domai
   }, []);
 
   useEffect(() => {
-    if (conversationId) {
-      window.sessionStorage.setItem(ACTIVE_CHAT_STORAGE_KEY, String(conversationId));
+    if (conversationUuid) {
+      window.sessionStorage.setItem(ACTIVE_CHAT_STORAGE_KEY, conversationUuid);
     } else {
       window.sessionStorage.removeItem(ACTIVE_CHAT_STORAGE_KEY);
     }
-  }, [conversationId]);
+  }, [conversationUuid]);
+
+  useEffect(() => {
+    if (routeConversationUuid && routeConversationUuid !== conversationUuid) {
+      loadConversation(routeConversationUuid);
+    }
+    if (!routeConversationUuid && conversationUuid && !loading) {
+      startNewChat();
+    }
+  }, [routeConversationUuid]);
 
   useEffect(() => {
     transcriptRef.current?.scrollTo({ top: transcriptRef.current.scrollHeight, behavior: 'smooth' });
@@ -250,9 +275,11 @@ function SearchView({ onOpenProfile }: { onOpenProfile: (sourceId: number, domai
       const items = await getAgentConversations({ limit: HISTORY_PAGE_SIZE });
       setHistory(items);
       setHistoryHasMore(items.length === HISTORY_PAGE_SIZE);
-      const activeChatId = Number(window.sessionStorage.getItem(ACTIVE_CHAT_STORAGE_KEY));
-      if (shouldRestoreConversation.current && Number.isFinite(activeChatId) && activeChatId > 0) {
-        await loadConversation(activeChatId);
+      const activeChatUuid = window.sessionStorage.getItem(ACTIVE_CHAT_STORAGE_KEY);
+      if (routeConversationUuid) {
+        await loadConversation(routeConversationUuid);
+      } else if (shouldRestoreConversation.current && activeChatUuid) {
+        await loadConversation(activeChatUuid);
       }
     } catch {
       // History is secondary; start on a clean chat if it fails.
@@ -261,12 +288,13 @@ function SearchView({ onOpenProfile }: { onOpenProfile: (sourceId: number, domai
     }
   }
 
-  async function loadConversation(id: number) {
+  async function loadConversation(uuid: string) {
     if (loading) return;
     setError(null);
     try {
-      const conversation = await getAgentConversation(id);
-      setConversationId(conversation.id);
+      const conversation = await getAgentConversation(uuid);
+      setConversationUuid(conversation.uuid);
+      onRouteConversationUuidChange(conversation.uuid);
       setStartedNewChat(false);
       setMessages(messagesFromConversation(conversation));
     } catch (err) {
@@ -277,7 +305,8 @@ function SearchView({ onOpenProfile }: { onOpenProfile: (sourceId: number, domai
   function startNewChat() {
     if (loading) return;
     setStartedNewChat(true);
-    setConversationId(undefined);
+    setConversationUuid(undefined);
+    onRouteConversationUuidChange(null);
     setMessages([]);
     setSelectedResultMessageId(null);
     setError(null);
@@ -306,9 +335,10 @@ function SearchView({ onOpenProfile }: { onOpenProfile: (sourceId: number, domai
     setLoading(true);
     setError(null);
     try {
-      await streamChatSearch(message, conversationId, (event) => {
+      await streamChatSearch(message, conversationUuid, (event) => {
         if (event.event === 'conversation') {
-          setConversationId(event.data.conversation_id);
+          setConversationUuid(event.data.conversation_uuid);
+          onRouteConversationUuidChange(event.data.conversation_uuid);
           return;
         }
         if (event.event === 'step') {
@@ -417,9 +447,9 @@ function SearchView({ onOpenProfile }: { onOpenProfile: (sourceId: number, domai
               history.map((item) => (
                 <button
                   key={item.id}
-                  className={item.id === conversationId ? 'chat-history-item chat-history-item-active' : 'chat-history-item'}
+                  className={item.uuid === conversationUuid ? 'chat-history-item chat-history-item-active' : 'chat-history-item'}
                   type="button"
-                  onClick={() => loadConversation(item.id)}
+                  onClick={() => loadConversation(item.uuid)}
                 >
                   <span>{item.title || 'Untitled search'}</span>
                 </button>
@@ -548,7 +578,7 @@ function SearchView({ onOpenProfile }: { onOpenProfile: (sourceId: number, domai
               value={query}
               onChange={setQuery}
               onSubmit={submit}
-              placeholder={loading ? 'Iris is working...' : conversationId ? 'Follow up...' : 'Message Iris...'}
+              placeholder={loading ? 'Iris is working...' : conversationUuid ? 'Follow up...' : 'Message Iris...'}
               disabled={loading || !query.trim()}
               autoFocus
             />
@@ -2387,6 +2417,9 @@ function formatDate(value: string | null | undefined) {
 
 function IrisApp({ currentUser, onSignOut }: { currentUser: IrisUser | null; onSignOut: () => void }) {
   const [view, setView] = useState<View>(initialView);
+  const [searchConversationUuid, setSearchConversationUuid] = useState<string | null>(() =>
+    typeof window === 'undefined' ? null : searchConversationUuidFromPath(window.location.pathname),
+  );
   const [profileTarget, setProfileTarget] = useState<ProfileTarget>(() =>
     typeof window === 'undefined' ? null : profileTargetFromPath(window.location.pathname),
   );
@@ -2399,6 +2432,8 @@ function IrisApp({ currentUser, onSignOut }: { currentUser: IrisUser | null; onS
     const nextPath =
       view === 'directory' && profileTarget?.domain
         ? `/directory/${encodeURIComponent(profileTarget.domain)}`
+        : view === 'search' && searchConversationUuid
+          ? `/search/${encodeURIComponent(searchConversationUuid)}`
         : viewPaths[view];
     if (window.location.pathname !== nextPath) {
       if (applyingPopState.current) {
@@ -2408,12 +2443,13 @@ function IrisApp({ currentUser, onSignOut }: { currentUser: IrisUser | null; onS
       }
     }
     applyingPopState.current = false;
-  }, [view, profileTarget?.domain]);
+  }, [view, profileTarget?.domain, searchConversationUuid]);
 
   useEffect(() => {
     function handlePopState() {
       const nextView = viewFromPath(window.location.pathname) ?? 'search';
       setProfileTarget(profileTargetFromPath(window.location.pathname));
+      setSearchConversationUuid(searchConversationUuidFromPath(window.location.pathname));
       applyingPopState.current = true;
       setView(nextView);
     }
@@ -2448,6 +2484,11 @@ function IrisApp({ currentUser, onSignOut }: { currentUser: IrisUser | null; onS
     setView('directory');
   }
 
+  function openSearchRoot() {
+    setSearchConversationUuid(null);
+    setView('search');
+  }
+
   const navItems: Array<{ view: View; label: string; icon: ReactNode; adminOnly?: boolean }> = [
     { view: 'search', label: 'Search', icon: <Search size={15} /> },
     { view: 'bookshelf', label: 'Bookshelf', icon: <BookOpen size={15} /> },
@@ -2472,6 +2513,8 @@ function IrisApp({ currentUser, onSignOut }: { currentUser: IrisUser | null; onS
               onClick={() => {
                 if (item.view === 'directory') {
                   openDirectoryRoot();
+                } else if (item.view === 'search') {
+                  openSearchRoot();
                 } else {
                   setView(item.view);
                 }
@@ -2526,8 +2569,14 @@ function IrisApp({ currentUser, onSignOut }: { currentUser: IrisUser | null; onS
         )}
       </Box>
       <Box className={view === 'explore' || view === 'graph' ? 'workspace workspace-fullscreen' : view === 'search' ? 'workspace workspace-search' : 'workspace'}>
-        {view === 'search' && <SearchView onOpenProfile={openProfile} />}
-        {view === 'bookshelf' && <BookshelfView onDiscover={() => setView('search')} />}
+        {view === 'search' && (
+          <SearchView
+            routeConversationUuid={searchConversationUuid}
+            onRouteConversationUuidChange={setSearchConversationUuid}
+            onOpenProfile={openProfile}
+          />
+        )}
+        {view === 'bookshelf' && <BookshelfView onDiscover={openSearchRoot} />}
         {view === 'directory' && <DirectoryView target={profileTarget} onOpenProfile={openProfile} onDirectoryRoot={openDirectoryRoot} />}
         {view === 'explore' && <EmbeddingExplorer />}
         {view === 'graph' && <GraphExplorer onOpenProfile={openProfile} />}

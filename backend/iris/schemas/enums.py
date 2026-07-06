@@ -104,6 +104,7 @@ class CategoryStatus(StringEnum):
 
 class CategoryAssignmentSource(StringEnum):
     SYSTEM = "system"
+    LLM = "llm"
     USER = "user"
 
 

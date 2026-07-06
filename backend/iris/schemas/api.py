@@ -82,6 +82,7 @@ class DirectorySourceSchema(BaseModel):
 
 class DocumentSchema(BaseModel):
     id: int
+    uuid: str
     source_id: int
     source_domain: str
     url: str
@@ -129,6 +130,7 @@ class AgentChatRequestSchema(BaseModel):
     message: str
     limit: int | None = None
     conversation_id: int | None = None
+    conversation_uuid: str | None = None
 
 
 class AgentStepSchema(BaseModel):
@@ -148,6 +150,7 @@ class SearchSchema(BaseModel):
 
 class AgentChatSchema(BaseModel):
     conversation_id: int
+    conversation_uuid: str
     user_message_id: int
     assistant_message_id: int
     message: str
@@ -158,6 +161,7 @@ class AgentChatSchema(BaseModel):
 
 class AgentConversationSummarySchema(BaseModel):
     id: int
+    uuid: str
     title: str | None
     created_at: datetime
     updated_at: datetime
@@ -175,6 +179,7 @@ class AgentMessageSchema(BaseModel):
 
 class AgentConversationSchema(BaseModel):
     id: int
+    uuid: str
     title: str | None
     created_at: datetime
     updated_at: datetime

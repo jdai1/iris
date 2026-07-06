@@ -20,6 +20,7 @@ export interface User {
 
 export interface Document {
   id: number;
+  uuid: string;
   source_id: number;
   source_domain: string;
   url: string;
@@ -80,6 +81,7 @@ export interface AgentStep {
 
 export interface AgentChatResponse {
   conversation_id: number;
+  conversation_uuid: string;
   user_message_id: number;
   assistant_message_id: number;
   message: string;
@@ -93,6 +95,7 @@ export type AgentStreamEvent =
       event: 'conversation';
       data: {
         conversation_id: number;
+        conversation_uuid: string;
         user_message_id: number;
         message: string;
       };
@@ -124,6 +127,7 @@ export type AgentStreamEvent =
       event: 'done';
       data: {
         conversation_id: number;
+        conversation_uuid: string;
       };
     }
   | {
@@ -136,6 +140,7 @@ export type AgentStreamEvent =
 
 export interface AgentConversationSummary {
   id: number;
+  uuid: string;
   title: string | null;
   created_at: string;
   updated_at: string;
@@ -153,6 +158,7 @@ export interface AgentMessage {
 
 export interface AgentConversation {
   id: number;
+  uuid: string;
   title: string | null;
   created_at: string;
   updated_at: string;

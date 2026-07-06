@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from uuid import uuid4
 
 from sqlalchemy import Float, ForeignKey, Index, Integer, JSON, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -260,9 +261,13 @@ class AgentConversation(Base):
     """A persisted agentic search chat for the local user."""
 
     __tablename__ = "agent_conversations"
-    __table_args__ = (Index("idx_agent_conversations_user_updated", "user_id", "updated_at"),)
+    __table_args__ = (
+        Index("idx_agent_conversations_user_updated", "user_id", "updated_at"),
+        Index("idx_agent_conversations_uuid", "uuid", unique=True),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    uuid: Mapped[str] = mapped_column(String(36), default=lambda: str(uuid4()), nullable=False)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
 
     created_at: Mapped[datetime] = mapped_column(default=utcnow)

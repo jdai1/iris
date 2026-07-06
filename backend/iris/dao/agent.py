@@ -16,17 +16,24 @@ def create_agent_chat(
     user: User | None = None,
     limit: int | None = None,
     conversation_id: int | None = None,
+    conversation_uuid: str | None = None,
 ) -> tuple[AgentConversation, AgentMessage, AgentMessage, AgentChatResult]:
     """Persist one user turn, one assistant turn, and the assistant's citations."""
-    conversation, user_message = start_agent_chat(message, user=user, conversation_id=conversation_id)
+    conversation, user_message = start_agent_chat(
+        message,
+        user=user,
+        conversation_id=conversation_id,
+        conversation_uuid=conversation_uuid,
+    )
     trace_user = conversation.user
     result = agentic_chat(
         message,
         limit=limit,
-        session_id=agent_conversation_session_id(conversation.id),
+        session_id=agent_conversation_session_id(conversation.uuid),
         user_id=agent_user_id(trace_user.id),
         trace_metadata=agent_trace_metadata(
             conversation_id=conversation.id,
+            conversation_uuid=conversation.uuid,
             user_id=trace_user.id,
             firebase_uid=trace_user.firebase_uid,
         ),
@@ -40,11 +47,12 @@ def start_agent_chat(
     *,
     user: User | None = None,
     conversation_id: int | None = None,
+    conversation_uuid: str | None = None,
 ) -> tuple[AgentConversation, AgentMessage]:
     """Persist the user side of an agent chat turn."""
     session = db.current_session()
     user = user or get_or_create_local_user()
-    conversation = _get_or_create_conversation(user.id, message, conversation_id)
+    conversation = _get_or_create_conversation(user.id, message, conversation_id, conversation_uuid)
     user_message = AgentMessage(
         conversation_id=conversation.id,
         role=AgentMessageRole.USER,
@@ -163,8 +171,34 @@ def get_agent_conversation(conversation_id: int, *, user: User | None = None) ->
     ).scalar_one_or_none()
 
 
-def _get_or_create_conversation(user_id: int, message: str, conversation_id: int | None) -> AgentConversation:
+def get_agent_conversation_by_uuid(conversation_uuid: str, *, user: User | None = None) -> AgentConversation | None:
     session = db.current_session()
+    user = user or get_or_create_local_user()
+    return session.execute(
+        select(AgentConversation).where(
+            AgentConversation.uuid == conversation_uuid,
+            AgentConversation.user_id == user.id,
+        )
+    ).scalar_one_or_none()
+
+
+def _get_or_create_conversation(
+    user_id: int,
+    message: str,
+    conversation_id: int | None,
+    conversation_uuid: str | None,
+) -> AgentConversation:
+    session = db.current_session()
+    if conversation_uuid:
+        conversation = session.execute(
+            select(AgentConversation).where(
+                AgentConversation.uuid == conversation_uuid,
+                AgentConversation.user_id == user_id,
+            )
+        ).scalar_one_or_none()
+        if conversation:
+            return conversation
+
     if conversation_id is not None:
         conversation = session.execute(
             select(AgentConversation).where(
