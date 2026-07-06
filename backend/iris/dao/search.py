@@ -51,7 +51,10 @@ def _postgres_document_picker_search(query: str, *, limit: int) -> list[RankedDo
                 ts_rank_cd(
                     setweight(to_tsvector('simple', coalesce(d.title, '')), 'A') ||
                     setweight(to_tsvector('simple', coalesce(d.author, '')), 'B') ||
+                    setweight(to_tsvector('simple', coalesce(d.one_liner, '')), 'B') ||
+                    setweight(to_tsvector('simple', coalesce(d.audience, '')), 'B') ||
                     setweight(to_tsvector('simple', coalesce(d.summary, '')), 'B') ||
+                    setweight(to_tsvector('simple', coalesce(d.takeaways::text, '')), 'B') ||
                     setweight(to_tsvector('simple', coalesce(d.extracted_text, '')), 'D'),
                     query.tsquery
                 ) as rank
@@ -61,7 +64,10 @@ def _postgres_document_picker_search(query: str, *, limit: int) -> list[RankedDo
               and (
                 setweight(to_tsvector('simple', coalesce(d.title, '')), 'A') ||
                 setweight(to_tsvector('simple', coalesce(d.author, '')), 'B') ||
+                setweight(to_tsvector('simple', coalesce(d.one_liner, '')), 'B') ||
+                setweight(to_tsvector('simple', coalesce(d.audience, '')), 'B') ||
                 setweight(to_tsvector('simple', coalesce(d.summary, '')), 'B') ||
+                setweight(to_tsvector('simple', coalesce(d.takeaways::text, '')), 'B') ||
                 setweight(to_tsvector('simple', coalesce(d.extracted_text, '')), 'D')
               ) @@ query.tsquery
             order by rank desc, d.published_at desc nulls last, d.id desc
@@ -91,7 +97,10 @@ def _portable_document_picker_search(query: str, *, limit: int) -> list[RankedDo
             text(
                 "lower(coalesce(documents.title, '') || ' ' || "
                 "coalesce(documents.author, '') || ' ' || "
+                "coalesce(documents.one_liner, '') || ' ' || "
+                "coalesce(documents.audience, '') || ' ' || "
                 "coalesce(documents.summary, '') || ' ' || "
+                "coalesce(documents.takeaways, '') || ' ' || "
                 "coalesce(documents.extracted_text, '')) like :pattern"
             )
         )
@@ -129,7 +138,10 @@ def _ranked_documents_from_id_scores(id_scores: list[tuple[int, float]], *, reas
 
 def _picker_keyword_score(terms: list[str], document: Document) -> float:
     title = (document.title or "").lower()
+    one_liner = (document.one_liner or "").lower()
+    audience = (document.audience or "").lower()
     summary = (document.summary or "").lower()
+    takeaways = " ".join(document.takeaways or []).lower()
     source = document.source.canonical_domain.lower()
     text = (document.extracted_text or "").lower()
     score = 0.0
@@ -138,7 +150,13 @@ def _picker_keyword_score(terms: list[str], document: Document) -> float:
             score += 4.0
         if term in source:
             score += 2.5
+        if term in one_liner:
+            score += 2.5
+        if term in audience:
+            score += 2.0
         if term in summary:
+            score += 2.0
+        if term in takeaways:
             score += 2.0
         if term in text:
             score += 0.5
