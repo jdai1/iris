@@ -68,7 +68,10 @@ def _keyword_score(query_terms: set[str], document: Document) -> float:
         for item in (
             document.title,
             document.author,
+            document.one_liner,
+            document.audience,
             document.summary,
+            " ".join(document.takeaways or []),
             " ".join(document.topics or []),
             str(document.category.value if hasattr(document.category, "value") else document.category),
             document.extracted_text[:3000] if document.extracted_text else "",
@@ -80,6 +83,21 @@ def _keyword_score(query_terms: set[str], document: Document) -> float:
         return 0.0
     hits = sum(1 for term in query_terms if term in haystack)
     return hits / len(query_terms)
+
+
+def _document_search_payload(document: Document) -> dict[str, object]:
+    return {
+        "document_id": document.id,
+        "title": document.title,
+        "source": document.source.canonical_domain,
+        "url": document.url,
+        "category": str(document.category.value if hasattr(document.category, "value") else document.category),
+        "summary": document.summary,
+        "one_liner": document.one_liner,
+        "audience": document.audience,
+        "takeaways": document.takeaways or [],
+        "topics": document.topics or [],
+    }
 
 
 def search_documents(query: str, limit: int = 12, persist: bool = True) -> tuple[None, list[RankedDocument]]:
@@ -166,13 +184,7 @@ async def stream_openai_agentic_chat(
         return json.dumps(
             [
                 {
-                    "document_id": row.document.id,
-                    "title": row.document.title,
-                    "source": row.document.source.canonical_domain,
-                    "url": row.document.url,
-                    "category": str(row.document.category.value if hasattr(row.document.category, "value") else row.document.category),
-                    "summary": row.document.summary,
-                    "topics": row.document.topics or [],
+                    **_document_search_payload(row.document),
                     "score": round(row.score, 4),
                     "reason": row.reason,
                 }
@@ -325,13 +337,7 @@ def _openai_agentic_chat(
         return json.dumps(
             [
                 {
-                    "document_id": row.document.id,
-                    "title": row.document.title,
-                    "source": row.document.source.canonical_domain,
-                    "url": row.document.url,
-                    "category": str(row.document.category.value if hasattr(row.document.category, "value") else row.document.category),
-                    "summary": row.document.summary,
-                    "topics": row.document.topics or [],
+                    **_document_search_payload(row.document),
                     "score": round(row.score, 4),
                     "reason": row.reason,
                 }
@@ -472,6 +478,9 @@ def _serialize_document_metadata(document: Document) -> str:
             "document_type": str(document.document_type.value if hasattr(document.document_type, "value") else document.document_type),
             "category": str(document.category.value if hasattr(document.category, "value") else document.category),
             "summary": document.summary,
+            "one_liner": document.one_liner,
+            "audience": document.audience,
+            "takeaways": document.takeaways or [],
             "topics": document.topics or [],
             "excerpt": excerpt,
         },
@@ -506,6 +515,9 @@ def _serialize_source_metadata(source: Source) -> str:
                     "title": document.title,
                     "url": document.url,
                     "summary": document.summary,
+                    "one_liner": document.one_liner,
+                    "audience": document.audience,
+                    "takeaways": document.takeaways or [],
                     "topics": document.topics or [],
                 }
                 for document in recent_documents
@@ -819,11 +831,8 @@ def _rerank_candidates(query: str, candidates: list[RankedDocument]) -> list[Ran
 def _llm_rerank_order(api_key: str, query: str, candidates: list[RankedDocument]) -> list[int]:
     payload_candidates = [
         {
+            **_document_search_payload(item.document),
             "id": item.document.id,
-            "title": item.document.title,
-            "source": item.document.source.canonical_domain,
-            "summary": item.document.summary,
-            "topics": item.document.topics or [],
             "current_score": round(item.score, 4),
         }
         for item in candidates
