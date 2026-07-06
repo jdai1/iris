@@ -449,9 +449,11 @@ def agent_chat(
         user=user,
         limit=payload.limit,
         conversation_id=payload.conversation_id,
+        conversation_uuid=payload.conversation_uuid,
     )
     return AgentChatSchema(
         conversation_id=conversation.id,
+        conversation_uuid=conversation.uuid,
         user_message_id=user_message.id,
         assistant_message_id=assistant_message.id,
         message=payload.message,
@@ -487,13 +489,16 @@ async def _agent_chat_stream_events(payload: AgentChatRequestSchema, authorizati
                 payload.message,
                 user=user,
                 conversation_id=payload.conversation_id,
+                conversation_uuid=payload.conversation_uuid,
             )
             conversation_id = conversation.id
+            conversation_uuid = conversation.uuid
             user_message_id = user_message.id
         yield _sse(
             "conversation",
             {
                 "conversation_id": conversation_id,
+                "conversation_uuid": conversation_uuid,
                 "user_message_id": user_message_id,
                 "message": payload.message,
             },
@@ -518,10 +523,11 @@ async def _agent_chat_stream_events(payload: AgentChatRequestSchema, authorizati
                 payload.message,
                 limit=payload.limit,
                 conversation_context=conversation_context,
-                session_id=agent_conversation_session_id(conversation_id),
+                session_id=agent_conversation_session_id(conversation.uuid),
                 user_id=agent_user_id(user.id),
                 trace_metadata=agent_trace_metadata(
                     conversation_id=conversation_id,
+                    conversation_uuid=conversation.uuid,
                     user_id=user.id,
                     firebase_uid=user.firebase_uid,
                 ),
@@ -571,6 +577,7 @@ async def _agent_chat_event_chunks(event, conversation, user_message, payload: A
             "final",
             {
                 "conversation_id": conversation.id,
+                "conversation_uuid": conversation.uuid,
                 "user_message_id": user_message.id,
                 "assistant_message_id": assistant_message.id,
                 "message": payload.message,
@@ -586,7 +593,7 @@ async def _agent_chat_event_chunks(event, conversation, user_message, payload: A
                 ],
             },
         )
-        yield _sse("done", {"conversation_id": conversation.id})
+        yield _sse("done", {"conversation_id": conversation.id, "conversation_uuid": conversation.uuid})
         return
 
 
@@ -643,6 +650,7 @@ def agent_conversations(
     return [
         AgentConversationSummarySchema(
             id=conversation.id,
+            uuid=conversation.uuid,
             title=conversation.title,
             created_at=conversation.created_at,
             updated_at=conversation.updated_at,
@@ -652,17 +660,22 @@ def agent_conversations(
     ]
 
 
-@app.get("/api/agent-conversations/{conversation_id}", response_model=AgentConversationSchema)
+@app.get("/api/agent-conversations/{conversation_identifier}", response_model=AgentConversationSchema)
 def agent_conversation(
-    conversation_id: int,
+    conversation_identifier: str,
     _bound_session=Depends(get_session),
     user: User = Depends(get_current_user),
 ) -> AgentConversationSchema:
-    conversation = agent_dao.get_agent_conversation(conversation_id, user=user)
+    conversation = (
+        agent_dao.get_agent_conversation(int(conversation_identifier), user=user)
+        if conversation_identifier.isdigit()
+        else agent_dao.get_agent_conversation_by_uuid(conversation_identifier, user=user)
+    )
     if not conversation:
         raise HTTPException(status_code=404, detail="Conversation not found")
     return AgentConversationSchema(
         id=conversation.id,
+        uuid=conversation.uuid,
         title=conversation.title,
         created_at=conversation.created_at,
         updated_at=conversation.updated_at,

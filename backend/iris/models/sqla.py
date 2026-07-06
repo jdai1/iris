@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from uuid import uuid4
 from sqlalchemy import Enum as SqlEnum
 from sqlalchemy import ForeignKey, Index, Integer, JSON, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -107,9 +108,11 @@ class Document(Base):
     __table_args__ = (
         UniqueConstraint("url", name="uq_documents_url"),
         Index("idx_documents_type_status", "document_type", "crawl_status"),
+        Index("idx_documents_uuid", "uuid", unique=True),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    uuid: Mapped[str] = mapped_column(String(36), default=lambda: str(uuid4()), nullable=False)
     source_id: Mapped[int] = mapped_column(ForeignKey("sources.id"), index=True)
     crawl_job_id: Mapped[int | None] = mapped_column(ForeignKey("crawl_jobs.id"), nullable=True, index=True)
     url: Mapped[str] = mapped_column(Text)

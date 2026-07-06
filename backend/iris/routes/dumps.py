@@ -21,6 +21,7 @@ def dump_source(source: Source) -> SourceSchema:
 def dump_document(document: Document) -> DocumentSchema:
     return DocumentSchema(
         id=document.id,
+        uuid=document.uuid,
         source_id=document.source_id,
         source_domain=document.source.canonical_domain,
         url=document.url,

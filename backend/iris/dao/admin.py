@@ -576,6 +576,7 @@ def clamped_embedding_limit(limit: int) -> int:
 def _embedding_map_document(document: Document) -> DocumentSchema:
     return DocumentSchema(
         id=document.id,
+        uuid=document.uuid,
         source_id=document.source_id,
         source_domain=document.source.canonical_domain,
         url=document.url,
