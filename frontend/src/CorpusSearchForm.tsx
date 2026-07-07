@@ -1,5 +1,7 @@
 import { FormEvent, ReactNode } from 'react';
+import { Box, HStack, Input } from '@chakra-ui/react';
 import { CornerDownLeft, Search } from 'lucide-react';
+import { IconButton } from './components/ui';
 
 type CorpusSearchFormProps = {
   value: string;
@@ -24,12 +26,16 @@ export function CorpusSearchForm({
 }: CorpusSearchFormProps) {
   return (
     <form className={className ? `corpus-search ${className}` : 'corpus-search'} onSubmit={onSubmit}>
-      <Search size={18} />
-      <input value={value} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} autoFocus={autoFocus} />
-      <button type="submit" disabled={disabled} aria-label="Submit search" data-tooltip="Submit" data-tooltip-placement="bottom">
-        <CornerDownLeft size={18} />
-      </button>
-      {children}
+      <HStack display="contents">
+        <Search size={18} />
+        <Input unstyled border="0" value={value} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} autoFocus={autoFocus} />
+        <IconButton type="submit" uiVariant="plainIcon" disabled={disabled} aria-label="Submit search" data-tooltip="Submit" data-tooltip-placement="bottom">
+          <CornerDownLeft size={18} />
+        </IconButton>
+        <Box display="contents">
+          {children}
+        </Box>
+      </HStack>
     </form>
   );
 }
