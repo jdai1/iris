@@ -3,10 +3,13 @@ import * as d3 from 'd3-force';
 import { ArrowUpRight, FileText, Loader2, LocateFixed, Users } from 'lucide-react';
 import { getGraph, searchGraphSources } from './api';
 import { CorpusSearchForm } from './CorpusSearchForm';
+import { StateMessage } from './components/ui';
 import type { AdminSource, GraphEdge, GraphNode, GraphResponse } from './types';
 
 type GraphMode = 'sources' | 'documents';
 type LayoutNode = GraphNode & d3.SimulationNodeDatum & { x: number; y: number; r: number; color: string };
+type RankedGraphReference = { edge: GraphEdge; node: LayoutNode };
+type GraphReferenceDirection = 'inbound' | 'outbound';
 type DragState =
   | { kind: 'canvas'; x: number; y: number; moved: boolean }
   | { kind: 'node'; id: string; x: number; y: number; moved: boolean };
@@ -123,6 +126,8 @@ export function GraphExplorer({ onOpenProfile }: { onOpenProfile?: (sourceId: nu
   const selected = selectedId ? nodeById.get(selectedId) : null;
   const activeId = hoveredId ?? selectedId;
   const visibleEdges = graph.edges.filter((edge) => nodeById.has(edge.source) && nodeById.has(edge.target));
+  const inboundReferences = rankedGraphReferences(selectedId, visibleEdges, nodeById, 'inbound');
+  const outboundReferences = rankedGraphReferences(selectedId, visibleEdges, nodeById, 'outbound');
   const matches = domain.trim()
     ? layout.filter((node) => node.label.toLowerCase().includes(domain.trim().toLowerCase()) || node.domain.toLowerCase().includes(domain.trim().toLowerCase())).slice(0, 8)
     : [];
@@ -277,7 +282,7 @@ export function GraphExplorer({ onOpenProfile }: { onOpenProfile?: (sourceId: nu
               setSearchOpen(true);
             }}
             onSubmit={submit}
-            placeholder={mode === 'sources' ? 'focus domain, e.g. jdai1.github.io' : 'filter title/domain'}
+            placeholder={mode === 'sources' ? 'focus domain, e.g. example.com' : 'filter title/domain'}
           />
           {showMatches && (
             <div className="graph-matches">
@@ -316,7 +321,7 @@ export function GraphExplorer({ onOpenProfile }: { onOpenProfile?: (sourceId: nu
         </div>
       </div>
 
-      {error && <div className="error">{error}</div>}
+      {error && <StateMessage className="error" tone="error">{error}</StateMessage>}
       <div className="graph-layout">
         <div className="graph-canvas-wrap">
           {loading && (
@@ -325,7 +330,7 @@ export function GraphExplorer({ onOpenProfile }: { onOpenProfile?: (sourceId: nu
               <span>Loading graph</span>
             </div>
           )}
-          {!loading && graph.nodes.length === 0 && <div className="graph-loading">No graph neighbors found.</div>}
+          {!loading && graph.nodes.length === 0 && <StateMessage className="graph-loading">No graph neighbors found.</StateMessage>}
           <svg
             className="graph-canvas"
             viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
@@ -402,15 +407,15 @@ export function GraphExplorer({ onOpenProfile }: { onOpenProfile?: (sourceId: nu
                 <h3>{selected.label}</h3>
                 <div className="graph-title-actions" aria-label="Graph actions">
                   {mode === 'sources' && (
-                    <button type="button" onClick={() => openProfile(selected)} aria-label="Open profile" data-tooltip="Open profile">
+                    <button type="button" onClick={() => openProfile(selected)} aria-label="Open profile" data-tooltip="Open profile" data-tooltip-placement="left">
                       <Users size={16} />
                     </button>
                   )}
-                  <button type="button" onClick={() => openNodeGraph(selected)} aria-label="Open this graph" data-tooltip="Open this graph">
+                  <button type="button" onClick={() => openNodeGraph(selected)} aria-label="Open this graph" data-tooltip="Open this graph" data-tooltip-placement="left">
                     <LocateFixed size={16} />
                   </button>
                   {selected.url && (
-                    <a href={selected.url} aria-label="Open source" data-tooltip="Open source">
+                    <a href={selected.url} target="_blank" rel="noreferrer" aria-label="Open source" data-tooltip="Open source" data-tooltip-placement="left">
                       <ArrowUpRight size={16} />
                     </a>
                   )}
@@ -421,7 +426,11 @@ export function GraphExplorer({ onOpenProfile }: { onOpenProfile?: (sourceId: nu
               <div className="graph-stats">
                 <span>{graph.nodes.length} nodes</span>
                 <span>{visibleEdges.length} edges</span>
+                <span>{inboundReferences.length} referenced by</span>
+                <span>{outboundReferences.length} references</span>
               </div>
+              <GraphReferenceSection title="Referenced by" emptyLabel="No visible inbound references." items={inboundReferences} mode={mode} onSelect={selectGraphNode} />
+              <GraphReferenceSection title="References" emptyLabel="No visible outbound references." items={outboundReferences} mode={mode} onSelect={selectGraphNode} />
             </>
           ) : (
             <p>Select a node.</p>
@@ -431,6 +440,70 @@ export function GraphExplorer({ onOpenProfile }: { onOpenProfile?: (sourceId: nu
       </div>
     </section>
   );
+}
+
+function GraphReferenceSection({
+  title,
+  emptyLabel,
+  items,
+  mode,
+  onSelect,
+}: {
+  title: string;
+  emptyLabel: string;
+  items: RankedGraphReference[];
+  mode: GraphMode;
+  onSelect: (nodeId: string) => void;
+}) {
+  return (
+    <section className="graph-reference-section" aria-label={title}>
+      <h4>{title}</h4>
+      {items.length === 0 ? (
+        <p className="graph-reference-empty">{emptyLabel}</p>
+      ) : (
+        <div className="graph-reference-list">
+          {items.map((item) => (
+            <button key={`${item.edge.source}-${item.edge.target}-${item.node.id}`} type="button" onClick={() => onSelect(item.node.id)}>
+              <span className="graph-reference-copy">
+                <strong>{item.node.label}</strong>
+                <small>{graphReferenceMeta(item.node, item.edge)}</small>
+              </span>
+              <span className="graph-reference-weight">{graphReferenceWeightLabel(item.edge, mode)}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function rankedGraphReferences(
+  selectedId: string | null,
+  edges: GraphEdge[],
+  nodeById: Map<string, LayoutNode>,
+  direction: GraphReferenceDirection,
+): RankedGraphReference[] {
+  if (!selectedId) return [];
+  return edges
+    .filter((edge) => (direction === 'inbound' ? edge.target === selectedId : edge.source === selectedId))
+    .map((edge) => {
+      const relatedId = direction === 'inbound' ? edge.source : edge.target;
+      const node = nodeById.get(relatedId);
+      return node ? { edge, node } : null;
+    })
+    .filter((item): item is RankedGraphReference => item !== null)
+    .sort((a, b) => b.edge.weight - a.edge.weight || a.node.label.localeCompare(b.node.label))
+    .slice(0, 12);
+}
+
+function graphReferenceMeta(node: LayoutNode, edge: GraphEdge) {
+  return edge.label ? `${node.domain} / ${edge.label}` : node.domain;
+}
+
+function graphReferenceWeightLabel(edge: GraphEdge, mode: GraphMode) {
+  if (mode === 'documents') return edge.weight > 1 ? `${edge.weight} refs` : '1 ref';
+  const count = Math.round(edge.weight);
+  return `${count} link${count === 1 ? '' : 's'}`;
 }
 
 function exactSearchMatch(query: string, nodes: LayoutNode[]): LayoutNode | null {

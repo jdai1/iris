@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
-import { Badge, Box, Heading, HStack, Link, Text } from '@chakra-ui/react';
+import { Box, Heading, HStack, Link, Text } from '@chakra-ui/react';
 import { ArrowUpRight, ChevronRight, MoreHorizontal } from 'lucide-react';
 import { addBookshelfCollectionItem, getBookshelfCollections, updateDocumentBookshelf } from '../api';
 import type { BookshelfCollection, Document } from '../types';
+import { Button, Chip, ChipList, IconButton, Panel, PopoverMenu } from './ui';
 
 type DocumentCardProps = {
   document: Document;
@@ -89,9 +90,10 @@ export function DocumentCard({
 
   const actionsMenu = (
     <div className="document-actions-menu">
-      <button
+      <IconButton
         className="document-actions-trigger"
         type="button"
+        uiVariant="plainIcon"
         onClick={() => {
           const nextOpen = !actionsOpen;
           setActionsOpen(nextOpen);
@@ -102,39 +104,39 @@ export function DocumentCard({
         data-tooltip="Actions"
       >
         <MoreHorizontal size={17} />
-      </button>
+      </IconButton>
       {actionsOpen && (
-        <div className="document-actions-popover">
-          <button type="button" onClick={saveToReadNext} disabled={saving}>
+        <PopoverMenu className="document-actions-popover">
+          <Button uiVariant="rowAction" type="button" onClick={saveToReadNext} disabled={saving}>
             {saved ? 'In read next' : 'Read next'}
-          </button>
-          <button type="button" onClick={toggleFavorite} disabled={saving}>
+          </Button>
+          <Button uiVariant="rowAction" type="button" onClick={toggleFavorite} disabled={saving}>
             {favorited ? 'Favorited' : 'Favorite'}
-          </button>
+          </Button>
           <div className="document-actions-submenu" onMouseEnter={loadCollections} onFocus={loadCollections}>
-            <button type="button" disabled={saving}>
+            <Button uiVariant="rowAction" type="button" disabled={saving}>
               <span>Add to collection</span>
               <ChevronRight size={14} />
-            </button>
+            </Button>
             <div className="document-actions-submenu-list">
               {collections.length === 0 && <span>No collections yet</span>}
               {collections.map((collection) => {
                 const added = addedCollectionIds.has(collection.id);
                 return (
-                  <button key={collection.id} type="button" onClick={() => addToCollection(collection.id)} disabled={saving || added}>
+                  <Button key={collection.id} uiVariant="rowAction" type="button" onClick={() => addToCollection(collection.id)} disabled={saving || added}>
                     {added ? 'Added' : collection.name}
-                  </button>
+                  </Button>
                 );
               })}
             </div>
           </div>
-        </div>
+        </PopoverMenu>
       )}
     </div>
   );
 
   return (
-    <Box as="article" className={compact ? 'document-card document-card-compact' : 'document-card'}>
+    <Panel as="article" className={compact ? 'document-card document-card-compact' : 'document-card'}>
       {!compact && (
         <HStack gap="2" flexWrap="wrap" color="iris.500" fontSize="xs" textTransform="uppercase">
           <button className="profile-link" type="button" onClick={() => onOpenProfile?.(document.source_id, document.source_domain)}>
@@ -145,10 +147,10 @@ export function DocumentCard({
         </HStack>
       )}
       <div className={compact ? 'document-title-row' : undefined}>
-        <Heading as="h3" mt="2" mb="3" fontSize="xl" lineHeight="1.2" fontWeight="650">
+        <Heading as="h3" mt="2" mb="3" fontSize="xl" lineHeight="1.2" fontWeight="600">
           {document.title ?? document.url}
           {compact && (
-            <Link href={document.url} className="document-open-icon" color="iris.900" fontWeight="650" textDecoration="none" aria-label="Open document" data-tooltip="Open document">
+            <Link href={document.url} target="_blank" rel="noreferrer" className="document-open-icon" color="iris.900" fontWeight="600" textDecoration="none" aria-label="Open document" data-tooltip="Open document">
               <ArrowUpRight size={16} />
             </Link>
           )}
@@ -162,16 +164,16 @@ export function DocumentCard({
       )}
       {document.summary && <Text color="iris.700" lineHeight="1.6" mb="3">{document.summary}</Text>}
       {!compact && <Text color="iris.500" fontSize="sm" lineHeight="1.55" mb="4">{reason}</Text>}
-      <HStack className="topics" gap="1.5" flexWrap="wrap" mb="4">
-        {document.topics.slice(0, 6).map((topic) => (
-          <Badge key={topic} variant="outline" borderColor="iris.300" color="iris.700" bg="iris.100" fontWeight="500">
+      <ChipList className="topics" mb="4">
+        {document.topics.map((topic) => (
+          <Chip key={topic}>
             {topic}
-          </Badge>
+          </Chip>
         ))}
-      </HStack>
+      </ChipList>
       {!compact && (
         <HStack>
-          <Link href={document.url} color="iris.900" fontWeight="650" textDecoration="none">
+          <Link href={document.url} target="_blank" rel="noreferrer" color="iris.900" fontWeight="600" textDecoration="none">
             <ArrowUpRight size={16} />
             Open
           </Link>
@@ -183,6 +185,6 @@ export function DocumentCard({
           {error && <small>{error}</small>}
         </div>
       )}
-    </Box>
+    </Panel>
   );
 }

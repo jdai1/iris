@@ -1,5 +1,5 @@
-import { Badge } from '@chakra-ui/react';
+import { StatusBadge } from './ui';
 
 export function StatusPill({ value }: { value: string }) {
-  return <Badge className={`status-pill status-${value}`} variant="outline" borderRadius="0">{value}</Badge>;
+  return <StatusBadge className={`status-pill status-${value}`} value={value} />;
 }

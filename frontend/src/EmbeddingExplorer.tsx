@@ -3,6 +3,7 @@ import { ArrowUpRight, Crosshair, HelpCircle, Loader2, MousePointer2 } from 'luc
 import * as THREE from 'three';
 import { getEmbeddingMap, getEmbeddingNeighbors } from './api';
 import { CorpusSearchForm } from './CorpusSearchForm';
+import { Button, Chip, ChipList, StateMessage } from './components/ui';
 import type { EmbeddingMap, EmbeddingMapPoint, EmbeddingNeighbor } from './types';
 
 type HoverState = {
@@ -42,6 +43,31 @@ const SCENE_SPREAD = 2.65;
 const Z_SPREAD = 1.7;
 const MIN_RENDER_GAP = 3.1;
 const TRACKING_KEYS = new Set(['fbclid', 'gclid', 'mc_cid', 'mc_eid', 'ref']);
+type ThemeMode = 'light' | 'dark';
+
+function currentThemeMode(): ThemeMode {
+  return document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light';
+}
+
+function cssToken(name: string, fallback: string) {
+  if (typeof document === 'undefined') return fallback;
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback;
+}
+
+function explorerTheme(mode: ThemeMode) {
+  const dark = mode === 'dark';
+  return {
+    bg: cssToken('--canvas-bg', dark ? '#17171a' : '#ffffff'),
+    gridPrimary: cssToken('--border-input', dark ? '#3a3a41' : '#dedede'),
+    gridSecondary: cssToken('--border-subtle', dark ? '#26262b' : '#eeeeee'),
+    highlightOuter: cssToken('--accent', dark ? '#818cf8' : '#4f46e5'),
+    highlightInner: cssToken('--canvas-label-halo', dark ? 'rgba(15, 15, 17, 0.82)' : 'rgba(255, 255, 255, 0.82)'),
+    hoverOuter: cssToken('--canvas-crosshair', dark ? 'rgba(255, 255, 255, 0.42)' : 'rgba(17, 17, 17, 0.42)'),
+    hoverInner: cssToken('--canvas-label-halo', dark ? 'rgba(15, 15, 17, 0.82)' : 'rgba(255, 255, 255, 0.82)'),
+    pointGlowStrong: cssToken('--canvas-label-halo', dark ? 'rgba(15, 15, 17, 0.82)' : 'rgba(255, 255, 255, 0.82)'),
+    pointGlowSoft: cssToken('--glass-border', dark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(17, 17, 17, 0.08)'),
+  };
+}
 
 function colorForCluster(clusterId: number | null) {
   if (clusterId == null) return new THREE.Color('#9ca3af');
@@ -113,7 +139,28 @@ function focusedPoint(
   return best;
 }
 
-function createHolographicPointTexture() {
+function nearestRenderedNeighbors(
+  selected: EmbeddingMapPoint | null,
+  points: EmbeddingMapPoint[],
+  renderPositions: Map<number, THREE.Vector3>,
+) {
+  if (!selected) return [];
+  const selectedPosition = renderPositions.get(selected.document.id) ?? scenePosition(selected);
+  return points
+    .filter((point) => point.document.id !== selected.document.id)
+    .map((point) => {
+      const position = renderPositions.get(point.document.id) ?? scenePosition(point);
+      return {
+        point,
+        distance: selectedPosition.distanceTo(position),
+      };
+    })
+    .sort((left, right) => left.distance - right.distance)
+    .slice(0, 5);
+}
+
+function createHolographicPointTexture(mode: ThemeMode) {
+  const theme = explorerTheme(mode);
   const canvas = document.createElement('canvas');
   canvas.width = 48;
   canvas.height = 48;
@@ -121,15 +168,15 @@ function createHolographicPointTexture() {
   if (!context) return null;
 
   const glow = context.createRadialGradient(24, 24, 4, 24, 24, 24);
-  glow.addColorStop(0, 'rgba(255, 255, 255, 0.78)');
-  glow.addColorStop(0.34, 'rgba(255, 255, 255, 0.24)');
-  glow.addColorStop(1, 'rgba(255, 255, 255, 0)');
+  glow.addColorStop(0, theme.pointGlowStrong);
+  glow.addColorStop(0.34, theme.pointGlowSoft);
+  glow.addColorStop(1, 'transparent');
   context.fillStyle = glow;
   context.fillRect(0, 0, 48, 48);
 
-  context.fillStyle = 'rgba(255, 255, 255, 0.82)';
+  context.fillStyle = theme.pointGlowStrong;
   context.fillRect(14, 14, 20, 20);
-  context.strokeStyle = 'rgba(255, 255, 255, 0.38)';
+  context.strokeStyle = theme.pointGlowSoft;
   context.lineWidth = 2;
   context.strokeRect(13, 13, 22, 22);
 
@@ -139,17 +186,18 @@ function createHolographicPointTexture() {
   return texture;
 }
 
-function createHighlightTexture() {
+function createHighlightTexture(mode: ThemeMode) {
+  const theme = explorerTheme(mode);
   const canvas = document.createElement('canvas');
   canvas.width = 64;
   canvas.height = 64;
   const context = canvas.getContext('2d');
   if (!context) return null;
   context.clearRect(0, 0, 64, 64);
-  context.strokeStyle = 'rgba(17, 17, 17, 0.82)';
+  context.strokeStyle = theme.highlightOuter;
   context.lineWidth = 4;
   context.strokeRect(18, 18, 28, 28);
-  context.strokeStyle = 'rgba(255, 255, 255, 0.82)';
+  context.strokeStyle = theme.highlightInner;
   context.lineWidth = 2;
   context.strokeRect(20, 20, 24, 24);
   const texture = new THREE.CanvasTexture(canvas);
@@ -158,17 +206,18 @@ function createHighlightTexture() {
   return texture;
 }
 
-function createHoverTexture() {
+function createHoverTexture(mode: ThemeMode) {
+  const theme = explorerTheme(mode);
   const canvas = document.createElement('canvas');
   canvas.width = 64;
   canvas.height = 64;
   const context = canvas.getContext('2d');
   if (!context) return null;
   context.clearRect(0, 0, 64, 64);
-  context.strokeStyle = 'rgba(17, 17, 17, 0.46)';
+  context.strokeStyle = theme.hoverOuter;
   context.lineWidth = 3;
   context.strokeRect(20, 20, 24, 24);
-  context.strokeStyle = 'rgba(255, 255, 255, 0.64)';
+  context.strokeStyle = theme.hoverInner;
   context.lineWidth = 2;
   context.strokeRect(22, 22, 20, 20);
   const texture = new THREE.CanvasTexture(canvas);
@@ -203,6 +252,8 @@ export function EmbeddingExplorer() {
   const [neighborsLoading, setNeighborsLoading] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
   const [flightActive, setFlightActive] = useState(false);
+  const [themeMode, setThemeMode] = useState<ThemeMode>(currentThemeMode);
+  const [renderPositionVersion, setRenderPositionVersion] = useState(0);
 
   const searchMatches = useMemo(() => {
     const normalized = normalizeUrlForLookup(query);
@@ -213,6 +264,22 @@ export function EmbeddingExplorer() {
       })
       .slice(0, 6);
   }, [map, query]);
+
+  const renderedNeighbors = useMemo(
+    () => nearestRenderedNeighbors(selected, map?.points ?? [], renderPositionsRef.current),
+    [map, renderPositionVersion, selected],
+  );
+
+  useEffect(() => {
+    const updateTheme = () => setThemeMode(currentThemeMode());
+    const observer = new MutationObserver(updateTheme);
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+    window.addEventListener('iris-theme-change', updateTheme);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('iris-theme-change', updateTheme);
+    };
+  }, []);
 
   useEffect(() => {
     let mounted = true;
@@ -257,13 +324,14 @@ export function EmbeddingExplorer() {
     if (!canvasRef.current || !map) return;
     const mapPoints = map.points;
     const canvas = canvasRef.current;
+    const theme = explorerTheme(themeMode);
     const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     rendererRef.current = renderer;
 
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color('#ffffff');
-    scene.fog = new THREE.Fog('#ffffff', 190, 520);
+    scene.background = new THREE.Color(theme.bg);
+    scene.fog = new THREE.Fog(theme.bg, 190, 520);
     sceneRef.current = scene;
 
     const camera = new THREE.PerspectiveCamera(58, 1, 0.1, 1000);
@@ -277,6 +345,7 @@ export function EmbeddingExplorer() {
     renderPositionsRef.current = new Map(
       mapPoints.map((point, index) => [point.document.id, renderPositions[index].clone()]),
     );
+    setRenderPositionVersion((version) => version + 1);
     mapPoints.forEach((point, index) => {
       positions[index * 3] = renderPositions[index].x;
       positions[index * 3 + 1] = renderPositions[index].y;
@@ -293,7 +362,7 @@ export function EmbeddingExplorer() {
     const colorAttribute = new THREE.BufferAttribute(colors, 3);
     geometry.setAttribute('color', colorAttribute);
 
-    const pointTexture = createHolographicPointTexture();
+    const pointTexture = createHolographicPointTexture(themeMode);
     const material = new THREE.PointsMaterial({
       size: 2.08,
       map: pointTexture ?? undefined,
@@ -310,13 +379,13 @@ export function EmbeddingExplorer() {
     pointsRef.current = pointCloud;
     scene.add(pointCloud);
 
-    const grid = new THREE.GridHelper(240, 24, '#d8d8d8', '#eeeeee');
+    const grid = new THREE.GridHelper(240, 24, theme.gridPrimary, theme.gridSecondary);
     grid.position.y = -95;
     scene.add(grid);
     scene.add(new THREE.AmbientLight('#ffffff', 1));
 
-    const highlightTexture = createHighlightTexture();
-    const hoverTexture = createHoverTexture();
+    const highlightTexture = createHighlightTexture(themeMode);
+    const hoverTexture = createHoverTexture(themeMode);
     const hoverMarker = new THREE.Sprite(
       new THREE.SpriteMaterial({
         map: hoverTexture ?? undefined,
@@ -473,7 +542,7 @@ export function EmbeddingExplorer() {
         markerMaterial.dispose();
       }
     };
-  }, [map]);
+  }, [map, themeMode]);
 
   function selectPoint(point: EmbeddingMapPoint, options: { teleport?: boolean } = {}) {
     setSelected(point);
@@ -564,9 +633,8 @@ export function EmbeddingExplorer() {
           }}
         />
         {loading && (
-          <div className="explorer-loading" aria-live="polite">
-            <Loader2 size={22} />
-            <span>Loading map</span>
+          <div className="explorer-loading" aria-label="Loading map" aria-live="polite">
+            <Loader2 size={20} />
           </div>
         )}
         <div className="explorer-crosshair"><Crosshair size={24} /></div>
@@ -579,9 +647,9 @@ export function EmbeddingExplorer() {
         {!flightActive && (
           <div className="explorer-start">Click canvas to fly · Esc releases</div>
         )}
-        {error && <div className="explorer-empty">{error}</div>}
+        {error && <StateMessage className="explorer-empty" tone="error">{error}</StateMessage>}
         {!loading && !error && map?.points.length === 0 && (
-          <div className="explorer-empty">No embedded essays yet. Run an embedding batch, then refresh this map.</div>
+          <StateMessage className="explorer-empty">No embedded essays yet. Run an embedding batch, then refresh this map.</StateMessage>
         )}
 
         {selected && (
@@ -589,19 +657,23 @@ export function EmbeddingExplorer() {
             <div className="document-meta">
               <span>{selected.document.source_domain}</span>
               <span>{selected.document.document_type}</span>
-              {selected.cluster_id != null && <span>cluster {selected.cluster_id}</span>}
             </div>
-            <h2>{selected.document.title || selected.document.url}</h2>
+            <div className="explorer-panel-title">
+              <h2>{selected.document.title || selected.document.url}</h2>
+              <a href={selected.document.url} target="_blank" rel="noreferrer" aria-label="Open document">
+                <ArrowUpRight size={16} />
+              </a>
+            </div>
             {selected.document.summary && <p>{selected.document.summary}</p>}
-            <div className="topics">
-              {selected.document.topics.slice(0, 6).map((topic) => <span key={topic}>{topic}</span>)}
-            </div>
+            <ChipList className="topics">
+              {selected.document.topics.map((topic) => <Chip key={topic}>{topic}</Chip>)}
+            </ChipList>
             <div className="embedding-neighborhood">
               <div>
                 <strong>Nearest by full embedding</strong>
                 <span>Computed from original vectors, not the compressed 3D map.</span>
               </div>
-              {neighborsLoading && <small>Loading true nearest neighbors...</small>}
+              {neighborsLoading && <span className="visually-hidden" aria-live="polite">Loading true nearest neighbors</span>}
               {!neighborsLoading && neighbors.map((neighbor) => (
                 <button
                   key={neighbor.document.id}
@@ -618,10 +690,18 @@ export function EmbeddingExplorer() {
                 </button>
               ))}
             </div>
-            <a href={selected.document.url}>
-              <ArrowUpRight size={16} />
-              Open
-            </a>
+            <div className="embedding-neighborhood">
+              <div>
+                <strong>Nearest in 3D map</strong>
+                <span>Computed from visible map positions.</span>
+              </div>
+              {renderedNeighbors.map(({ point, distance }) => (
+                <button key={point.document.id} type="button" onClick={() => selectPoint(point)}>
+                  <span>{point.document.title || point.document.url}</span>
+                  <small>{point.document.source_domain} · {distance.toFixed(1)} units</small>
+                </button>
+              ))}
+            </div>
           </aside>
         )}
       </div>
@@ -636,10 +716,10 @@ export function EmbeddingExplorer() {
           <span><kbd>Space</kbd><kbd>Ctrl</kbd> Up/down</span>
           <span><kbd>Shift</kbd> Boost</span>
         </div>
-        <button className="explorer-help" type="button" onClick={() => setShowHelp((current) => !current)}>
+        <Button className="explorer-help" uiVariant="rowAction" type="button" onClick={() => setShowHelp((current) => !current)}>
           <HelpCircle size={16} />
           Help
-        </button>
+        </Button>
       </div>
       {showHelp && (
         <div className="explorer-help-card">
