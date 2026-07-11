@@ -60,7 +60,6 @@ export interface DocumentDetail extends Document {
 
 export interface SearchResult {
   document: Document;
-  score: number;
   reason: string;
 }
 
@@ -111,10 +110,8 @@ export type AgentStreamEvent =
       data: {
         step: AgentStep;
         hits: Array<{
-          document_id: number;
           title: string;
           source_domain: string;
-          score: number;
           reason: string;
         }>;
       };

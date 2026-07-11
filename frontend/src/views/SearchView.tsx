@@ -1,11 +1,9 @@
 import { FormEvent, ReactNode, useEffect, useRef, useState } from 'react';
 import { Box } from '@chakra-ui/react';
-import { ChevronDown, Search, X } from 'lucide-react';
-import { getAgentConversation, getAgentConversations, searchCorpus, streamChatSearch } from '../api';
-import { defaultArtifactWidth } from '../app/navigation';
+import { ArrowUpRight, Search, X } from 'lucide-react';
+import { getAgentConversation, getAgentConversations, getDocument, streamChatSearch } from '../api';
 import { CorpusSearchForm } from '../CorpusSearchForm';
-import { DocumentCard } from '../components/DocumentCard';
-import type { AgentConversation, AgentConversationSummary, AgentStep, SearchResult } from '../types';
+import type { AgentConversation, AgentConversationSummary, AgentStep, DocumentDetail, SearchResult } from '../types';
 
 type ChatMessage = {
   id: string;
@@ -30,14 +28,16 @@ export function SearchView({ onOpenProfile }: { onOpenProfile: (sourceId: number
   const [historyLoadingMore, setHistoryLoadingMore] = useState(false);
   const [historyHasMore, setHistoryHasMore] = useState(false);
   const [startedNewChat, setStartedNewChat] = useState(false);
-  const [selectedResultMessageId, setSelectedResultMessageId] = useState<string | null>(null);
-  const [searchesOpen, setSearchesOpen] = useState(false);
-  const [linksDrawerOpen, setLinksDrawerOpen] = useState(false);
-  const [artifactWidth, setArtifactWidth] = useState(defaultArtifactWidth);
+  const [drawerResult, setDrawerResult] = useState<SearchResult | null>(null);
+  const [drawerDetail, setDrawerDetail] = useState<DocumentDetail | null>(null);
+  const [drawerLoading, setDrawerLoading] = useState(false);
+  const [drawerError, setDrawerError] = useState<string | null>(null);
+  const [drawerClosing, setDrawerClosing] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const transcriptRef = useRef<HTMLDivElement | null>(null);
   const historyRef = useRef<HTMLDivElement | null>(null);
+  const drawerCloseTimeoutRef = useRef<number | null>(null);
   const didLoadInitialConversation = useRef(false);
   const shouldRestoreConversation = useRef(
     typeof window !== 'undefined' && window.sessionStorage.getItem(SEARCH_RELOAD_STORAGE_KEY) === '1',
@@ -82,30 +82,61 @@ export function SearchView({ onOpenProfile }: { onOpenProfile: (sourceId: number
     return () => window.clearTimeout(timeout);
   }, [historyQuery]);
 
-  const resultTurns = messages
-    .map((message, index) => {
-      if (message.role !== 'assistant' || !message.results?.length) return null;
-      const userMessage = [...messages.slice(0, index)].reverse().find((item) => item.role === 'user');
-      return {
-        id: message.id,
-        query: userMessage?.content ?? 'Previous search',
-        results: message.results,
-      };
-    })
-    .filter((item): item is { id: string; query: string; results: SearchResult[] } => Boolean(item));
-  const selectedResultTurn =
-    resultTurns.find((turn) => turn.id === selectedResultMessageId) ?? resultTurns[resultTurns.length - 1] ?? null;
-
   useEffect(() => {
-    const latest = resultTurns[resultTurns.length - 1];
-    if (!latest) {
-      setSelectedResultMessageId(null);
+    if (!drawerResult) {
+      setDrawerDetail(null);
+      setDrawerError(null);
+      setDrawerLoading(false);
       return;
     }
-    if (!selectedResultMessageId || !resultTurns.some((turn) => turn.id === selectedResultMessageId)) {
-      setSelectedResultMessageId(latest.id);
+
+    let cancelled = false;
+    setDrawerLoading(true);
+    setDrawerError(null);
+    getDocument(drawerResult.document.id)
+      .then((detail) => {
+        if (!cancelled) setDrawerDetail(detail);
+      })
+      .catch((err) => {
+        if (!cancelled) setDrawerError(err instanceof Error ? err.message : 'Could not load document');
+      })
+      .finally(() => {
+        if (!cancelled) setDrawerLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [drawerResult?.document.id]);
+
+  useEffect(() => {
+    return () => {
+      if (drawerCloseTimeoutRef.current !== null) window.clearTimeout(drawerCloseTimeoutRef.current);
+    };
+  }, []);
+
+  function openResultDrawer(result: SearchResult) {
+    if (drawerCloseTimeoutRef.current !== null) {
+      window.clearTimeout(drawerCloseTimeoutRef.current);
+      drawerCloseTimeoutRef.current = null;
     }
-  }, [resultTurns.length, selectedResultMessageId]);
+    setDrawerClosing(false);
+    setDrawerResult(result);
+    setDrawerDetail(null);
+    setDrawerError(null);
+  }
+
+  function closeResultDrawer() {
+    if (!drawerResult || drawerClosing) return;
+    setDrawerClosing(true);
+    drawerCloseTimeoutRef.current = window.setTimeout(() => {
+      setDrawerResult(null);
+      setDrawerDetail(null);
+      setDrawerError(null);
+      setDrawerClosing(false);
+      drawerCloseTimeoutRef.current = null;
+    }, 180);
+  }
 
   async function refreshHistory(nextQuery = historyQuery) {
     setHistoryLoading(true);
@@ -171,7 +202,7 @@ export function SearchView({ onOpenProfile }: { onOpenProfile: (sourceId: number
     setStartedNewChat(true);
     setConversationId(undefined);
     setMessages([]);
-    setSelectedResultMessageId(null);
+    closeResultDrawer();
     setError(null);
   }
 
@@ -212,8 +243,6 @@ export function SearchView({ onOpenProfile }: { onOpenProfile: (sourceId: number
           return;
         }
         if (event.event === 'final') {
-          setSelectedResultMessageId(assistantId);
-          setSearchesOpen(false);
           setMessages((current) =>
             current.map((item) =>
               item.id === assistantId
@@ -267,31 +296,6 @@ export function SearchView({ onOpenProfile }: { onOpenProfile: (sourceId: number
       }),
     );
   }
-
-  function startResizeArtifact(event: React.PointerEvent<HTMLButtonElement>) {
-    event.preventDefault();
-    const startX = event.clientX;
-    const startWidth = artifactWidth;
-    function handleMove(moveEvent: PointerEvent) {
-      const nextWidth = startWidth - (moveEvent.clientX - startX);
-      setArtifactWidth(Math.min(900, Math.max(320, nextWidth)));
-    }
-    function handleUp() {
-      window.removeEventListener('pointermove', handleMove);
-      window.removeEventListener('pointerup', handleUp);
-    }
-    window.addEventListener('pointermove', handleMove);
-    window.addEventListener('pointerup', handleUp);
-  }
-
-  const showResultsSkeleton = loading && messages.length > 0 && !selectedResultTurn;
-  const showArtifact = Boolean(selectedResultTurn) || showResultsSkeleton;
-
-  useEffect(() => {
-    if (!showArtifact) {
-      setLinksDrawerOpen(false);
-    }
-  }, [showArtifact]);
 
   return (
     <Box as="section" className="search-view">
@@ -347,10 +351,7 @@ export function SearchView({ onOpenProfile }: { onOpenProfile: (sourceId: number
         </div>
       )}
 
-      <Box
-        className={showArtifact ? 'chat-shell chat-shell-with-artifact' : 'chat-shell'}
-        style={showArtifact ? { '--artifact-width': `${artifactWidth}px` } as React.CSSProperties : undefined}
-      >
+      <Box className="chat-shell">
         <Box className="chat-layout">
           <div className="chat-transcript" ref={transcriptRef}>
             {messages.map((message) => (
@@ -377,103 +378,17 @@ export function SearchView({ onOpenProfile }: { onOpenProfile: (sourceId: number
                     </div>
                   </details>
                 )}
+                {message.role === 'assistant' && message.results && message.results.length > 0 && (
+                  <SearchResultsTable
+                    results={message.results}
+                    selectedDocumentId={drawerResult?.document.id ?? null}
+                    onOpenResult={openResultDrawer}
+                  />
+                )}
               </div>
             ))}
           </div>
         </Box>
-
-        {showArtifact && (
-          <>
-          <button
-            className="chat-artifact-toggle"
-            type="button"
-            onClick={() => setLinksDrawerOpen(true)}
-            aria-label="Open links"
-          >
-            Links
-            <span>
-              {selectedResultTurn
-                ? selectedResultTurn.results.length
-                : '...'}
-            </span>
-          </button>
-          <button
-            className={linksDrawerOpen ? 'chat-artifact-backdrop chat-artifact-backdrop-open' : 'chat-artifact-backdrop'}
-            type="button"
-            aria-label="Close links"
-            onClick={() => setLinksDrawerOpen(false)}
-          />
-          <aside className={linksDrawerOpen ? 'chat-artifact chat-artifact-drawer-open' : 'chat-artifact'} aria-label="Search results">
-            <button className="chat-artifact-resize" type="button" aria-label="Resize links panel" data-tooltip="Resize links panel" onPointerDown={startResizeArtifact} />
-            <div className="chat-artifact-header">
-              <span>Links</span>
-              <small>
-                {selectedResultTurn
-                  ? `${selectedResultTurn.results.length} result${selectedResultTurn.results.length === 1 ? '' : 's'}`
-                  : 'Searching'}
-              </small>
-              <button className="chat-artifact-close" type="button" onClick={() => setLinksDrawerOpen(false)} aria-label="Close links">
-                <X size={15} />
-              </button>
-            </div>
-            {selectedResultTurn && resultTurns.length > 1 && (
-              <div className="chat-artifact-tabs">
-                <button
-                  className="chat-artifact-tabs-toggle"
-                  type="button"
-                  onClick={() => setSearchesOpen((value) => !value)}
-                  aria-expanded={searchesOpen}
-                >
-                  <span>Searches · {resultTurns.length}</span>
-                  <ChevronDown size={14} className={searchesOpen ? 'history-chevron history-chevron-open' : 'history-chevron'} />
-                </button>
-                <button
-                  className="chat-artifact-tab chat-artifact-tab-active"
-                  type="button"
-                  onClick={() => setSearchesOpen((value) => !value)}
-                >
-                  <span>{resultTurns.findIndex((turn) => turn.id === selectedResultTurn.id) + 1}</span>
-                  <small>{selectedResultTurn.query}</small>
-                </button>
-                {searchesOpen && (
-                  <div className="chat-artifact-tabs-menu">
-                    {resultTurns.map((turn, index) => (
-                      <button
-                        key={turn.id}
-                        className={turn.id === selectedResultTurn.id ? 'chat-artifact-tab chat-artifact-tab-active' : 'chat-artifact-tab'}
-                        type="button"
-                        onClick={() => {
-                          setSelectedResultMessageId(turn.id);
-                          setSearchesOpen(false);
-                        }}
-                      >
-                        <span>{index + 1}</span>
-                        <small>{turn.query}</small>
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-            <div className="chat-artifact-list">
-              {selectedResultTurn ? (
-                selectedResultTurn.results.map((result) => (
-                  <DocumentCard
-                    key={result.document.id}
-                    document={result.document}
-                    reason={result.reason}
-                    score={result.score}
-                    onOpenProfile={onOpenProfile}
-                    compact
-                  />
-                ))
-              ) : (
-                <ResultSkeleton />
-              )}
-            </div>
-          </aside>
-          </>
-        )}
         {messages.length > 0 && (
           <div className="chat-composer chat-composer-bottom">
             <CorpusSearchForm
@@ -490,6 +405,20 @@ export function SearchView({ onOpenProfile }: { onOpenProfile: (sourceId: number
       </Box>
         </div>
       </div>
+      {drawerResult && (
+        <>
+          <button className={drawerClosing ? 'drawer-backdrop drawer-closing' : 'drawer-backdrop'} type="button" aria-label="Close details" onClick={closeResultDrawer} />
+          <SearchResultDrawer
+            result={drawerResult}
+            detail={drawerDetail}
+            loading={drawerLoading}
+            error={drawerError}
+            closing={drawerClosing}
+            onClose={closeResultDrawer}
+            onOpenProfile={onOpenProfile}
+          />
+        </>
+      )}
     </Box>
   );
 }
@@ -537,6 +466,190 @@ function ResultSkeleton({ rows = 4 }: { rows?: number }) {
       ))}
     </div>
   );
+}
+
+function SearchResultsTable({
+  results,
+  selectedDocumentId,
+  onOpenResult,
+}: {
+  results: SearchResult[];
+  selectedDocumentId: number | null;
+  onOpenResult: (result: SearchResult) => void;
+}) {
+  return (
+    <div className="search-results-turn">
+      <div className="search-results-turn-header">
+        <span>Results</span>
+        <small>{results.length}</small>
+      </div>
+      <div className="search-results-table" role="table" aria-label="Search results">
+        <div className="search-results-row search-results-head" role="row">
+          <span>Title</span>
+          <span>One-liner</span>
+        </div>
+        {results.map((result) => {
+          const { document } = result;
+          const selected = selectedDocumentId === document.id;
+          return (
+            <div
+              key={document.id}
+              className={selected ? 'search-results-row search-results-row-selected' : 'search-results-row'}
+              role="row"
+              tabIndex={0}
+              aria-selected={selected}
+              onClick={(event) => {
+                const target = event.target as HTMLElement;
+                if (target.closest('a, button')) return;
+                onOpenResult(result);
+              }}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                  event.preventDefault();
+                  onOpenResult(result);
+                }
+              }}
+            >
+              <span className="search-results-title tooltip-overflow-cell" data-label="Title" data-tooltip={document.title ?? document.url}>
+                <strong>
+                  <span className="tooltip-overflow-text">{document.title ?? document.url}</span>
+                  <a href={document.url} target="_blank" rel="noreferrer" aria-label="Open document" onClick={(event) => event.stopPropagation()}>
+                    <ArrowUpRight size={14} />
+                  </a>
+                </strong>
+              </span>
+              <span className="search-results-one-liner tooltip-overflow-cell" data-label="One-liner" data-tooltip={resultOneLiner(result)}>
+                <span className="tooltip-overflow-text">{resultOneLiner(result)}</span>
+              </span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function SearchResultDrawer({
+  result,
+  detail,
+  loading,
+  error,
+  closing,
+  onClose,
+  onOpenProfile,
+}: {
+  result: SearchResult;
+  detail: DocumentDetail | null;
+  loading: boolean;
+  error: string | null;
+  closing: boolean;
+  onClose: () => void;
+  onOpenProfile: (sourceId: number, domain: string) => void;
+}) {
+  const document = detail ?? result.document;
+  return (
+    <aside className={closing ? 'bookshelf-detail-drawer search-result-drawer drawer-closing' : 'bookshelf-detail-drawer search-result-drawer'} aria-label="Search result details">
+      <div className="bookshelf-detail-header">
+        <div>
+          <button className="profile-link" type="button" onClick={() => onOpenProfile(document.source_id, document.source_domain)}>
+            {document.source_domain}
+          </button>
+          <h3>
+            {document.title ?? document.url}
+            <a href={document.url} target="_blank" rel="noreferrer" aria-label="Open document">
+              <ArrowUpRight size={15} />
+            </a>
+          </h3>
+        </div>
+        <button type="button" onClick={onClose} aria-label="Close details">
+          <X size={16} />
+        </button>
+      </div>
+
+      <section className="bookshelf-detail-section search-result-match">
+        <h4>Why This Result</h4>
+        <p>{naturalRelevance(result)}</p>
+      </section>
+
+      {loading && <div className="skeleton-stack" aria-label="Loading document details"><span className="skeleton-line" /><span className="skeleton-line" /><span className="skeleton-line" /></div>}
+      {error && <div className="error">{error}</div>}
+
+      {document.topics.length > 0 && (
+        <div className="bookshelf-detail-tags directory-document-drawer-tags">
+          {document.topics.map((topic) => <span key={topic}>{topic}</span>)}
+        </div>
+      )}
+
+      <section className="bookshelf-detail-section">
+        <h4>Summary</h4>
+        <p>{document.summary || document.one_liner || 'No summary yet.'}</p>
+      </section>
+
+      {detail && (
+        <div className="bookshelf-detail-reference-grid">
+          <section className="bookshelf-detail-section">
+            <h4>References</h4>
+            {detail.outgoing_links.length ? (
+              <div className="bookshelf-detail-link-list">
+                {detail.outgoing_links.slice(0, 8).map((link, index) => (
+                  <a key={`${link.target_url}-${index}`} href={link.target_url} target="_blank" rel="noreferrer">
+                    <strong>{link.anchor_text || link.target_domain || link.target_url}</strong>
+                    <small>{link.target_domain || link.target_url}</small>
+                    {link.context && <span>{link.context}</span>}
+                  </a>
+                ))}
+              </div>
+            ) : (
+              <p>No outgoing references indexed.</p>
+            )}
+          </section>
+          <section className="bookshelf-detail-section">
+            <h4>Referenced By</h4>
+            {detail.incoming_links.length ? (
+              <div className="bookshelf-detail-link-list">
+                {detail.incoming_links.slice(0, 8).map((link, index) => (
+                  <button key={`${link.source_document_id}-${index}`} type="button">
+                    <strong>{link.anchor_text || link.target_url || 'Referenced document'}</strong>
+                    <small>{link.target_url}</small>
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <p>No incoming references indexed.</p>
+            )}
+          </section>
+        </div>
+      )}
+    </aside>
+  );
+}
+
+function naturalRelevance(result: SearchResult): string {
+  const text =
+    result.document.one_liner?.trim() ||
+    result.document.summary?.trim() ||
+    cleanTechnicalReason(result.reason);
+  return truncate(text || 'This result matched the search terms and corpus context.', 180);
+}
+
+function resultOneLiner(result: SearchResult): string {
+  return truncate(result.document.one_liner?.trim() || 'No one-liner yet.', 180);
+}
+
+function cleanTechnicalReason(reason: string): string {
+  return reason
+    .replace(/^agent selected:\s*/i, '')
+    .replace(/\b(keyword|semantic|tags|categories):\s*/gi, '')
+    .replace(/\bpgvector cosine\s+\d+(?:\.\d+)?/gi, 'semantic match')
+    .replace(/\bembedding cosine\s+\d+(?:\.\d+)?/gi, 'semantic match')
+    .replace(/\bkeyword overlap\s+\d+%/gi, 'keyword match')
+    .replace(/\s*;\s*/g, ', ')
+    .trim();
+}
+
+function truncate(text: string, maxLength: number): string {
+  if (text.length <= maxLength) return text;
+  return `${text.slice(0, maxLength - 3).trimEnd()}...`;
 }
 
 function messagesFromConversation(conversation: AgentConversation): ChatMessage[] {

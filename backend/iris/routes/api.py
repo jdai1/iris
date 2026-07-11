@@ -367,7 +367,7 @@ def _dump_document_for_user(document: Document, user: User) -> DocumentSchema:
 
 def _dump_search_results_for_user(results, user: User) -> list[SearchResultSchema]:
     return [
-        SearchResultSchema(document=_dump_document_for_user(item.document, user), score=item.score, reason=item.reason)
+        SearchResultSchema(document=_dump_document_for_user(item.document, user), reason=item.reason)
         for item in results
     ]
 
@@ -376,7 +376,7 @@ def _dump_search_results(results, user: User | None = None) -> list[SearchResult
     if user:
         return _dump_search_results_for_user(results, user)
     return [
-        SearchResultSchema(document=dump_document(item.document), score=item.score, reason=item.reason)
+        SearchResultSchema(document=dump_document(item.document), reason=item.reason)
         for item in results
     ]
 
@@ -555,10 +555,8 @@ async def _agent_chat_event_chunks(event, conversation, user_message, payload: A
                 "step": _agent_step_payload(event.step),
                 "hits": [
                     {
-                        "document_id": row.document.id,
                         "title": row.document.title or row.document.url,
                         "source_domain": row.document.source.canonical_domain,
-                        "score": row.score,
                         "reason": row.reason,
                     }
                     for row in event.rows[:5]
@@ -586,7 +584,6 @@ async def _agent_chat_event_chunks(event, conversation, user_message, payload: A
                 "results": [
                     {
                         "document": _dump_document_for_user(item.document, conversation.user).model_dump(),
-                        "score": item.score,
                         "reason": item.reason,
                     }
                     for item in event.result.results
@@ -628,7 +625,7 @@ def _agent_conversation_context(conversation, *, current_user_message_id: int) -
                 if len(summary) > 260:
                     summary = f"{summary[:257]}..."
                 lines.append(
-                    f"- document_id={document.id}; title={title}; source={document.source.canonical_domain}; "
+                    f"- internal_ref={document.id}; title={title}; source={document.source.canonical_domain}; "
                     f"url={document.url}; summary={summary}"
                 )
     return "\n".join(lines)
@@ -702,7 +699,7 @@ def _dump_agent_message(message, user: User) -> AgentMessageSchema:
         created_at=message.created_at,
         steps=steps,
         results=[
-            SearchResultSchema(document=_dump_document_for_user(result.document, user), score=result.score, reason=result.reason)
+            SearchResultSchema(document=_dump_document_for_user(result.document, user), reason=result.reason)
             for result in message.results
         ],
     )

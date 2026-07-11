@@ -889,7 +889,7 @@ function BookshelfDetailDrawer({
               <div className="bookshelf-detail-link-list">
                 {detail.incoming_links.slice(0, referencedByLimit).map((link, index) => (
                   <button key={`${link.source_document_id}-${index}`} type="button">
-                    <strong>{link.anchor_text || `Document ${link.source_document_id}`}</strong>
+                    <strong>{link.anchor_text || link.target_url || 'Referenced document'}</strong>
                     <small>{link.target_url}</small>
                   </button>
                 ))}

@@ -70,8 +70,14 @@ class EmbeddingProjection:
 
 
 class AgentSearchOutput(BaseModel):
-    answer: str = Field(description="A concise conversational answer. Ask a clarifying question when the user has not given a searchable corpus request.")
+    answer: str = Field(
+        description=(
+            "One short natural-language search summary, at most two sentences. "
+            "Do not list every result; the UI renders selected documents as the primary results. "
+            "Never mention document IDs or database IDs."
+        )
+    )
     document_ids: list[int] = Field(
         default_factory=list,
-        description="Only the most relevant document ids from tool results to show as link cards. Leave empty when no documents are worth showing.",
+        description="Internal document ids from tool results for the most relevant link cards. Never mention these ids in the answer. Leave empty when no documents are worth showing.",
     )

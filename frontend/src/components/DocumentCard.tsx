@@ -8,7 +8,6 @@ import { Button, Chip, ChipList, IconButton, Panel, PopoverMenu } from './ui';
 type DocumentCardProps = {
   document: Document;
   reason: string;
-  score?: number;
   onOpenProfile?: (sourceId: number, domain: string) => void;
   compact?: boolean;
 };
@@ -16,7 +15,6 @@ type DocumentCardProps = {
 export function DocumentCard({
   document,
   reason,
-  score,
   onOpenProfile,
   compact = false,
 }: DocumentCardProps) {
@@ -143,7 +141,6 @@ export function DocumentCard({
             {document.source_domain}
           </button>
           <Text as="span">{document.document_type}</Text>
-          {typeof score === 'number' && <Text as="span">{score.toFixed(2)}</Text>}
         </HStack>
       )}
       <div className={compact ? 'document-title-row' : undefined}>

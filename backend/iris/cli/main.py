@@ -106,9 +106,7 @@ def cmd_search(args: argparse.Namespace) -> None:
         for idx, item in enumerate(ranked, start=1):
             doc = item.document
             print(f"\n{idx}. {doc.title or doc.url}")
-            print(
-                f"   {doc.source.canonical_domain} | score={item.score:.3f} | {item.reason}"
-            )
+            print(f"   {doc.source.canonical_domain} | {item.reason}")
             print(f"   {doc.url}")
             if doc.summary:
                 print(f"   {doc.summary[:260]}")

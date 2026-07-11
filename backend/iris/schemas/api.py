@@ -122,7 +122,6 @@ class DocumentDetailSchema(DocumentSchema):
 
 class SearchResultSchema(BaseModel):
     document: DocumentSchema
-    score: float
     reason: str
 
 

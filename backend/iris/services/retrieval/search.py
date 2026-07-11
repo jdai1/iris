@@ -13,6 +13,7 @@ from iris.dao import search as search_dao
 from iris.services.common.config import (
     AGENT_SEARCH_MAX_TURNS,
     AGENT_SEARCH_MODEL,
+    AGENT_SEARCH_REASONING_EFFORT,
     SEARCH_RERANK_MODEL,
     SEARCH_RERANK_TIMEOUT_SECONDS,
     USE_LLM_RERANKER,
@@ -26,7 +27,7 @@ from iris.schemas.retrieval import AgentChatResult, AgentChatStreamEvent, AgentS
 
 AGENT_RESULT_SAFETY_CAP = 20
 AGENT_INSTRUCTIONS = (
-    "You answer in English over a personal corpus of indexed blogs and essays. "
+    "You are the search intelligence for Iris, a personal corpus search engine for indexed blogs and essays. "
     "You have retrieval tools plus metadata tools: keyword_search, semantic_search, tag_search, category_search, "
     "get_document_metadata, and get_source_metadata. "
     "Do not call retrieval tools for greetings, small talk, vague fragments, or messages where the user's search intent is unclear. "
@@ -44,11 +45,18 @@ AGENT_INSTRUCTIONS = (
     "When recall matters or initial hits are thin or noisy, try 2-4 distinct standalone query formulations before answering. "
     "Keep alternate queries narrow and anchored to the user's intent rather than using generic category searches as filler. "
     "Ask a clarifying question only when the full conversation still does not contain a workable search intent. "
-    "If the user asks about a previously recommended document, use its document_id from context and call get_document_metadata before answering. "
+    "If the user asks about a previously recommended document, use its internal ref from context and call get_document_metadata before answering. "
     "Use get_source_metadata when the user asks about a blog/source rather than one post. "
     "When the user gives a clear corpus search request, call at least one retrieval tool before answering. "
     "Use more than one tool or query when it improves recall or disambiguation. "
     "Only cite documents returned by tools. Return document_ids only for documents that are clearly relevant enough to show as link cards. "
+    "Document IDs and database IDs are internal handles only: never mention them in answer text, explanations, or user-facing tool summaries. "
+    "The UI will show the search results. Your answer should not be the main artifact. "
+    "For normal search requests, write one short natural-language summary sentence, at most two sentences. "
+    "Briefly describe what the results seem to contain and any important mismatch or caveat. "
+    "If the matches are only adjacent, broad, or weak, say that directly: 'I did not find a strong direct match; these are the closest results I found.' "
+    "Do not write a checklist, essay, or bullet list of every result. Do not repeat titles unless it is necessary to disambiguate. "
+    "When good matches exist, let document_ids carry the results. "
     "Before finalizing, compare the user's exact query against every document_id you are about to return. "
     "Your final document_ids are the relevance filter: selectively remove cards that are adjacent, broader, candidate-oriented, behavioral, generic process, "
     "or about a different subtype than requested, even if those cards appeared high in tool results. "
@@ -254,7 +262,7 @@ async def stream_openai_agentic_chat(
         model=AGENT_SEARCH_MODEL,
         output_type=AgentSearchOutput,
         instructions=AGENT_INSTRUCTIONS,
-        model_settings=ModelSettings(tool_choice="auto"),
+        model_settings=ModelSettings(tool_choice="auto", reasoning={"effort": AGENT_SEARCH_REASONING_EFFORT}),
         tools=[
             keyword_search,
             semantic_search,
@@ -407,7 +415,7 @@ def _openai_agentic_chat(
         model=AGENT_SEARCH_MODEL,
         output_type=AgentSearchOutput,
         instructions=AGENT_INSTRUCTIONS,
-        model_settings=ModelSettings(tool_choice="auto"),
+        model_settings=ModelSettings(tool_choice="auto", reasoning={"effort": AGENT_SEARCH_REASONING_EFFORT}),
         tools=[
             keyword_search,
             semantic_search,
@@ -736,10 +744,11 @@ def _category_query_terms(query_terms: set[str]) -> set[str]:
 
 def _tool_step(tool: AgentToolName, query: str, rows: list[RankedDocument]) -> AgentStep:
     if tool == AgentToolName.DOCUMENT_METADATA:
+        title = rows[0].document.title or rows[0].document.url if rows else "Document details"
         return AgentStep(
             kind=AgentStepKind.TOOL,
             title="Inspect document",
-            detail=f"document_id={query}",
+            detail=title,
             tool=tool,
             query=query,
             hits=None,
