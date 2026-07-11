@@ -1,5 +1,7 @@
 from datetime import datetime, timedelta, timezone
 
+from uuid import UUID
+
 from fastapi.testclient import TestClient
 
 from iris.models import CrawlJob, IndexRun
@@ -226,8 +228,10 @@ def test_agent_chat_persists_conversation_and_results(session, monkeypatch):
     assert first.status_code == 200
     first_body = first.json()
     assert first_body["conversation_id"] > 0
+    conversation_uuid = str(UUID(first_body["conversation_uuid"]))
     assert first_body["assistant_message_id"] > first_body["user_message_id"]
     assert first_body["results"][0]["document"]["title"] == "Choosing a company"
+    assert str(UUID(first_body["results"][0]["document"]["uuid"]))
     assert {step["kind"] for step in first_body["steps"]} >= {"plan", "tool", "answer"}
 
     second = client.post(
@@ -235,31 +239,35 @@ def test_agent_chat_persists_conversation_and_results(session, monkeypatch):
         json={
             "message": "what about learning trajectory?",
             "limit": 5,
-            "conversation_id": first_body["conversation_id"],
+            "conversation_uuid": first_body["conversation_uuid"],
         },
         headers=headers,
     )
     assert second.status_code == 200
     assert second.json()["conversation_id"] == first_body["conversation_id"]
+    assert second.json()["conversation_uuid"] == first_body["conversation_uuid"]
     assert session_ids == [
-        f"search:{first_body['conversation_id']}",
-        f"search:{first_body['conversation_id']}",
+        f"search:{conversation_uuid}",
+        f"search:{conversation_uuid}",
     ]
     assert trace_metadata_values[0] is not None
     assert user_ids == [str(trace_metadata_values[0]["iris_user_id"]), str(trace_metadata_values[0]["iris_user_id"])]
     assert trace_metadata_values[0]["conversation_id"] == first_body["conversation_id"]
-    assert trace_metadata_values[0]["conversation_uuid"] == f"search:{first_body['conversation_id']}"
+    assert trace_metadata_values[0]["conversation_uuid"] == first_body["conversation_uuid"]
     assert trace_metadata_values[0]["user_uuid"] == str(trace_metadata_values[0]["iris_user_id"])
     assert trace_metadata_values[0]["firebase_uid"] == "agent-user"
 
     conversations = client.get("/api/agent-conversations", headers=headers)
     assert conversations.status_code == 200
     assert conversations.json()[0]["id"] == first_body["conversation_id"]
+    assert conversations.json()[0]["uuid"] == first_body["conversation_uuid"]
     assert conversations.json()[0]["message_count"] == 4
 
-    replay = client.get(f"/api/agent-conversations/{first_body['conversation_id']}", headers=headers)
+    replay = client.get(f"/api/agent-conversations/{first_body['conversation_uuid']}", headers=headers)
     assert replay.status_code == 200
     replay_body = replay.json()
+    assert replay_body["id"] == first_body["conversation_id"]
+    assert replay_body["uuid"] == first_body["conversation_uuid"]
     assert [message["role"] for message in replay_body["messages"]] == ["user", "assistant", "user", "assistant"]
     assert replay_body["messages"][1]["results"][0]["document"]["title"] == "Choosing a company"
 
@@ -327,6 +335,7 @@ def test_agent_conversations_are_scoped_to_firebase_user(session, monkeypatch):
     )
     assert first_history.status_code == 200
     assert first_history.json()[0]["id"] == first.json()["conversation_id"]
+    assert first_history.json()[0]["uuid"] == first.json()["conversation_uuid"]
 
 
 def test_embedding_map_api_projects_embedded_documents(session):

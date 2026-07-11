@@ -1,3 +1,4 @@
+import json
 from datetime import datetime, timezone
 
 from iris.dao import bookshelf
@@ -13,10 +14,17 @@ from iris.services.common.langfuse_tracing import (
 )
 from iris.schemas.enums import AgentToolName
 from iris.schemas.retrieval import AgentToolRun, RankedDocument
-from iris.services.retrieval.search import AGENT_INSTRUCTIONS, _rank_agent_documents, search_documents
+from iris.services.retrieval.search import (
+    AGENT_INSTRUCTIONS,
+    _document_search_payload,
+    _keyword_score,
+    _rank_agent_documents,
+    _serialize_document_metadata,
+    search_documents,
+)
 
 
-def add_doc(session, source, title, text, *, content_hash=None):
+def add_doc(session, source, title, text, *, content_hash=None, one_liner=None, audience=None, takeaways=None):
     return upsert_document(
         source=source,
         url=f"https://{source.canonical_domain}/{title.lower().replace(' ', '-')}",
@@ -27,6 +35,9 @@ def add_doc(session, source, title, text, *, content_hash=None):
         published_at=None,
         extracted_text=text,
         summary=text[:240],
+        one_liner=one_liner,
+        audience=audience,
+        takeaways=takeaways,
         topics=["teams", "software"],
         embedding=dumps_embedding(embed_text(text)),
         content_hash=content_hash or title,
@@ -40,6 +51,59 @@ def test_search_ranks_relevant_documents(session):
     _search, results = search_documents("why are small teams effective", limit=2)
     assert results
     assert results[0].document.title == "Small teams"
+
+
+def test_agent_document_payload_includes_structured_summary_fields(session):
+    source = get_or_create_source("https://a.test", status="indexed")
+    document = add_doc(
+        session,
+        source,
+        "Behavioral interviews",
+        "interview loops and calibration",
+        one_liner="Describes how to run calibrated behavioral interviews.",
+        audience="Engineering managers and interviewers.",
+        takeaways=["Interview evidence should map to clear competencies."],
+    )
+
+    payload = _document_search_payload(document)
+
+    assert payload["one_liner"] == "Describes how to run calibrated behavioral interviews."
+    assert payload["audience"] == "Engineering managers and interviewers."
+    assert payload["takeaways"] == ["Interview evidence should map to clear competencies."]
+
+
+def test_agent_document_metadata_includes_structured_summary_fields(session):
+    source = get_or_create_source("https://a.test", status="indexed")
+    document = add_doc(
+        session,
+        source,
+        "Behavioral interviews",
+        "interview loops and calibration",
+        one_liner="Describes how to run calibrated behavioral interviews.",
+        audience="Engineering managers and interviewers.",
+        takeaways=["Interview evidence should map to clear competencies."],
+    )
+
+    metadata = json.loads(_serialize_document_metadata(document))
+
+    assert metadata["one_liner"] == "Describes how to run calibrated behavioral interviews."
+    assert metadata["audience"] == "Engineering managers and interviewers."
+    assert metadata["takeaways"] == ["Interview evidence should map to clear competencies."]
+
+
+def test_keyword_score_matches_structured_summary_fields(session):
+    source = get_or_create_source("https://a.test", status="indexed")
+    document = add_doc(
+        session,
+        source,
+        "Hiring notes",
+        "interview loops and calibration",
+        one_liner="Describes hiring signal design.",
+        audience="Engineering managers and interviewers.",
+        takeaways=["Rubrics help convert interview evidence into decisions."],
+    )
+
+    assert _keyword_score({"rubrics", "managers"}, document) == 1.0
 
 
 def test_langfuse_trace_noops_without_keys(monkeypatch):

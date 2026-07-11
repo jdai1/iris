@@ -17,8 +17,8 @@ def langfuse_enabled() -> bool:
     return bool(os.getenv("LANGFUSE_PUBLIC_KEY") and os.getenv("LANGFUSE_SECRET_KEY"))
 
 
-def agent_conversation_session_id(conversation_id: int) -> str:
-    return f"search:{conversation_id}"
+def agent_conversation_session_id(conversation_identifier: int | str) -> str:
+    return f"search:{conversation_identifier}"
 
 
 def agent_user_id(user_id: int) -> str:
@@ -28,13 +28,14 @@ def agent_user_id(user_id: int) -> str:
 def agent_trace_metadata(
     *,
     conversation_id: int,
+    conversation_uuid: str,
     user_id: int,
     firebase_uid: str | None = None,
 ) -> dict[str, object]:
     trace_user_id = agent_user_id(user_id)
     metadata: dict[str, object] = {
         "conversation_id": conversation_id,
-        "conversation_uuid": agent_conversation_session_id(conversation_id),
+        "conversation_uuid": conversation_uuid,
         "iris_user_id": user_id,
         "user_uuid": trace_user_id,
     }

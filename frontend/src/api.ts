@@ -104,17 +104,17 @@ function clearConversationCache() {
   clearCachePrefix('agent-conversations:');
 }
 
-export function chatSearch(message: string, conversationId?: number): Promise<AgentChatResponse> {
+export function chatSearch(message: string, conversationUuid?: string): Promise<AgentChatResponse> {
   clearConversationCache();
   return request<AgentChatResponse>('/api/agent-chat', {
     method: 'POST',
-    body: JSON.stringify({ message, conversation_id: conversationId }),
+    body: JSON.stringify({ message, conversation_uuid: conversationUuid }),
   });
 }
 
 export async function streamChatSearch(
   message: string,
-  conversationId: number | undefined,
+  conversationUuid: string | undefined,
   onEvent: (event: AgentStreamEvent) => void,
   signal?: AbortSignal,
 ): Promise<void> {
@@ -122,7 +122,7 @@ export async function streamChatSearch(
   const response = await fetch(`${API_BASE}/api/agent-chat/stream`, {
     method: 'POST',
     headers: await requestHeaders(),
-    body: JSON.stringify({ message, conversation_id: conversationId }),
+    body: JSON.stringify({ message, conversation_uuid: conversationUuid }),
     signal,
   });
   if (!response.ok || !response.body) {
@@ -172,8 +172,8 @@ export function getAgentConversations(params: { limit?: number; offset?: number;
   );
 }
 
-export function getAgentConversation(conversationId: number): Promise<AgentConversation> {
-  return cachedRequest<AgentConversation>(`agent-conversations:detail:${conversationId}`, `/api/agent-conversations/${conversationId}`);
+export function getAgentConversation(conversationUuid: string): Promise<AgentConversation> {
+  return cachedRequest<AgentConversation>(`agent-conversations:detail:${conversationUuid}`, `/api/agent-conversations/${conversationUuid}`);
 }
 
 export function searchCorpus(query: string, limit = 50): Promise<SearchResponse> {

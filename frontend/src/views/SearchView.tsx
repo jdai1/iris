@@ -16,13 +16,13 @@ type ChatMessage = {
   pending?: boolean;
 };
 
-const ACTIVE_CHAT_STORAGE_KEY = 'iris.activeChatId';
+const ACTIVE_CHAT_STORAGE_KEY = 'iris.activeChatUuid';
 const SEARCH_RELOAD_STORAGE_KEY = 'iris.searchReloading';
 const HISTORY_PAGE_SIZE = 15;
 
 export function SearchView({ onOpenProfile }: { onOpenProfile: (sourceId: number, domain: string) => void }) {
   const [query, setQuery] = useState('');
-  const [conversationId, setConversationId] = useState<number | undefined>();
+  const [conversationId, setConversationId] = useState<string | undefined>();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [history, setHistory] = useState<AgentConversationSummary[]>([]);
   const [historyQuery, setHistoryQuery] = useState('');
@@ -142,8 +142,8 @@ export function SearchView({ onOpenProfile }: { onOpenProfile: (sourceId: number
       const items = await getAgentConversations({ limit: HISTORY_PAGE_SIZE });
       setHistory(items);
       setHistoryHasMore(items.length === HISTORY_PAGE_SIZE);
-      const activeChatId = Number(window.sessionStorage.getItem(ACTIVE_CHAT_STORAGE_KEY));
-      if (shouldRestoreConversation.current && Number.isFinite(activeChatId) && activeChatId > 0) {
+      const activeChatId = window.sessionStorage.getItem(ACTIVE_CHAT_STORAGE_KEY);
+      if (shouldRestoreConversation.current && activeChatId) {
         await loadConversation(activeChatId);
       }
     } catch {
@@ -153,12 +153,12 @@ export function SearchView({ onOpenProfile }: { onOpenProfile: (sourceId: number
     }
   }
 
-  async function loadConversation(id: number) {
+  async function loadConversation(id: string) {
     if (loading) return;
     setError(null);
     try {
       const conversation = await getAgentConversation(id);
-      setConversationId(conversation.id);
+      setConversationId(conversation.uuid);
       setStartedNewChat(false);
       setMessages(messagesFromConversation(conversation));
     } catch (err) {
@@ -200,7 +200,7 @@ export function SearchView({ onOpenProfile }: { onOpenProfile: (sourceId: number
     try {
       await streamChatSearch(message, conversationId, (event) => {
         if (event.event === 'conversation') {
-          setConversationId(event.data.conversation_id);
+          setConversationId(event.data.conversation_uuid);
           return;
         }
         if (event.event === 'step') {
@@ -317,10 +317,10 @@ export function SearchView({ onOpenProfile }: { onOpenProfile: (sourceId: number
             {!historyLoading &&
               history.map((item) => (
                 <button
-                  key={item.id}
-                  className={item.id === conversationId ? 'chat-history-item chat-history-item-active' : 'chat-history-item'}
+                  key={item.uuid}
+                  className={item.uuid === conversationId ? 'chat-history-item chat-history-item-active' : 'chat-history-item'}
                   type="button"
-                  onClick={() => loadConversation(item.id)}
+                  onClick={() => loadConversation(item.uuid)}
                 >
                   <span>{item.title || 'Untitled search'}</span>
                 </button>
