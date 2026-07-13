@@ -1,15 +1,18 @@
-import { FormEvent, useEffect, useRef, useState } from 'react';
+import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { Box } from '@chakra-ui/react';
 import { ArrowUpRight } from 'lucide-react';
-import { getAdminDocuments, getAdminSources, getDirectorySources, getDocument, getSourceProfileAnalysis } from '../api';
+import { getAdminDocuments, getAdminSources, getBookshelfCollections, getDirectorySources, getGraph, getSourceProfileAnalysis } from '../api';
 import { emptyPage } from '../app/paging';
-import type { ProfileTarget } from '../app/navigation';
+import { documentPath, navigateTo, type ProfileTarget } from '../app/navigation';
 import { CorpusSearchForm } from '../CorpusSearchForm';
 import { DenseDocumentTable } from '../components/DenseDocumentTable';
+import { OverflowText } from '../components/OverflowText';
 import { ProfilePagination, type PageState } from '../components/Pagination';
 import { ProfileAnalysisCard } from '../components/ProfileAnalysisCard';
 import { Button, StateMessage } from '../components/ui';
-import type { AdminSource, DirectorySource, DirectorySourceSort, Document, DocumentDetail, Page, SortDirection, SourceProfileAnalysis } from '../types';
+import type { AdminSource, BookshelfCollection, BookshelfEntry, DirectorySource, DirectorySourceSort, Document, GraphEdge, GraphNode, GraphResponse, Page, SortDirection, SourceProfileAnalysis } from '../types';
+
+type SourceProfileTab = 'profile' | 'essays' | 'collections';
 
 function defaultDirectorySortDirection(sort: DirectorySourceSort): SortDirection {
   return sort === 'source' ? 'asc' : 'desc';
@@ -29,11 +32,6 @@ function formatDirectoryDate(value: string | null) {
   return new Date(value).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
-function formatYield(source: DirectorySource) {
-  if (!source.document_count) return '-';
-  return `${Math.round((source.essay_count / source.document_count) * 100)}%`;
-}
-
 export function DirectoryView({
   target,
   onOpenProfile,
@@ -46,15 +44,13 @@ export function DirectoryView({
   const [query, setQuery] = useState(target?.domain ?? '');
   const [selectedSource, setSelectedSource] = useState<AdminSource | null>(null);
   const [directoryPage, setDirectoryPage] = useState<Page<DirectorySource>>(emptyPage);
-  const [directorySort, setDirectorySort] = useState<DirectorySourceSort>('inbound');
+  const [directorySort, setDirectorySort] = useState<DirectorySourceSort>('essays');
   const [directorySortDirection, setDirectorySortDirection] = useState<SortDirection>('desc');
   const [documentsPage, setDocumentsPage] = useState<Page<Document>>(emptyPage);
   const [profileAnalysis, setProfileAnalysis] = useState<SourceProfileAnalysis | null>(null);
-  const [drawerDocument, setDrawerDocument] = useState<Document | null>(null);
-  const [drawerDetail, setDrawerDetail] = useState<DocumentDetail | null>(null);
-  const [drawerLoading, setDrawerLoading] = useState(false);
-  const [drawerError, setDrawerError] = useState<string | null>(null);
-  const [drawerClosing, setDrawerClosing] = useState(false);
+  const [profileCollections, setProfileCollections] = useState<BookshelfCollection[]>([]);
+  const [profileGraph, setProfileGraph] = useState<GraphResponse | null>(null);
+  const [activeProfileTab, setActiveProfileTab] = useState<SourceProfileTab>('profile');
   const [selected, setSelected] = useState<ProfileTarget>(target);
   const [documentPageState, setDocumentPageState] = useState<PageState>({ limit: 50, offset: 0 });
   const [directoryPageState, setDirectoryPageState] = useState<PageState>({ limit: 50, offset: 0 });
@@ -62,18 +58,25 @@ export function DirectoryView({
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const didLoadDirectoryRef = useRef(false);
-  const drawerCloseTimeoutRef = useRef<number | null>(null);
+  const profileCollectionGroups = useMemo(
+    () => selected ? sourceCollectionGroups(profileCollections, selected.sourceId, selected.domain) : [],
+    [profileCollections, selected?.sourceId, selected?.domain],
+  );
+  const hasProfileEssays = documentsPage.total > 0;
+  const profileNetwork = useMemo(
+    () => selected && profileGraph ? sourceNetwork(profileGraph, `source:${selected.sourceId}`) : { inbound: [], outbound: [] },
+    [profileGraph, selected?.sourceId],
+  );
+
+  useEffect(() => {
+    if (activeProfileTab === 'collections' && profileCollectionGroups.length === 0) setActiveProfileTab('profile');
+    if (activeProfileTab === 'essays' && !hasProfileEssays) setActiveProfileTab('profile');
+  }, [activeProfileTab, hasProfileEssays, profileCollectionGroups.length]);
 
   useEffect(() => {
     setSelected(target);
     if (target) setQuery(target.domain);
   }, [target?.sourceId, target?.domain]);
-
-  useEffect(() => {
-    return () => {
-      if (drawerCloseTimeoutRef.current !== null) window.clearTimeout(drawerCloseTimeoutRef.current);
-    };
-  }, []);
 
   async function refresh(
     nextQuery = query,
@@ -102,6 +105,8 @@ export function DirectoryView({
         setSelected(null);
         setDocumentsPage(emptyPage<Document>());
         setProfileAnalysis(null);
+        setProfileCollections([]);
+        setProfileGraph(null);
         return;
       }
       const sources = await getAdminSources({ status: 'indexed', q: normalizedQuery, limit: 25 });
@@ -114,14 +119,18 @@ export function DirectoryView({
       setSelectedSource(source);
       setSelected(nextProfile);
       if (source && !nextSelected) setQuery(source.canonical_domain);
-      const [documents, analysis] = nextProfile
+      const [documents, analysis, collections, graph] = nextProfile
         ? await Promise.all([
             getAdminDocuments({ ...nextPage, sourceId: nextProfile.sourceId, documentType: 'essay' }),
             getSourceProfileAnalysis(nextProfile.sourceId).catch(() => null),
+            getBookshelfCollections().catch(() => []),
+            getGraph({ mode: 'sources', sourceId: nextProfile.sourceId, limit: 80, depth: 1 }).catch(() => null),
           ])
-        : [emptyPage<Document>(), null];
+        : [emptyPage<Document>(), null, [], null];
       setDocumentsPage(documents);
       setProfileAnalysis(analysis);
+      setProfileCollections(collections);
+      setProfileGraph(graph);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Directory failed');
     } finally {
@@ -149,30 +158,6 @@ export function DirectoryView({
     return () => window.clearTimeout(timeout);
   }, [query, selected?.domain]);
 
-  useEffect(() => {
-    if (!drawerDocument) {
-      setDrawerDetail(null);
-      setDrawerError(null);
-      return;
-    }
-    let cancelled = false;
-    setDrawerLoading(true);
-    setDrawerError(null);
-    getDocument(drawerDocument.id)
-      .then((detail) => {
-        if (!cancelled) setDrawerDetail(detail);
-      })
-      .catch((err) => {
-        if (!cancelled) setDrawerError(err instanceof Error ? err.message : 'Could not load document');
-      })
-      .finally(() => {
-        if (!cancelled) setDrawerLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [drawerDocument?.id]);
-
   function submit(event: FormEvent) {
     event.preventDefault();
     const nextPage = { limit: documentPageState.limit, offset: 0 };
@@ -191,6 +176,7 @@ export function DirectoryView({
     const nextProfile = { sourceId: source.id, domain: source.canonical_domain };
     setQuery(source.canonical_domain);
     setSelected(nextProfile);
+    setActiveProfileTab('profile');
     setDocumentPageState(nextPage);
     refresh(source.canonical_domain, nextProfile, nextPage);
     onOpenProfile(source.id, source.canonical_domain);
@@ -226,7 +212,9 @@ export function DirectoryView({
     setSelected(null);
     setSelectedSource(null);
     setProfileAnalysis(null);
-    setDrawerDocument(null);
+    setProfileCollections([]);
+    setProfileGraph(null);
+    setActiveProfileTab('profile');
     setDocumentsPage(emptyPage<Document>());
     setQuery('');
     onDirectoryRoot();
@@ -236,20 +224,7 @@ export function DirectoryView({
   }
 
   function openDirectoryDrawer(document: Document) {
-    if (drawerCloseTimeoutRef.current !== null) window.clearTimeout(drawerCloseTimeoutRef.current);
-    drawerCloseTimeoutRef.current = null;
-    setDrawerClosing(false);
-    setDrawerDocument(document);
-  }
-
-  function closeDirectoryDrawer() {
-    if (!drawerDocument || drawerClosing) return;
-    setDrawerClosing(true);
-    drawerCloseTimeoutRef.current = window.setTimeout(() => {
-      setDrawerDocument(null);
-      setDrawerClosing(false);
-      drawerCloseTimeoutRef.current = null;
-    }, 190);
+    navigateTo(documentPath(document.id));
   }
 
   return (
@@ -270,7 +245,7 @@ export function DirectoryView({
       )}
 
       {error && <StateMessage className="error" tone="error">{error}</StateMessage>}
-      {loading && <TableSkeleton columns={8} rows={10} />}
+      {loading && <TableSkeleton columns={7} rows={10} />}
 
       {!loading && !selected && (
         <div className="directory-table-panel">
@@ -278,12 +253,11 @@ export function DirectoryView({
             <div className="directory-table-row directory-table-head" role="row">
               <Button uiVariant="rowAction" type="button" onClick={() => updateDirectorySort('source')}>{directorySortLabel('Source', 'source', directorySort, directorySortDirection)}</Button>
               <span>About</span>
-              <Button uiVariant="rowAction" type="button" onClick={() => updateDirectorySort('inbound')}>{directorySortLabel('In', 'inbound', directorySort, directorySortDirection)}</Button>
-              <Button uiVariant="rowAction" type="button" onClick={() => updateDirectorySort('outbound')}>{directorySortLabel('Out', 'outbound', directorySort, directorySortDirection)}</Button>
               <Button uiVariant="rowAction" type="button" onClick={() => updateDirectorySort('essays')}>{directorySortLabel('Essays', 'essays', directorySort, directorySortDirection)}</Button>
+              <Button uiVariant="rowAction" type="button" onClick={() => updateDirectorySort('essay_references')} data-tooltip="Distinct indexed essays referenced by this source">{directorySortLabel('Essay refs', 'essay_references', directorySort, directorySortDirection)}</Button>
+              <Button uiVariant="rowAction" type="button" onClick={() => updateDirectorySort('external_sources')} data-tooltip="Distinct external indexed sources referenced by this source">{directorySortLabel('Sources', 'external_sources', directorySort, directorySortDirection)}</Button>
               <Button uiVariant="rowAction" type="button" onClick={() => updateDirectorySort('documents')}>{directorySortLabel('Docs', 'documents', directorySort, directorySortDirection)}</Button>
-              <span>Yield</span>
-              <Button uiVariant="rowAction" type="button" onClick={() => updateDirectorySort('recent')}>{directorySortLabel('Checked', 'recent', directorySort, directorySortDirection)}</Button>
+              <Button uiVariant="rowAction" type="button" onClick={() => updateDirectorySort('recent')}>{directorySortLabel('Updated', 'recent', directorySort, directorySortDirection)}</Button>
             </div>
             {directoryPage.items.map((source) => (
               <div key={source.id} className="directory-table-row" role="button" tabIndex={0} onClick={() => selectDirectorySource(source)} onKeyDown={(event) => {
@@ -295,25 +269,22 @@ export function DirectoryView({
                     <ArrowUpRight size={15} />
                   </a>
                 </span>
-                <span className="directory-description-cell tooltip-overflow-cell" data-label="About" data-tooltip={source.description || source.name || 'No description'}>
-                  <span className="tooltip-overflow-text">{source.description || source.name || '-'}</span>
-                </span>
-                <span className="directory-stat-pair" data-label="In">
-                  <strong>{formatCompactCount(source.inbound_count)}</strong>
-                </span>
-                <span className="directory-stat-pair" data-label="Out">
-                  <strong>{formatCompactCount(source.outbound_count)}</strong>
+                <span className="directory-description-cell tooltip-overflow-cell" data-label="About">
+                  <OverflowText>{source.description || source.name || '-'}</OverflowText>
                 </span>
                 <span className="directory-stat-pair" data-label="Essays">
                   <strong>{formatCompactCount(source.essay_count)}</strong>
                 </span>
+                <span className="directory-stat-pair" data-label="Essay refs">
+                  <strong>{formatCompactCount(source.essay_reference_count)}</strong>
+                </span>
+                <span className="directory-stat-pair" data-label="Sources">
+                  <strong>{formatCompactCount(source.external_source_count)}</strong>
+                </span>
                 <span className="directory-stat-pair" data-label="Docs">
                   <strong>{formatCompactCount(source.document_count)}</strong>
                 </span>
-                <span className="directory-stat-pair" data-label="Yield">
-                  <strong>{formatYield(source)}</strong>
-                </span>
-                <span className="directory-stat-pair" data-label="Checked">
+                <span className="directory-stat-pair" data-label="Updated">
                   <strong>{formatDirectoryDate(source.last_checked_at)}</strong>
                 </span>
               </div>
@@ -327,31 +298,60 @@ export function DirectoryView({
         <div className="profile-panel directory-profile-page">
           <div className="profile-heading">
             <div>
-              <h3>{profileAnalysis?.display_name || selectedSource?.canonical_domain || selected.domain}</h3>
+              <h3>
+                <span>{profileAnalysis?.display_name || selectedSource?.canonical_domain || selected.domain}</span>
+                <a href={selectedSource?.url ?? `https://${selected.domain}`} target="_blank" rel="noreferrer" aria-label="Open source">
+                  <ArrowUpRight size={16} />
+                </a>
+              </h3>
               {profileAnalysis?.display_name && profileAnalysis.display_name !== selected.domain && <p>{selectedSource?.canonical_domain ?? selected.domain}</p>}
             </div>
-            <a href={selectedSource?.url ?? `https://${selected.domain}`} target="_blank" rel="noreferrer">
-              <ArrowUpRight size={16} />
-            </a>
           </div>
-          <ProfileAnalysisCard analysis={profileAnalysis} />
-          <div className="profile-documents">
-            <DirectoryDocumentTable documents={documentsPage.items} onOpenDocument={openDirectoryDrawer} />
+          <div className="profile-tabs" role="tablist" aria-label="Source profile sections">
+            <button className={activeProfileTab === 'profile' ? 'profile-tab profile-tab-active' : 'profile-tab'} type="button" role="tab" aria-selected={activeProfileTab === 'profile'} onClick={() => setActiveProfileTab('profile')}>
+              Profile
+            </button>
+            {hasProfileEssays && (
+              <button
+                className={activeProfileTab === 'essays' ? 'profile-tab profile-tab-active' : 'profile-tab'}
+                type="button"
+                role="tab"
+                aria-selected={activeProfileTab === 'essays'}
+                onClick={() => setActiveProfileTab('essays')}
+              >
+                Essays <span>{documentsPage.total}</span>
+              </button>
+            )}
+            {profileCollectionGroups.length > 0 && (
+              <button
+                className={activeProfileTab === 'collections' ? 'profile-tab profile-tab-active' : 'profile-tab'}
+                type="button"
+                role="tab"
+                aria-selected={activeProfileTab === 'collections'}
+                onClick={() => setActiveProfileTab('collections')}
+              >
+                Collections <span>{profileCollectionGroups.length}</span>
+              </button>
+            )}
           </div>
-          <ProfilePagination page={documentsPage} onChange={pageProfileDocuments} />
+          {activeProfileTab === 'profile' && (
+            <div className="profile-overview-grid">
+              <ProfileAnalysisCard analysis={profileAnalysis} />
+              <SourceNetworkPanel inbound={profileNetwork.inbound} outbound={profileNetwork.outbound} onOpenProfile={onOpenProfile} />
+            </div>
+          )}
+          {activeProfileTab === 'essays' && (
+            <>
+              <div className="profile-documents">
+                <DirectoryDocumentTable documents={documentsPage.items} onOpenDocument={openDirectoryDrawer} />
+              </div>
+              <ProfilePagination page={documentsPage} onChange={pageProfileDocuments} />
+            </>
+          )}
+          {activeProfileTab === 'collections' && (
+            <SourceCollectionsTab groups={profileCollectionGroups} onOpenDocument={openDirectoryDrawer} />
+          )}
         </div>
-      )}
-      {drawerDocument && (
-        <>
-          <button className={drawerClosing ? 'drawer-backdrop drawer-closing' : 'drawer-backdrop'} type="button" aria-label="Close details" onClick={closeDirectoryDrawer} />
-          <DirectoryDocumentDrawer
-            document={drawerDetail ?? drawerDocument}
-            loading={drawerLoading}
-            error={drawerError}
-            closing={drawerClosing}
-            onClose={closeDirectoryDrawer}
-          />
-        </>
       )}
     </Box>
   );
@@ -367,89 +367,151 @@ function DirectoryDocumentTable({ documents, onOpenDocument }: { documents: Docu
       }))}
       ariaLabel="Source documents"
       showNote={false}
+      showSource={false}
       onPrimaryClick={(row) => onOpenDocument(row.document)}
     />
   );
 }
 
-function DirectoryDocumentDrawer({
-  document,
-  loading,
-  error,
-  closing,
-  onClose,
+function sourceCollectionGroups(collections: BookshelfCollection[], sourceId: number, domain: string): Array<{ collection: BookshelfCollection; items: BookshelfEntry[] }> {
+  return collections
+    .map((collection) => ({
+      collection,
+      items: collection.items.filter((entry) => entry.document.source_id === sourceId || entry.document.source_domain === domain),
+    }))
+    .filter((group) => group.items.length > 0)
+    .sort((a, b) => b.items.length - a.items.length || a.collection.name.localeCompare(b.collection.name));
+}
+
+function SourceCollectionsTab({
+  groups,
+  onOpenDocument,
 }: {
-  document: Document | DocumentDetail;
-  loading: boolean;
-  error: string | null;
-  closing: boolean;
-  onClose: () => void;
+  groups: Array<{ collection: BookshelfCollection; items: BookshelfEntry[] }>;
+  onOpenDocument: (document: Document) => void;
 }) {
-  const detail = 'outgoing_links' in document ? document : null;
+  if (!groups.length) {
+    return (
+      <StateMessage className="profile-tab-empty">
+        No collections include documents from this source.
+      </StateMessage>
+    );
+  }
+
   return (
-    <aside className={closing ? 'bookshelf-detail-drawer directory-document-drawer drawer-closing' : 'bookshelf-detail-drawer directory-document-drawer'} aria-label="Directory document details">
-      <div className="bookshelf-detail-header">
-        <div>
-          <span>{document.source_domain}</span>
-          <h3>
-            {document.title ?? document.url}
-            <a href={document.url} target="_blank" rel="noreferrer" aria-label="Open document">
-              <ArrowUpRight size={15} />
-            </a>
-          </h3>
-        </div>
-        <button type="button" onClick={onClose} aria-label="Close details">×</button>
-      </div>
-
-      {loading && <div className="skeleton-stack" aria-label="Loading document details"><span className="skeleton-line" /><span className="skeleton-line" /><span className="skeleton-line" /></div>}
-      {error && <StateMessage className="error" tone="error">{error}</StateMessage>}
-
-      {document.topics.length > 0 && (
-        <div className="bookshelf-detail-tags directory-document-drawer-tags">
-          {document.topics.map((topic) => <span key={topic}>{topic}</span>)}
-        </div>
-      )}
-
-      <section className="bookshelf-detail-section">
-        <h4>Summary</h4>
-        <p>{document.summary || 'No summary yet.'}</p>
-      </section>
-
-      <div className="bookshelf-detail-reference-grid">
-        <section className="bookshelf-detail-section">
-          <h4>References</h4>
-          {detail?.outgoing_links.length ? (
-            <div className="bookshelf-detail-link-list">
-              {detail.outgoing_links.map((link, index) => (
-                <a key={`${link.target_url}-${index}`} href={link.target_url} target="_blank" rel="noreferrer">
-                  <strong>{link.anchor_text || link.target_domain || link.target_url}</strong>
-                  <small>{link.target_domain || link.target_url}</small>
-                  {link.context && <span>{link.context}</span>}
-                </a>
-              ))}
-            </div>
-          ) : (
-            <p>No outgoing references indexed.</p>
-          )}
+    <div className="profile-collection-list">
+      {groups.map(({ collection, items }) => (
+        <section className="profile-collection-group" key={collection.id}>
+          <div className="profile-collection-heading">
+            <strong>{collection.name}</strong>
+            <span>{items.length}</span>
+          </div>
+          <DenseDocumentTable
+            rows={items.map((entry) => ({
+              document: entry.document,
+              tags: entry.tags.length ? entry.tags : entry.document.topics,
+              date: formatDirectoryDate(entry.read_at ?? entry.first_seen_at ?? entry.favorited_at ?? entry.document.published_at),
+            }))}
+            ariaLabel={`${collection.name} documents from this source`}
+            showNote={false}
+            showSource={false}
+            onPrimaryClick={(row) => onOpenDocument(row.document)}
+          />
         </section>
-        <section className="bookshelf-detail-section">
-          <h4>Referenced By</h4>
-          {detail?.incoming_links.length ? (
-            <div className="bookshelf-detail-link-list">
-              {detail.incoming_links.map((link, index) => (
-                <button key={`${link.source_document_id}-${index}`} type="button">
-                  <strong>{link.anchor_text || link.target_url || 'Referenced document'}</strong>
-                  <small>{link.target_url}</small>
-                </button>
-              ))}
-            </div>
-          ) : (
-            <p>No incoming references indexed.</p>
-          )}
-        </section>
+      ))}
+    </div>
+  );
+}
+
+type SourceNetworkItem = {
+  node: GraphNode;
+  edge: GraphEdge;
+};
+
+function sourceNetwork(graph: GraphResponse, selectedId: string): { inbound: SourceNetworkItem[]; outbound: SourceNetworkItem[] } {
+  const nodesById = new Map(graph.nodes.map((node) => [node.id, node]));
+  return {
+    inbound: rankedSourceNetworkItems(graph.edges, nodesById, selectedId, 'inbound'),
+    outbound: rankedSourceNetworkItems(graph.edges, nodesById, selectedId, 'outbound'),
+  };
+}
+
+function rankedSourceNetworkItems(
+  edges: GraphEdge[],
+  nodesById: Map<string, GraphNode>,
+  selectedId: string,
+  direction: 'inbound' | 'outbound',
+): SourceNetworkItem[] {
+  return edges
+    .filter((edge) => (direction === 'inbound' ? edge.target === selectedId : edge.source === selectedId))
+    .map((edge) => {
+      const relatedId = direction === 'inbound' ? edge.source : edge.target;
+      const node = nodesById.get(relatedId);
+      return node ? { node, edge } : null;
+    })
+    .filter((item): item is SourceNetworkItem => item !== null)
+    .sort((a, b) => b.edge.weight - a.edge.weight || a.node.label.localeCompare(b.node.label))
+    .slice(0, 12);
+}
+
+function SourceNetworkPanel({
+  inbound,
+  outbound,
+  onOpenProfile,
+}: {
+  inbound: SourceNetworkItem[];
+  outbound: SourceNetworkItem[];
+  onOpenProfile: (sourceId: number, domain: string) => void;
+}) {
+  return (
+    <aside className="profile-network-panel" aria-label="Source network">
+      <div className="profile-network-panel-heading">
+        <h4>Network</h4>
+        <span>{inbound.length + outbound.length}</span>
       </div>
+      <SourceNetworkSection title="Referenced by" items={inbound} onOpenProfile={onOpenProfile} />
+      <SourceNetworkSection title="References" items={outbound} onOpenProfile={onOpenProfile} />
     </aside>
   );
+}
+
+function SourceNetworkSection({
+  title,
+  items,
+  onOpenProfile,
+}: {
+  title: string;
+  items: SourceNetworkItem[];
+  onOpenProfile: (sourceId: number, domain: string) => void;
+}) {
+  return (
+    <section className="profile-network-section">
+      <h4>{title}</h4>
+      {items.length === 0 ? (
+        <p className="empty-reference-note" data-tooltip="No visible sources.">—</p>
+      ) : (
+        <div className="profile-network-list">
+          {items.map((item) => {
+            const sourceId = Number(item.node.id.replace('source:', ''));
+            return (
+              <button key={`${item.edge.source}-${item.edge.target}`} type="button" onClick={() => onOpenProfile(sourceId, item.node.domain)}>
+                <span>
+                  <strong>{item.node.label}</strong>
+                  <small>{item.node.domain}</small>
+                </span>
+                <em>{sourceNetworkWeightLabel(item.edge.weight)}</em>
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function sourceNetworkWeightLabel(weight: number) {
+  const count = Math.round(weight);
+  return `${count} link${count === 1 ? '' : 's'}`;
 }
 
 function TableSkeleton({ columns, rows }: { columns: number; rows: number }) {

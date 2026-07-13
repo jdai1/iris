@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from sqlalchemy import Select, func, select
+from sqlalchemy.orm import aliased
 from sqlalchemy.sql.elements import ColumnElement
 
 from iris.dao import db
@@ -24,6 +25,7 @@ class SourceDirectoryQuery:
     direction: str = "desc"
 
     def statement(self) -> Select:
+        target_document = aliased(Document)
         doc_counts = (
             select(
                 Document.source_id,
@@ -45,10 +47,28 @@ class SourceDirectoryQuery:
             .group_by(Document.source_id)
             .subquery()
         )
+        essay_reference_counts = (
+            select(Document.source_id, func.count(func.distinct(Link.target_document_id)).label("essay_reference_count"))
+            .join(Link, Link.source_document_id == Document.id)
+            .join(target_document, target_document.id == Link.target_document_id)
+            .where(target_document.document_type == DocumentType.ESSAY.value)
+            .group_by(Document.source_id)
+            .subquery()
+        )
+        external_source_counts = (
+            select(Document.source_id, func.count(func.distinct(Link.target_source_id)).label("external_source_count"))
+            .join(Link, Link.source_document_id == Document.id)
+            .where(Link.target_source_id.is_not(None))
+            .where(Link.target_source_id != Document.source_id)
+            .group_by(Document.source_id)
+            .subquery()
+        )
         document_count = func.coalesce(doc_counts.c.document_count, 0).label("document_count")
         essay_count = func.coalesce(doc_counts.c.essay_count, 0).label("essay_count")
         inbound_count = func.coalesce(inbound_counts.c.inbound_count, 0).label("inbound_count")
         outbound_count = func.coalesce(outbound_counts.c.outbound_count, 0).label("outbound_count")
+        essay_reference_count = func.coalesce(essay_reference_counts.c.essay_reference_count, 0).label("essay_reference_count")
+        external_source_count = func.coalesce(external_source_counts.c.external_source_count, 0).label("external_source_count")
         statement = (
             select(
                 Source,
@@ -56,10 +76,14 @@ class SourceDirectoryQuery:
                 essay_count,
                 inbound_count,
                 outbound_count,
+                essay_reference_count,
+                external_source_count,
             )
             .outerjoin(doc_counts, doc_counts.c.source_id == Source.id)
             .outerjoin(inbound_counts, inbound_counts.c.source_id == Source.id)
             .outerjoin(outbound_counts, outbound_counts.c.source_id == Source.id)
+            .outerjoin(essay_reference_counts, essay_reference_counts.c.source_id == Source.id)
+            .outerjoin(external_source_counts, external_source_counts.c.source_id == Source.id)
         )
         if self.status and self.status != "all":
             statement = statement.where(Source.status == self.status)
@@ -70,7 +94,7 @@ class SourceDirectoryQuery:
                 | Source.name.ilike(pattern)
                 | Source.description.ilike(pattern)
             )
-        return statement.order_by(*self._order_by(document_count, essay_count, inbound_count, outbound_count))
+        return statement.order_by(*self._order_by(document_count, essay_count, inbound_count, outbound_count, essay_reference_count, external_source_count))
 
     def _order_by(
         self,
@@ -78,6 +102,8 @@ class SourceDirectoryQuery:
         essay_count: ColumnElement,
         inbound_count: ColumnElement,
         outbound_count: ColumnElement,
+        essay_reference_count: ColumnElement,
+        external_source_count: ColumnElement,
     ):
         descending = self.direction != "asc"
         if self.sort == "source":
@@ -90,6 +116,12 @@ class SourceDirectoryQuery:
             return (ordered, Source.canonical_domain.asc())
         if self.sort == "outbound":
             ordered = outbound_count.desc() if descending else outbound_count.asc()
+            return (ordered, Source.canonical_domain.asc())
+        if self.sort == "essay_references":
+            ordered = essay_reference_count.desc() if descending else essay_reference_count.asc()
+            return (ordered, Source.canonical_domain.asc())
+        if self.sort == "external_sources":
+            ordered = external_source_count.desc() if descending else external_source_count.asc()
             return (ordered, Source.canonical_domain.asc())
         if self.sort == "recent":
             ordered = Source.last_checked_at.desc().nullslast() if descending else Source.last_checked_at.asc().nullsfirst()
@@ -118,7 +150,9 @@ def get_source_directory_page(*, q: str | None, status: str | None, sort: str, d
             essay_count=int(essay_count or 0),
             inbound_count=int(inbound_count or 0),
             outbound_count=int(outbound_count or 0),
+            essay_reference_count=int(essay_reference_count or 0),
+            external_source_count=int(external_source_count or 0),
         )
-        for source, document_count, essay_count, inbound_count, outbound_count in rows
+        for source, document_count, essay_count, inbound_count, outbound_count, essay_reference_count, external_source_count in rows
     ]
     return items, total

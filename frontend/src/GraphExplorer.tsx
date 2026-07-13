@@ -60,6 +60,12 @@ export function GraphExplorer({ onOpenProfile }: { onOpenProfile?: (sourceId: nu
   }
 
   useEffect(() => {
+    const documentId = Number(new URLSearchParams(window.location.search).get('document'));
+    if (Number.isSafeInteger(documentId) && documentId > 0) {
+      setMode('documents');
+      refresh('documents', '', `doc:${documentId}`);
+      return;
+    }
     refresh();
   }, []);
 
@@ -372,10 +378,11 @@ export function GraphExplorer({ onOpenProfile }: { onOpenProfile?: (sourceId: nu
                 const active = activeId === node.id;
                 const related = activeId ? visibleEdges.some((edge) => (edge.source === activeId && edge.target === node.id) || (edge.target === activeId && edge.source === node.id)) : false;
                 const labeled = active || related || node.r >= 17;
+                const stateClass = node.bookshelf_status === 'read' ? ' graph-node-read' : node.bookshelf_status === 'saved' ? ' graph-node-saved' : '';
                 return (
                   <g
                     key={node.id}
-                    className={active ? 'graph-node active' : related ? 'graph-node related' : activeId ? 'graph-node muted' : 'graph-node'}
+                    className={`${active ? 'graph-node active' : related ? 'graph-node related' : activeId ? 'graph-node muted' : 'graph-node'}${stateClass}`}
                     transform={`translate(${node.x} ${node.y})`}
                     onMouseEnter={() => setHoveredId(node.id)}
                     onMouseLeave={() => setHoveredId(null)}

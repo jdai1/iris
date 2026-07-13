@@ -1,6 +1,6 @@
 import { Box, Link, Text } from '@chakra-ui/react';
 import type { SourceProfileAnalysis, SourceProfileLink } from '../types';
-import { Chip, ChipList, Panel, StateMessage } from './ui';
+import { Chip, ChipList, StateMessage } from './ui';
 
 export function ProfileAnalysisCard({ analysis }: { analysis: SourceProfileAnalysis | null }) {
   const facts = analysis?.scraped_facts;
@@ -10,31 +10,30 @@ export function ProfileAnalysisCard({ analysis }: { analysis: SourceProfileAnaly
 
   if (!analysis) {
     return (
-      <Panel className="profile-analysis-card" p="4">
-        <ProfileUnavailable labels={['bio', 'themes', 'writing style', 'strong takes', 'links', 'contact']} />
-      </Panel>
+      <Box className="profile-analysis-card" display="grid" gap="4">
+        <StateMessage className="profile-empty">Loading profile...</StateMessage>
+      </Box>
     );
   }
 
   return (
-    <Panel className="profile-analysis-card" p="4" display="grid" gap="4">
-      {analysis.bio ? <Text className="profile-bio" color="fg.default" lineHeight="1.6">{analysis.bio}</Text> : <ProfileUnavailable labels={['bio']} />}
+    <Box className="profile-analysis-card" display="grid" gap="4">
+      {analysis.bio && <Text className="profile-bio" color="fg.default" lineHeight="1.6">{analysis.bio}</Text>}
       <ProfileChipSection title="Writes about" items={themes} />
-      <ProfileChipSection title="Style" items={analysis.writing_style ?? []} />
       <ProfileTakeSection takes={analysis.strong_takes ?? []} />
       <ProfileLinkSection title="Links" links={links} />
       <ProfileLinkSection title="Contact" links={contact} />
       {analysis.caveats && analysis.caveats.length > 0 && (
-        <ChipList className="profile-caveats">
-          {analysis.caveats.map((caveat) => <Chip key={caveat}>{caveat}</Chip>)}
-        </ChipList>
+        <Box className="profile-caveats" color="fg.muted">
+          {analysis.caveats.map((caveat) => <Text as="p" key={caveat}>{caveat}</Text>)}
+        </Box>
       )}
-    </Panel>
+    </Box>
   );
 }
 
 function ProfileChipSection({ title, items }: { title: string; items: string[] }) {
-  if (!items.length) return <ProfileUnavailable labels={[title.toLowerCase()]} />;
+  if (!items.length) return null;
   return (
     <Box className="profile-analysis-section" display="grid" gap="2">
       <Text as="h4" color="fg.default" fontSize="sm" fontWeight="600">{title}</Text>
@@ -46,10 +45,10 @@ function ProfileChipSection({ title, items }: { title: string; items: string[] }
 }
 
 function ProfileTakeSection({ takes }: { takes: Array<{ take: string }> }) {
-  if (!takes.length) return <ProfileUnavailable labels={['strong takes']} />;
+  if (!takes.length) return null;
   return (
     <Box className="profile-analysis-section" display="grid" gap="2">
-      <Text as="h4" color="fg.default" fontSize="sm" fontWeight="600">Strong takes</Text>
+      <Text as="h4" color="fg.default" fontSize="sm" fontWeight="600">Opinions</Text>
       <Box as="ul" className="profile-take-list" m="0" pl="4" color="fg.default">
         {takes.map((item) => <li key={item.take}>{item.take}</li>)}
       </Box>
@@ -59,7 +58,7 @@ function ProfileTakeSection({ takes }: { takes: Array<{ take: string }> }) {
 
 function ProfileLinkSection({ title, links }: { title: string; links: SourceProfileLink[] }) {
   const usable = links.filter((link) => link.url);
-  if (!usable.length) return <ProfileUnavailable labels={[title.toLowerCase()]} />;
+  if (!usable.length) return null;
   return (
     <Box className="profile-analysis-section" display="grid" gap="2">
       <Text as="h4" color="fg.default" fontSize="sm" fontWeight="600">{title}</Text>
@@ -71,13 +70,5 @@ function ProfileLinkSection({ title, links }: { title: string; links: SourceProf
         ))}
       </Box>
     </Box>
-  );
-}
-
-function ProfileUnavailable({ labels }: { labels: string[] }) {
-  return (
-    <StateMessage className="profile-unavailable">
-      {labels.map((label) => <Text as="span" key={label}>{label} unavailable</Text>)}
-    </StateMessage>
   );
 }

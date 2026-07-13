@@ -12,6 +12,32 @@ export const viewPaths: Record<View, string> = {
   admin: '/admin',
 };
 
+export function documentIdFromPath(pathname: string): number | null {
+  const match = pathname.replace(/\/+$/, '').match(/^\/documents\/(\d+)$/);
+  if (!match) return null;
+  const documentId = Number(match[1]);
+  return Number.isSafeInteger(documentId) && documentId > 0 ? documentId : null;
+}
+
+export function collectionIdFromSearch(search: string): number | null {
+  const value = new URLSearchParams(search).get('collection');
+  if (!value) return null;
+  const collectionId = Number(value);
+  return Number.isSafeInteger(collectionId) && collectionId > 0 ? collectionId : null;
+}
+
+export function navigateTo(path: string, { replace = false }: { replace?: boolean } = {}) {
+  if (typeof window === 'undefined') return;
+  const current = `${window.location.pathname}${window.location.search}`;
+  if (current === path) return;
+  window.history[replace ? 'replaceState' : 'pushState'](null, '', path);
+  window.dispatchEvent(new PopStateEvent('popstate'));
+}
+
+export function documentPath(documentId: number) {
+  return `/documents/${documentId}`;
+}
+
 export function initialView(): View {
   if (typeof window === 'undefined') return 'search';
   const pathView = viewFromPath(window.location.pathname);

@@ -1,5 +1,5 @@
 import { FormEvent, MouseEvent, useEffect, useRef, useState } from 'react';
-import { ArrowUpRight, Check, Plus, Search, Trash2 } from 'lucide-react';
+import { Check, Plus, Search, Trash2 } from 'lucide-react';
 import {
   addBookshelfCollectionItem,
   createBookshelfCollection,
@@ -7,22 +7,28 @@ import {
   deleteBookshelfCollection,
   getBookshelf,
   getBookshelfCollections,
-  getDocument,
   removeBookshelfCollectionItem,
   searchDocuments,
   updateDocumentBookshelf,
 } from '../api';
 import { emptyPage } from '../app/paging';
+import { collectionIdFromSearch, documentPath, navigateTo } from '../app/navigation';
 import { DenseDocumentTable } from '../components/DenseDocumentTable';
 import { Button } from '../components/ui';
-import type { BookshelfCollection, BookshelfEntry, BookshelfStatus, Document, DocumentDetail, SearchResult } from '../types';
+import type { BookshelfCollection, BookshelfEntry, BookshelfStatus, SearchResult } from '../types';
 
 type BookshelfViewKey = 'unread' | 'favorites' | 'reading-log' | `collection:${number}`;
+
+function collectionViewFromLocation(): BookshelfViewKey | null {
+  if (window.location.pathname !== '/bookshelf') return null;
+  const collectionId = collectionIdFromSearch(window.location.search);
+  return collectionId ? `collection:${collectionId}` : 'unread';
+}
 
 export function BookshelfView({ onDiscover }: { onDiscover: () => void }) {
   const [entries, setEntries] = useState<BookshelfEntry[]>([]);
   const [collections, setCollections] = useState<BookshelfCollection[]>([]);
-  const [activeView, setActiveView] = useState<BookshelfViewKey>('unread');
+  const [activeView, setActiveView] = useState<BookshelfViewKey>(() => collectionViewFromLocation() ?? 'unread');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -39,15 +45,8 @@ export function BookshelfView({ onDiscover }: { onDiscover: () => void }) {
   const [selectedDocumentIds, setSelectedDocumentIds] = useState<Set<number>>(new Set());
   const [lastSelectedDocumentId, setLastSelectedDocumentId] = useState<number | null>(null);
   const [bulkMenuOpen, setBulkMenuOpen] = useState(false);
-  const [drawerEntry, setDrawerEntry] = useState<BookshelfEntry | null>(null);
-  const [drawerDetail, setDrawerDetail] = useState<DocumentDetail | null>(null);
-  const [drawerLoading, setDrawerLoading] = useState(false);
-  const [drawerError, setDrawerError] = useState<string | null>(null);
-  const [drawerClosing, setDrawerClosing] = useState(false);
   const collectionDraftRef = useRef<HTMLInputElement | null>(null);
   const bookshelfPanelRef = useRef<HTMLDivElement | null>(null);
-  const drawerRef = useRef<HTMLDivElement | null>(null);
-  const drawerCloseTimeoutRef = useRef<number | null>(null);
 
   const tableRows = filterBookshelfEntries(entries, collections, activeView);
   const discoverLabel = 'Discover';
@@ -70,9 +69,15 @@ export function BookshelfView({ onDiscover }: { onDiscover: () => void }) {
 
   useEffect(() => {
     refresh();
-    return () => {
-      if (drawerCloseTimeoutRef.current !== null) window.clearTimeout(drawerCloseTimeoutRef.current);
-    };
+  }, []);
+
+  useEffect(() => {
+    function syncCollectionRoute() {
+      const routeView = collectionViewFromLocation();
+      if (routeView) setActiveView(routeView);
+    }
+    window.addEventListener('popstate', syncCollectionRoute);
+    return () => window.removeEventListener('popstate', syncCollectionRoute);
   }, []);
 
   useEffect(() => {
@@ -93,30 +98,6 @@ export function BookshelfView({ onDiscover }: { onDiscover: () => void }) {
   }, [selectedDocumentIds.size]);
 
   useEffect(() => {
-    if (!drawerEntry) {
-      setDrawerDetail(null);
-      setDrawerError(null);
-      return;
-    }
-    let cancelled = false;
-    setDrawerLoading(true);
-    setDrawerError(null);
-    getDocument(drawerEntry.document.id)
-      .then((detail) => {
-        if (!cancelled) setDrawerDetail(detail);
-      })
-      .catch((err) => {
-        if (!cancelled) setDrawerError(err instanceof Error ? err.message : 'Could not load document');
-      })
-      .finally(() => {
-        if (!cancelled) setDrawerLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [drawerEntry?.document.id]);
-
-  useEffect(() => {
     if (selectedDocumentIds.size === 0) return;
     function clearSelectionOnOutsideClick(event: PointerEvent) {
       const target = event.target;
@@ -128,17 +109,6 @@ export function BookshelfView({ onDiscover }: { onDiscover: () => void }) {
     document.addEventListener('pointerdown', clearSelectionOnOutsideClick);
     return () => document.removeEventListener('pointerdown', clearSelectionOnOutsideClick);
   }, [selectedDocumentIds.size]);
-
-  useEffect(() => {
-    if (!drawerEntry) return;
-    function closeDrawerOnOutsideClick(event: PointerEvent) {
-      const target = event.target;
-      if (target instanceof Node && drawerRef.current?.contains(target)) return;
-      closeBookshelfDrawer();
-    }
-    document.addEventListener('pointerdown', closeDrawerOnOutsideClick);
-    return () => document.removeEventListener('pointerdown', closeDrawerOnOutsideClick);
-  }, [drawerEntry, drawerClosing]);
 
   useEffect(() => {
     const query = collectionSearchQuery.trim();
@@ -377,33 +347,15 @@ export function BookshelfView({ onDiscover }: { onDiscover: () => void }) {
   }
 
   function openBookshelfDrawer(entry: BookshelfEntry) {
-    if (drawerCloseTimeoutRef.current !== null) window.clearTimeout(drawerCloseTimeoutRef.current);
-    drawerCloseTimeoutRef.current = null;
-    setDrawerClosing(false);
-    setDrawerEntry(entry);
+    navigateTo(documentPath(entry.document.id));
   }
 
   function openSearchResultDrawer(result: SearchResult) {
-    openBookshelfDrawer(findBookshelfEntry(result.document.id) ?? entryFromDocument(result.document));
-  }
-
-  function findBookshelfEntry(documentId: number) {
-    return entries.find((entry) => entry.document.id === documentId) ?? collections.flatMap((collection) => collection.items).find((entry) => entry.document.id === documentId) ?? null;
-  }
-
-  function closeBookshelfDrawer() {
-    if (!drawerEntry || drawerClosing) return;
-    setDrawerClosing(true);
-    drawerCloseTimeoutRef.current = window.setTimeout(() => {
-      setDrawerEntry(null);
-      setDrawerClosing(false);
-      drawerCloseTimeoutRef.current = null;
-    }, 190);
+    navigateTo(documentPath(result.document.id));
   }
 
   function applyBookshelfEntryUpdate(entry: BookshelfEntry) {
     mergeBookshelfEntry(entry);
-    setDrawerEntry((current) => (current?.document.id === entry.document.id ? entry : current));
   }
 
   function mergeBookshelfEntry(entry: BookshelfEntry) {
@@ -618,6 +570,7 @@ export function BookshelfView({ onDiscover }: { onDiscover: () => void }) {
               rows={tableRows}
               selectedDocumentIds={selectedDocumentIds}
               selectionEnabled
+              collectionMode={Boolean(activeCollection)}
               onRowClick={selectBookshelfRow}
               onOpenDetail={openBookshelfDrawer}
               onToggleFavorite={toggleFavorite}
@@ -635,24 +588,6 @@ export function BookshelfView({ onDiscover }: { onDiscover: () => void }) {
           )}
         </div>
       </div>
-      {drawerEntry && (
-        <>
-          <button className={drawerClosing ? 'drawer-backdrop drawer-closing' : 'drawer-backdrop'} type="button" aria-label="Close details" onClick={closeBookshelfDrawer} />
-          <BookshelfDetailDrawer
-            entry={drawerEntry}
-            detail={drawerDetail}
-            collections={collections}
-            loading={drawerLoading}
-            error={drawerError}
-            drawerRef={drawerRef}
-            closing={drawerClosing}
-            onEntryChange={(entry) => {
-              applyBookshelfEntryUpdate(entry);
-            }}
-            onClose={closeBookshelfDrawer}
-          />
-        </>
-      )}
     </section>
   );
 }
@@ -688,225 +623,15 @@ function resultInActiveView(documentId: number, activeView: BookshelfViewKey, ac
   return entry.status === 'saved';
 }
 
-function entryFromDocument(document: Document): BookshelfEntry {
-  return {
-    document,
-    status: 'saved',
-    favorited: false,
-    note: null,
-    intent_note: null,
-    tags: [],
-    first_seen_at: null,
-    read_at: null,
-    archived_at: null,
-    favorited_at: null,
-  };
-}
-
 function notePreview(entry: BookshelfEntry): string {
   const text = (entry.note || entry.intent_note || '').trim();
-  if (!text) return 'No note';
+  if (!text) return '—';
   return text.split('\n')[0];
 }
 
 function mergeBookshelfEntryUpdates(current: BookshelfEntry[], updates: BookshelfEntry[]): BookshelfEntry[] {
   const byDocumentId = new Map(updates.map((entry) => [entry.document.id, entry]));
   return current.map((entry) => byDocumentId.get(entry.document.id) ?? entry);
-}
-
-function BookshelfDetailDrawer({
-  entry,
-  detail,
-  collections,
-  loading,
-  error,
-  drawerRef,
-  closing,
-  onEntryChange,
-  onClose,
-}: {
-  entry: BookshelfEntry;
-  detail: DocumentDetail | null;
-  collections: BookshelfCollection[];
-  loading: boolean;
-  error: string | null;
-  drawerRef: React.RefObject<HTMLDivElement | null>;
-  closing: boolean;
-  onEntryChange: (entry: BookshelfEntry) => void;
-  onClose: () => void;
-}) {
-  const document = detail ?? entry.document;
-  const containingCollections = collections.filter((collection) =>
-    collection.items.some((item) => item.document.id === entry.document.id),
-  );
-  const [noteDraft, setNoteDraft] = useState(entry.note ?? entry.intent_note ?? '');
-  const [tagDraftOpen, setTagDraftOpen] = useState(false);
-  const [tagDraft, setTagDraft] = useState('');
-  const [savingNote, setSavingNote] = useState(false);
-  const [savingTags, setSavingTags] = useState(false);
-  const [referenceLimit, setReferenceLimit] = useState(5);
-  const [referencedByLimit, setReferencedByLimit] = useState(5);
-
-  useEffect(() => {
-    setNoteDraft(entry.note ?? entry.intent_note ?? '');
-    setTagDraft('');
-    setTagDraftOpen(false);
-  }, [entry.document.id]);
-
-  useEffect(() => {
-    const nextNote = noteDraft.trim();
-    const currentNote = (entry.note ?? entry.intent_note ?? '').trim();
-    if (nextNote === currentNote) return;
-    const timeout = window.setTimeout(() => {
-      setSavingNote(true);
-      updateDocumentBookshelf(entry.document.id, { note: noteDraft })
-        .then(onEntryChange)
-        .finally(() => setSavingNote(false));
-    }, 450);
-    return () => window.clearTimeout(timeout);
-  }, [entry.document.id, entry.note, entry.intent_note, noteDraft, onEntryChange]);
-
-  async function addTag(event: FormEvent) {
-    event.preventDefault();
-    const tag = tagDraft.trim();
-    if (!tag || entry.tags.includes(tag)) {
-      setTagDraft('');
-      setTagDraftOpen(false);
-      return;
-    }
-    setSavingTags(true);
-    try {
-      const updated = await updateDocumentBookshelf(entry.document.id, { tags: [...entry.tags, tag] });
-      onEntryChange(updated);
-      setTagDraft('');
-      setTagDraftOpen(false);
-    } finally {
-      setSavingTags(false);
-    }
-  }
-
-  return (
-    <aside ref={drawerRef} className={closing ? 'bookshelf-detail-drawer drawer-closing' : 'bookshelf-detail-drawer'} aria-label="Bookshelf document details">
-      <div className="bookshelf-detail-header">
-        <div>
-          <span>{document.source_domain}</span>
-          <h3>
-            {document.title ?? document.url}
-            <a href={document.url} target="_blank" rel="noreferrer" aria-label="Open document">
-              <ArrowUpRight size={15} />
-            </a>
-          </h3>
-        </div>
-        <button type="button" onClick={onClose} aria-label="Close details">×</button>
-      </div>
-
-      <div className="bookshelf-detail-actions">
-        {containingCollections.map((collection) => (
-          <span key={collection.id}>{collection.name}</span>
-        ))}
-        {entry.favorited && <span>favorite</span>}
-      </div>
-
-      {loading && <div className="skeleton-stack" aria-label="Loading document details"><span className="skeleton-line" /><span className="skeleton-line" /><span className="skeleton-line" /></div>}
-      {error && <div className="error">{error}</div>}
-
-      <section className="bookshelf-detail-section">
-        <h4>Summary</h4>
-        <p>{document.summary || 'No summary yet.'}</p>
-      </section>
-
-      <section className="bookshelf-detail-section">
-        <div className="bookshelf-detail-section-heading">
-          <h4>Notes</h4>
-          {savingNote && <span>Saving</span>}
-        </div>
-        <textarea
-          className="bookshelf-detail-note-input"
-          value={noteDraft}
-          onChange={(event) => setNoteDraft(event.target.value)}
-          placeholder="Add a note..."
-        />
-      </section>
-
-      <section className="bookshelf-detail-section">
-        <div className="bookshelf-detail-section-heading">
-          <h4>Tags</h4>
-          <button type="button" className="bookshelf-detail-add-tag" onClick={() => setTagDraftOpen((value) => !value)}>
-            Add tag
-          </button>
-        </div>
-        {tagDraftOpen && (
-          <form className="bookshelf-detail-tag-form" onSubmit={addTag}>
-            <input
-              value={tagDraft}
-              onChange={(event) => setTagDraft(event.target.value)}
-              placeholder="New tag"
-              disabled={savingTags}
-              autoFocus
-            />
-          </form>
-        )}
-        {entry.tags.length > 0 || document.topics.length > 0 ? (
-          <div className="bookshelf-detail-tags">
-            {[...entry.tags, ...document.topics.filter((topic) => !entry.tags.includes(topic))].map((tag) => (
-              <span key={tag}>{tag}</span>
-            ))}
-          </div>
-        ) : (
-          <p>No tags yet.</p>
-        )}
-      </section>
-
-      <div className="bookshelf-detail-reference-grid">
-        <section className="bookshelf-detail-section">
-          <h4>References</h4>
-          {detail?.outgoing_links.length ? (
-            <>
-              <div className="bookshelf-detail-link-list">
-                {detail.outgoing_links.slice(0, referenceLimit).map((link, index) => (
-                  <a key={`${link.target_url}-${index}`} href={link.target_url} target="_blank" rel="noreferrer">
-                    <strong>{link.anchor_text || link.target_domain || link.target_url}</strong>
-                    <small>{link.target_domain || link.target_url}</small>
-                    {link.context && <span>{link.context}</span>}
-                  </a>
-                ))}
-              </div>
-              {referenceLimit < detail.outgoing_links.length && (
-                <button className="bookshelf-detail-more" type="button" onClick={() => setReferenceLimit((value) => value + 5)}>
-                  More references
-                </button>
-              )}
-            </>
-          ) : (
-            <p>No outgoing references indexed.</p>
-          )}
-        </section>
-
-        <section className="bookshelf-detail-section">
-          <h4>Referenced By</h4>
-          {detail?.incoming_links.length ? (
-            <>
-              <div className="bookshelf-detail-link-list">
-                {detail.incoming_links.slice(0, referencedByLimit).map((link, index) => (
-                  <button key={`${link.source_document_id}-${index}`} type="button">
-                    <strong>{link.anchor_text || link.target_url || 'Referenced document'}</strong>
-                    <small>{link.target_url}</small>
-                  </button>
-                ))}
-              </div>
-              {referencedByLimit < detail.incoming_links.length && (
-                <button className="bookshelf-detail-more" type="button" onClick={() => setReferencedByLimit((value) => value + 5)}>
-                  More referenced by
-                </button>
-              )}
-            </>
-          ) : (
-            <p>No incoming references indexed.</p>
-          )}
-        </section>
-      </div>
-    </aside>
-  );
 }
 
 function entryDate(entry: BookshelfEntry): string {
@@ -919,6 +644,7 @@ function BookshelfTable({
   rows,
   selectedDocumentIds,
   selectionEnabled,
+  collectionMode,
   onRowClick,
   onOpenDetail,
   onToggleFavorite,
@@ -927,6 +653,7 @@ function BookshelfTable({
   rows: BookshelfEntry[];
   selectedDocumentIds: Set<number>;
   selectionEnabled: boolean;
+  collectionMode: boolean;
   onRowClick: (entry: BookshelfEntry, event: MouseEvent<HTMLDivElement>, forceSelect?: boolean) => void;
   onOpenDetail: (entry: BookshelfEntry) => void;
   onToggleFavorite: (entry: BookshelfEntry) => void;
@@ -947,8 +674,11 @@ function BookshelfTable({
       rows={tableRows}
       ariaLabel="Bookshelf documents"
       selectionEnabled={selectionEnabled}
-      showFavorite
-      showActions
+      showNote={!collectionMode}
+      showFavorite={!collectionMode}
+      showActions={collectionMode}
+      showSource={false}
+      sourceAsTitle
       onPrimaryClick={(row, event) => {
         const entry = entriesByDocumentId.get(row.document.id);
         if (entry) onOpenDetail(entry);
