@@ -566,29 +566,35 @@ function SearchResultDrawer({
         </button>
       </div>
 
-      <section className="bookshelf-detail-section search-result-match">
-        <h4>Why This Result</h4>
-        <p>{naturalRelevance(result)}</p>
-      </section>
-
       {loading && <div className="skeleton-stack" aria-label="Loading document details"><span className="skeleton-line" /><span className="skeleton-line" /><span className="skeleton-line" /></div>}
       {error && <div className="error">{error}</div>}
-
-      {document.topics.length > 0 && (
-        <div className="bookshelf-detail-tags directory-document-drawer-tags">
-          {document.topics.map((topic) => <span key={topic}>{topic}</span>)}
-        </div>
-      )}
 
       <section className="bookshelf-detail-section">
         <h4>Summary</h4>
         <p>{document.summary || document.one_liner || 'No summary yet.'}</p>
       </section>
 
+      <section className="bookshelf-detail-section search-result-match">
+        <h4>Why This Result</h4>
+        <p>{naturalRelevance(result)}</p>
+      </section>
+
+      {document.topics.length > 0 && (
+        <section className="bookshelf-detail-section">
+          <h4>Tags</h4>
+          <div className="bookshelf-detail-tags directory-document-drawer-tags">
+            {document.topics.map((topic) => <span key={topic}>{topic}</span>)}
+          </div>
+        </section>
+      )}
+
       {detail && (
         <div className="bookshelf-detail-reference-grid">
           <section className="bookshelf-detail-section">
-            <h4>References</h4>
+            <div className="bookshelf-detail-section-heading bookshelf-detail-reference-heading">
+              <h4>References</h4>
+              <span>{detail.outgoing_links.length}</span>
+            </div>
             {detail.outgoing_links.length ? (
               <div className="bookshelf-detail-link-list">
                 {detail.outgoing_links.slice(0, 8).map((link, index) => (
@@ -604,7 +610,10 @@ function SearchResultDrawer({
             )}
           </section>
           <section className="bookshelf-detail-section">
-            <h4>Referenced By</h4>
+            <div className="bookshelf-detail-section-heading bookshelf-detail-reference-heading">
+              <h4>Referenced By</h4>
+              <span>{detail.incoming_links.length}</span>
+            </div>
             {detail.incoming_links.length ? (
               <div className="bookshelf-detail-link-list">
                 {detail.incoming_links.slice(0, 8).map((link, index) => (

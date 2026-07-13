@@ -1496,6 +1496,32 @@
   grid-template-columns: minmax(240px, 2fr) minmax(220px, 1.45fr) minmax(112px, 0.65fr) 28px;
 }
 
+.bookshelf-table-selectable .bookshelf-table-row {
+  grid-template-columns: 28px minmax(200px, 1.9fr) minmax(150px, 1.25fr) minmax(140px, 0.95fr) minmax(96px, 0.65fr) 28px 28px;
+}
+
+.bookshelf-table-selectable.bookshelf-table-simple .bookshelf-table-row {
+  grid-template-columns: 28px minmax(200px, 1.75fr) minmax(170px, 1.3fr) minmax(190px, 1fr) minmax(96px, 0.65fr);
+}
+
+.bookshelf-table-selectable.bookshelf-table-actions-only .bookshelf-table-row {
+  grid-template-columns: 28px minmax(240px, 2fr) minmax(220px, 1.45fr) minmax(112px, 0.65fr) 28px;
+}
+
+.bookshelf-table-select-cell {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.bookshelf-table-select-cell input {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  accent-color: var(--text);
+  cursor: pointer;
+}
+
 .bookshelf-table-no-source .bookshelf-table-row {
   min-height: 38px;
 }
@@ -1957,7 +1983,6 @@
   scrollbar-width: none;
   -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 26px), transparent);
   mask-image: linear-gradient(to right, #000 calc(100% - 26px), transparent);
-  cursor: text;
 }
 
 .bookshelf-detail-tags::-webkit-scrollbar {
@@ -2011,7 +2036,7 @@
   display: grid;
   gap: 3px;
   min-width: 0;
-  min-height: 86px;
+  height: 86px;
   border: 0;
   border-bottom: 1px solid var(--border-subtle);
   background: transparent;
@@ -2020,6 +2045,7 @@
   font: inherit;
   text-align: left;
   text-decoration: none;
+  overflow: hidden;
 }
 
 .bookshelf-detail-link-list a > *,
@@ -2080,6 +2106,10 @@
 @media (max-width: 760px) {
   .bookshelf-detail-reference-grid {
     grid-template-columns: 1fr;
+  }
+
+  .bookshelf-detail-reference-grid .bookshelf-detail-section {
+    min-height: 0;
   }
 }
 
