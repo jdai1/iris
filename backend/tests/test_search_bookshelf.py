@@ -194,6 +194,7 @@ def test_agent_instructions_cover_multi_query_precision_and_no_duplicate_cards()
     assert "opposite perspective" in AGENT_INSTRUCTIONS
     assert "inspect its metadata before citing it" in AGENT_INSTRUCTIONS
     assert "Your final document_ids are the relevance filter" in AGENT_INSTRUCTIONS
+    assert "I did not find a strong direct match" in AGENT_INSTRUCTIONS
 
 
 def test_bookshelf_lists_saved_entries_and_excludes_archived(session):
