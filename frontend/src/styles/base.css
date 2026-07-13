@@ -404,18 +404,23 @@ button:disabled {
   white-space: nowrap;
 }
 
+.overflow-tooltip {
+  display: block;
+  min-width: 0;
+}
+
 .drawer-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 19;
+  z-index: 900;
   border: 0;
-  background: rgba(0, 0, 0, 0.22);
+  background: rgba(0, 0, 0, 0.36);
   padding: 0;
   cursor: default;
 }
 
 :root[data-theme="dark"] .drawer-backdrop {
-  background: rgba(0, 0, 0, 0.34);
+  background: rgba(0, 0, 0, 0.46);
 }
 
 main {

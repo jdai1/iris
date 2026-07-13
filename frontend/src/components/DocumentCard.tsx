@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react';
+import { type MouseEvent, useEffect, useState } from 'react';
 import { Box, Heading, HStack, Link, Text } from '@chakra-ui/react';
 import { ArrowUpRight, ChevronRight, MoreHorizontal } from 'lucide-react';
 import { addBookshelfCollectionItem, getBookshelfCollections, updateDocumentBookshelf } from '../api';
+import { documentPath, navigateTo } from '../app/navigation';
 import type { BookshelfCollection, Document } from '../types';
 import { Button, Chip, ChipList, IconButton, Panel, PopoverMenu } from './ui';
 
@@ -86,6 +87,12 @@ export function DocumentCard({
     }
   }
 
+  function openDocument(event: MouseEvent<HTMLAnchorElement>) {
+    if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    event.preventDefault();
+    navigateTo(documentPath(document.id));
+  }
+
   const actionsMenu = (
     <div className="document-actions-menu">
       <IconButton
@@ -145,7 +152,9 @@ export function DocumentCard({
       )}
       <div className={compact ? 'document-title-row' : undefined}>
         <Heading as="h3" mt="2" mb="3" fontSize="xl" lineHeight="1.2" fontWeight="600">
-          {document.title ?? document.url}
+          <a className="document-detail-link" href={documentPath(document.id)} onClick={openDocument}>
+            {document.title ?? document.url}
+          </a>
           {compact && (
             <Link href={document.url} target="_blank" rel="noreferrer" className="document-open-icon" color="iris.900" fontWeight="600" textDecoration="none" aria-label="Open document" data-tooltip="Open document">
               <ArrowUpRight size={16} />

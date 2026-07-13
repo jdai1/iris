@@ -1,5 +1,6 @@
 import { KeyboardEvent, MouseEvent, useRef, useState } from 'react';
 import { ArrowUpRight, MoreVertical, Trash2 } from 'lucide-react';
+import { OverflowText } from './OverflowText';
 import type { Document } from '../types';
 
 export type DenseDocumentTableRow = {
@@ -18,8 +19,10 @@ export function DenseDocumentTable({
   showNote = true,
   showFavorite = false,
   showActions = false,
+  showSource = true,
+  sourceAsTitle = false,
   noteHeader = 'Notes',
-  emptyNoteLabel = 'No note',
+  emptyNoteLabel = '—',
   onPrimaryClick,
   onModifiedClick,
   onDoubleClick,
@@ -32,6 +35,8 @@ export function DenseDocumentTable({
   showNote?: boolean;
   showFavorite?: boolean;
   showActions?: boolean;
+  showSource?: boolean;
+  sourceAsTitle?: boolean;
   noteHeader?: string;
   emptyNoteLabel?: string;
   onPrimaryClick: (row: DenseDocumentTableRow, event: MouseEvent<HTMLDivElement> | KeyboardEvent<HTMLDivElement>) => void;
@@ -42,7 +47,11 @@ export function DenseDocumentTable({
 }) {
   const [openActionDocumentId, setOpenActionDocumentId] = useState<number | null>(null);
   const clickTimerRef = useRef<number | null>(null);
-  const tableClassName = showFavorite || showActions ? 'bookshelf-table' : showNote ? 'bookshelf-table bookshelf-table-simple' : 'bookshelf-table bookshelf-table-minimal';
+  const tableClassName = [
+    'bookshelf-table',
+    showFavorite || (showActions && showNote) ? '' : showActions ? 'bookshelf-table-actions-only' : showNote ? 'bookshelf-table-simple' : 'bookshelf-table-minimal',
+    showSource ? '' : 'bookshelf-table-no-source',
+  ].filter(Boolean).join(' ');
 
   function clearClickTimer() {
     if (clickTimerRef.current !== null) {
@@ -99,21 +108,25 @@ export function DenseDocumentTable({
               }
             }}
           >
-            <span className="bookshelf-table-title tooltip-overflow-cell" data-label="Title" data-tooltip={document.title ?? document.url}>
+            <span
+              className="bookshelf-table-title tooltip-overflow-cell"
+              data-label="Title"
+              aria-label={sourceAsTitle ? `${document.title ?? document.url}, ${document.source_domain}` : undefined}
+            >
               <strong>
-                <span className="tooltip-overflow-text">{document.title ?? document.url}</span>
+                <OverflowText>{document.title ?? document.url}</OverflowText>
                 <a href={document.url} target="_blank" rel="noreferrer" aria-label="Open document" onClick={(event) => event.stopPropagation()}>
                   <ArrowUpRight size={14} />
                 </a>
               </strong>
-              <small className="tooltip-overflow-text">{document.source_domain}</small>
+              {showSource && <OverflowText className="tooltip-overflow-text">{document.source_domain}</OverflowText>}
             </span>
-            <span className="bookshelf-table-tags tooltip-overflow-cell" data-label="Tags" data-tooltip={row.tags.join(', ') || 'No tags'}>
-              <span className="tooltip-overflow-text">{row.tags.join(', ') || '-'}</span>
+            <span className="bookshelf-table-tags tooltip-overflow-cell" data-label="Tags">
+              <OverflowText>{row.tags.join(', ') || '-'}</OverflowText>
             </span>
             {showNote && (
-              <span className={row.note ? 'bookshelf-note-preview tooltip-overflow-cell' : 'bookshelf-note-empty tooltip-overflow-cell'} data-label={noteHeader} data-tooltip={row.note || emptyNoteLabel}>
-                <span className="tooltip-overflow-text">{row.note || emptyNoteLabel}</span>
+              <span className={row.note ? 'bookshelf-note-preview tooltip-overflow-cell' : 'bookshelf-note-empty tooltip-overflow-cell'} data-label={noteHeader}>
+                <OverflowText>{row.note || emptyNoteLabel}</OverflowText>
               </span>
             )}
             <span className="bookshelf-table-date" data-label="Date">{row.date ?? ''}</span>

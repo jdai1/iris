@@ -236,6 +236,8 @@ export interface GraphNode {
   subtitle: string | null;
   summary: string | null;
   size: number;
+  bookshelf_status?: BookshelfStatus | null;
+  bookshelf_favorited?: boolean;
 }
 
 export interface GraphEdge {
@@ -323,7 +325,7 @@ export interface AdminSource {
   } | null;
 }
 
-export type DirectorySourceSort = 'source' | 'inbound' | 'outbound' | 'documents' | 'essays' | 'recent';
+export type DirectorySourceSort = 'source' | 'inbound' | 'outbound' | 'documents' | 'essays' | 'essay_references' | 'external_sources' | 'recent';
 export type SortDirection = 'asc' | 'desc';
 
 export interface DirectorySource {
@@ -339,6 +341,8 @@ export interface DirectorySource {
   essay_count: number;
   inbound_count: number;
   outbound_count: number;
+  essay_reference_count: number;
+  external_source_count: number;
 }
 
 export interface AdminCrawlJob {

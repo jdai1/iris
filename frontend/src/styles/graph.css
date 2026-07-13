@@ -152,6 +152,19 @@
   opacity: 0.72;
 }
 
+.graph-node-read circle {
+  stroke: var(--accent);
+  stroke-width: 2.4;
+  opacity: 0.98;
+  filter: drop-shadow(0 0 5px color-mix(in srgb, var(--accent) 45%, transparent));
+}
+
+.graph-node-saved circle {
+  stroke: var(--accent);
+  stroke-width: 1.8;
+  opacity: 0.9;
+}
+
 .graph-node.related circle {
   stroke: var(--graph-edge-active);
   opacity: 0.86;
@@ -166,6 +179,11 @@
 .graph-node.muted circle {
   stroke: var(--graph-node-stroke);
   opacity: 0.18;
+}
+
+.graph-node.muted.graph-node-read circle {
+  stroke: var(--accent);
+  opacity: 0.62;
 }
 
 .graph-node text {

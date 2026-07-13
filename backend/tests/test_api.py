@@ -127,7 +127,7 @@ def test_directory_sources_default_to_most_referenced(session):
     )
     upsert_link(source_document=alpha_doc, target_url="https://beta.test/profile", anchor_text="beta", context=None)
     upsert_link(source_document=gamma_doc, target_url="https://beta.test/about", anchor_text="beta", context=None)
-    upsert_link(source_document=beta_doc, target_url="https://alpha.test/about", anchor_text="alpha", context=None)
+    upsert_link(source_document=beta_doc, target_url=alpha_doc.url, anchor_text="alpha", context=None)
     session.commit()
 
     response = TestClient(app).get("/api/directory/sources")
@@ -138,6 +138,8 @@ def test_directory_sources_default_to_most_referenced(session):
     assert body["items"][0]["canonical_domain"] == "beta.test"
     assert body["items"][0]["inbound_count"] == 2
     assert body["items"][0]["essay_count"] == 1
+    assert body["items"][0]["essay_reference_count"] == 1
+    assert body["items"][0]["external_source_count"] == 1
 
 
 def test_me_maps_firebase_identity_to_user(session, monkeypatch):

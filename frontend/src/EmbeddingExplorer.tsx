@@ -286,10 +286,14 @@ export function EmbeddingExplorer() {
     getEmbeddingMap()
       .then((payload) => {
         if (!mounted) return;
+        const documentId = Number(new URLSearchParams(window.location.search).get('document'));
+        const initialPoint = Number.isSafeInteger(documentId) && documentId > 0
+          ? payload.points.find((point) => point.document.id === documentId) ?? payload.points[0] ?? null
+          : payload.points[0] ?? null;
         setMap(payload);
         dataRef.current = payload.points;
-        setSelected(payload.points[0] ?? null);
-        selectedRef.current = payload.points[0] ?? null;
+        setSelected(initialPoint);
+        selectedRef.current = initialPoint;
       })
       .catch((err) => setError(err instanceof Error ? err.message : 'Embedding map failed'))
       .finally(() => mounted && setLoading(false));

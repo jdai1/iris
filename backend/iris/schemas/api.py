@@ -78,6 +78,8 @@ class DirectorySourceSchema(BaseModel):
     essay_count: int
     inbound_count: int
     outbound_count: int
+    essay_reference_count: int
+    external_source_count: int
 
 
 class DocumentSchema(BaseModel):
