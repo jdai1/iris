@@ -5,7 +5,7 @@ import { emptyPage } from '../app/paging';
 import type { BookshelfCollection, BookshelfEntry, DocumentDetail } from '../types';
 import { DocumentDetailDrawer, entryFromDocument } from './DocumentDetailDrawer';
 
-export function DocumentRouteDrawer({ documentId, onClose }: { documentId: number; onClose: () => void }) {
+export function DocumentRouteDrawer({ documentUuid, onClose }: { documentUuid: string; onClose: () => void }) {
   const [entry, setEntry] = useState<BookshelfEntry | null>(null);
   const [detail, setDetail] = useState<DocumentDetail | null>(null);
   const [collections, setCollections] = useState<BookshelfCollection[]>([]);
@@ -29,14 +29,14 @@ export function DocumentRouteDrawer({ documentId, onClose }: { documentId: numbe
     setError(null);
     setClosing(false);
     Promise.all([
-      getDocument(documentId),
+      getDocument(documentUuid),
       getBookshelf({ limit: 500 }).catch(() => emptyPage<BookshelfEntry>()),
       getBookshelfCollections().catch(() => []),
     ])
       .then(([document, bookshelfPage, nextCollections]) => {
         if (cancelled) return;
-        const storedEntry = bookshelfPage.items.find((item) => item.document.id === documentId)
-          ?? nextCollections.flatMap((collection) => collection.items).find((item) => item.document.id === documentId);
+        const storedEntry = bookshelfPage.items.find((item) => item.document.uuid === document.uuid)
+          ?? nextCollections.flatMap((collection) => collection.items).find((item) => item.document.uuid === document.uuid);
         setDetail(document);
         setEntry(storedEntry ?? entryFromDocument(document));
         setCollections(nextCollections);
@@ -50,7 +50,7 @@ export function DocumentRouteDrawer({ documentId, onClose }: { documentId: numbe
     return () => {
       cancelled = true;
     };
-  }, [documentId]);
+  }, [documentUuid]);
 
   function closeDrawer() {
     if (closing) return;
@@ -62,7 +62,7 @@ export function DocumentRouteDrawer({ documentId, onClose }: { documentId: numbe
     setEntry(nextEntry);
     setCollections((current) => current.map((collection) => ({
       ...collection,
-      items: collection.items.map((item) => (item.document.id === nextEntry.document.id ? nextEntry : item)),
+      items: collection.items.map((item) => (item.document.uuid === nextEntry.document.uuid ? nextEntry : item)),
     })));
   }
 

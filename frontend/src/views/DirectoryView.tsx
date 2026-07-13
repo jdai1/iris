@@ -224,7 +224,7 @@ export function DirectoryView({
   }
 
   function openDirectoryDrawer(document: Document) {
-    navigateTo(documentPath(document.id));
+    navigateTo(documentPath(document.uuid));
   }
 
   return (

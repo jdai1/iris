@@ -31,7 +31,7 @@ export function DocumentCard({
   useEffect(() => {
     setSaved(document.bookshelf_status === 'saved');
     setFavorited(Boolean(document.bookshelf_favorited));
-  }, [document.id, document.bookshelf_status, document.bookshelf_favorited]);
+  }, [document.uuid, document.bookshelf_status, document.bookshelf_favorited]);
 
   async function loadCollections() {
     if (collectionsLoaded) return;
@@ -47,7 +47,7 @@ export function DocumentCard({
     setSaving(true);
     setError(null);
     try {
-      await updateDocumentBookshelf(document.id, { status: 'saved' });
+      await updateDocumentBookshelf(document.uuid, { status: 'saved' });
       setSaved(true);
       setActionsOpen(false);
     } catch (err) {
@@ -62,7 +62,7 @@ export function DocumentCard({
     setError(null);
     try {
       const nextFavorited = !favorited;
-      await updateDocumentBookshelf(document.id, { favorited: nextFavorited });
+      await updateDocumentBookshelf(document.uuid, { favorited: nextFavorited });
       setFavorited(nextFavorited);
       setActionsOpen(false);
     } catch (err) {
@@ -76,7 +76,7 @@ export function DocumentCard({
     setSaving(true);
     setError(null);
     try {
-      await addBookshelfCollectionItem(collectionId, document.id);
+      await addBookshelfCollectionItem(collectionId, document.uuid);
       setAddedCollectionIds((current) => new Set(current).add(collectionId));
       setSaved(true);
       setActionsOpen(false);
@@ -90,7 +90,7 @@ export function DocumentCard({
   function openDocument(event: MouseEvent<HTMLAnchorElement>) {
     if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
     event.preventDefault();
-    navigateTo(documentPath(document.id));
+    navigateTo(documentPath(document.uuid));
   }
 
   const actionsMenu = (
@@ -152,7 +152,7 @@ export function DocumentCard({
       )}
       <div className={compact ? 'document-title-row' : undefined}>
         <Heading as="h3" mt="2" mb="3" fontSize="xl" lineHeight="1.2" fontWeight="600">
-          <a className="document-detail-link" href={documentPath(document.id)} onClick={openDocument}>
+          <a className="document-detail-link" href={documentPath(document.uuid)} onClick={openDocument}>
             {document.title ?? document.url}
           </a>
           {compact && (

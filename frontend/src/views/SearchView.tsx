@@ -3,6 +3,7 @@ import { Box } from '@chakra-ui/react';
 import { ArrowUpRight, Search, X } from 'lucide-react';
 import { getAgentConversation, getAgentConversations, getDocument, streamChatSearch } from '../api';
 import { CorpusSearchForm } from '../CorpusSearchForm';
+import { documentPath, navigateTo } from '../app/navigation';
 import type { AgentConversation, AgentConversationSummary, AgentStep, DocumentDetail, SearchResult } from '../types';
 
 type ChatMessage = {
@@ -93,7 +94,7 @@ export function SearchView({ onOpenProfile }: { onOpenProfile: (sourceId: number
     let cancelled = false;
     setDrawerLoading(true);
     setDrawerError(null);
-    getDocument(drawerResult.document.id)
+    getDocument(drawerResult.document.uuid)
       .then((detail) => {
         if (!cancelled) setDrawerDetail(detail);
       })
@@ -107,7 +108,7 @@ export function SearchView({ onOpenProfile }: { onOpenProfile: (sourceId: number
     return () => {
       cancelled = true;
     };
-  }, [drawerResult?.document.id]);
+  }, [drawerResult?.document.uuid]);
 
   useEffect(() => {
     return () => {
@@ -381,7 +382,7 @@ export function SearchView({ onOpenProfile }: { onOpenProfile: (sourceId: number
                 {message.role === 'assistant' && message.results && message.results.length > 0 && (
                   <SearchResultsTable
                     results={message.results}
-                    selectedDocumentId={drawerResult?.document.id ?? null}
+                    selectedDocumentId={drawerResult?.document.uuid ?? null}
                     onOpenResult={openResultDrawer}
                   />
                 )}
@@ -474,7 +475,7 @@ function SearchResultsTable({
   onOpenResult,
 }: {
   results: SearchResult[];
-  selectedDocumentId: number | null;
+  selectedDocumentId: string | null;
   onOpenResult: (result: SearchResult) => void;
 }) {
   return (
@@ -490,10 +491,10 @@ function SearchResultsTable({
         </div>
         {results.map((result) => {
           const { document } = result;
-          const selected = selectedDocumentId === document.id;
+          const selected = selectedDocumentId === document.uuid;
           return (
             <div
-              key={document.id}
+              key={document.uuid}
               className={selected ? 'search-results-row search-results-row-selected' : 'search-results-row'}
               role="row"
               tabIndex={0}
@@ -598,11 +599,19 @@ function SearchResultDrawer({
             {detail.outgoing_links.length ? (
               <div className="bookshelf-detail-link-list">
                 {detail.outgoing_links.slice(0, 8).map((link, index) => (
-                  <a key={`${link.target_url}-${index}`} href={link.target_url} target="_blank" rel="noreferrer">
-                    <strong>{link.anchor_text || link.target_domain || link.target_url}</strong>
-                    <small>{link.target_domain || link.target_url}</small>
-                    {link.context && <span>{link.context}</span>}
-                  </a>
+                  link.target_document_uuid ? (
+                    <button key={`${link.target_url}-${index}`} type="button" onClick={() => navigateTo(documentPath(link.target_document_uuid!))}>
+                      <strong>{link.anchor_text || link.target_domain || link.target_url}</strong>
+                      <small>{link.target_domain || link.target_url}</small>
+                      {link.context && <span>{link.context}</span>}
+                    </button>
+                  ) : (
+                    <a key={`${link.target_url}-${index}`} href={link.target_url} target="_blank" rel="noreferrer">
+                      <strong>{link.anchor_text || link.target_domain || link.target_url}</strong>
+                      <small>{link.target_domain || link.target_url}</small>
+                      {link.context && <span>{link.context}</span>}
+                    </a>
+                  )
                 ))}
               </div>
             ) : (
@@ -617,7 +626,7 @@ function SearchResultDrawer({
             {detail.incoming_links.length ? (
               <div className="bookshelf-detail-link-list">
                 {detail.incoming_links.slice(0, 8).map((link, index) => (
-                  <button key={`${link.source_document_id}-${index}`} type="button">
+                  <button key={`${link.source_document_uuid}-${index}`} type="button" onClick={() => navigateTo(documentPath(link.source_document_uuid))}>
                     <strong>{link.anchor_text || link.target_url || 'Referenced document'}</strong>
                     <small>{link.target_url}</small>
                   </button>
