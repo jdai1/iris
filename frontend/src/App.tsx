@@ -9,7 +9,7 @@ import { AdminView } from './views/AdminView';
 import { BookshelfView } from './views/BookshelfView';
 import { DirectoryView } from './views/DirectoryView';
 import { SearchView } from './views/SearchView';
-import { documentUuidFromPath, initialView, navigateTo, profileTargetFromPath, VIEW_STORAGE_KEY, viewFromPath, viewPaths, type ProfileTarget, type View } from './app/navigation';
+import { documentPath, documentUuidFromPath, initialView, navigateTo, profileTargetFromPath, VIEW_STORAGE_KEY, viewFromPath, viewPaths, type ProfileTarget, type View } from './app/navigation';
 import { DocumentRouteDrawer } from './components/DocumentRouteDrawer';
 import { AppShell, Sidebar, Workspace } from './layout';
 import { EmbeddingExplorer } from './EmbeddingExplorer';
@@ -32,6 +32,9 @@ function IrisApp({ currentUser, onSignOut }: { currentUser: IrisUser | null; onS
   );
   const [documentUuid, setDocumentUuid] = useState<string | null>(() =>
     typeof window === 'undefined' ? null : documentUuidFromPath(window.location.pathname),
+  );
+  const [documentReason, setDocumentReason] = useState<string | null>(() =>
+    typeof window === 'undefined' ? null : readDocumentReason(window.history.state),
   );
   const [themeMode, setThemeMode] = useState<ThemeMode>(initialTheme);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -59,6 +62,7 @@ function IrisApp({ currentUser, onSignOut }: { currentUser: IrisUser | null; onS
     function handlePopState() {
       const nextDocumentUuid = documentUuidFromPath(window.location.pathname);
       setDocumentUuid(nextDocumentUuid);
+      setDocumentReason(nextDocumentUuid === null ? null : readDocumentReason(window.history.state));
       if (nextDocumentUuid !== null) return;
       const nextView = viewFromPath(window.location.pathname) ?? 'search';
       setProfileTarget(profileTargetFromPath(window.location.pathname));
@@ -111,6 +115,10 @@ function IrisApp({ currentUser, onSignOut }: { currentUser: IrisUser | null; onS
     navigateTo(fallbackPath, { replace: true });
   }
 
+  function openSearchDocument(documentUuid: string, reason: string) {
+    navigateTo(documentPath(documentUuid), { state: { documentReason: reason } });
+  }
+
   const navItems: Array<{ view: View; label: string; icon: ReactNode; adminOnly?: boolean }> = [
     { view: 'search', label: 'Search', icon: <Search size={15} /> },
     { view: 'bookshelf', label: 'Bookshelf', icon: <BookOpen size={15} /> },
@@ -142,11 +150,11 @@ function IrisApp({ currentUser, onSignOut }: { currentUser: IrisUser | null; onS
               }}
               uiVariant="nav"
               justifyContent="flex-start"
-              data-active={view === item.view ? 'true' : undefined}
+              data-active={documentUuid === null && view === item.view ? 'true' : undefined}
               bg="transparent"
-              color={view === item.view ? 'iris.900' : 'iris.500'}
+              color={documentUuid === null && view === item.view ? 'iris.900' : 'iris.500'}
               fontSize="14px"
-              fontWeight={view === item.view ? '600' : '500'}
+              fontWeight={documentUuid === null && view === item.view ? '600' : '500'}
               lineHeight="1"
               _hover={{
                 bg: 'transparent',
@@ -198,7 +206,7 @@ function IrisApp({ currentUser, onSignOut }: { currentUser: IrisUser | null; onS
         )}
       </Sidebar>
       <Workspace view={view}>
-        {view === 'search' && <SearchView onOpenProfile={openProfile} />}
+        {view === 'search' && <SearchView selectedDocumentUuid={documentUuid} onOpenDocument={openSearchDocument} />}
         {view === 'bookshelf' && <BookshelfView onDiscover={() => {
           setDocumentUuid(null);
           setView('search');
@@ -208,9 +216,15 @@ function IrisApp({ currentUser, onSignOut }: { currentUser: IrisUser | null; onS
         {view === 'graph' && <GraphExplorer onOpenProfile={openProfile} />}
         {view === 'admin' && currentUser?.is_admin && <AdminView />}
       </Workspace>
-      {documentUuid !== null && <DocumentRouteDrawer documentUuid={documentUuid} onClose={closeDocumentDrawer} />}
+      {documentUuid !== null && <DocumentRouteDrawer documentUuid={documentUuid} reason={documentReason} onClose={closeDocumentDrawer} />}
     </AppShell>
   );
+}
+
+function readDocumentReason(state: unknown): string | null {
+  if (!state || typeof state !== 'object' || !('documentReason' in state)) return null;
+  const reason = (state as { documentReason?: unknown }).documentReason;
+  return typeof reason === 'string' && reason.trim() ? reason : null;
 }
 
 export default function App() {

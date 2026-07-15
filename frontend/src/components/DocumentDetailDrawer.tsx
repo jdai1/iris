@@ -30,6 +30,7 @@ export function DocumentDetailDrawer({
   closing,
   className = '',
   ariaLabel = 'Document details',
+  reason,
   onEntryChange,
   onClose,
 }: {
@@ -42,6 +43,7 @@ export function DocumentDetailDrawer({
   closing: boolean;
   className?: string;
   ariaLabel?: string;
+  reason?: string | null;
   onEntryChange: (entry: BookshelfEntry) => void;
   onClose: () => void;
 }) {
@@ -168,6 +170,13 @@ export function DocumentDetailDrawer({
         <h4>Summary</h4>
         <p>{document.summary || 'No summary yet.'}</p>
       </section>
+
+      {reason && (
+        <section className="bookshelf-detail-section search-result-match">
+          <h4>Why This Result</h4>
+          <p>{reason}</p>
+        </section>
+      )}
 
       <section className="bookshelf-detail-section">
         <div className="bookshelf-detail-section-heading">

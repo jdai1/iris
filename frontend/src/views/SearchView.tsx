@@ -1,10 +1,9 @@
 import { FormEvent, ReactNode, useEffect, useRef, useState } from 'react';
 import { Box } from '@chakra-ui/react';
-import { ArrowUpRight, Search, X } from 'lucide-react';
-import { getAgentConversation, getAgentConversations, getDocument, streamChatSearch } from '../api';
+import { ArrowUpRight, Search } from 'lucide-react';
+import { getAgentConversation, getAgentConversations, streamChatSearch } from '../api';
 import { CorpusSearchForm } from '../CorpusSearchForm';
-import { documentPath, navigateTo } from '../app/navigation';
-import type { AgentConversation, AgentConversationSummary, AgentStep, DocumentDetail, SearchResult } from '../types';
+import type { AgentConversation, AgentConversationSummary, AgentStep, SearchResult } from '../types';
 
 type ChatMessage = {
   id: string;
@@ -19,7 +18,13 @@ const ACTIVE_CHAT_STORAGE_KEY = 'iris.activeChatUuid';
 const SEARCH_RELOAD_STORAGE_KEY = 'iris.searchReloading';
 const HISTORY_PAGE_SIZE = 15;
 
-export function SearchView({ onOpenProfile }: { onOpenProfile: (sourceId: number, domain: string) => void }) {
+export function SearchView({
+  selectedDocumentUuid,
+  onOpenDocument,
+}: {
+  selectedDocumentUuid: string | null;
+  onOpenDocument: (documentUuid: string, reason: string) => void;
+}) {
   const [query, setQuery] = useState('');
   const [conversationId, setConversationId] = useState<string | undefined>();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -29,16 +34,10 @@ export function SearchView({ onOpenProfile }: { onOpenProfile: (sourceId: number
   const [historyLoadingMore, setHistoryLoadingMore] = useState(false);
   const [historyHasMore, setHistoryHasMore] = useState(false);
   const [startedNewChat, setStartedNewChat] = useState(false);
-  const [drawerResult, setDrawerResult] = useState<SearchResult | null>(null);
-  const [drawerDetail, setDrawerDetail] = useState<DocumentDetail | null>(null);
-  const [drawerLoading, setDrawerLoading] = useState(false);
-  const [drawerError, setDrawerError] = useState<string | null>(null);
-  const [drawerClosing, setDrawerClosing] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const transcriptRef = useRef<HTMLDivElement | null>(null);
   const historyRef = useRef<HTMLDivElement | null>(null);
-  const drawerCloseTimeoutRef = useRef<number | null>(null);
   const didLoadInitialConversation = useRef(false);
   const shouldRestoreConversation = useRef(
     typeof window !== 'undefined' && window.sessionStorage.getItem(SEARCH_RELOAD_STORAGE_KEY) === '1',
@@ -83,60 +82,8 @@ export function SearchView({ onOpenProfile }: { onOpenProfile: (sourceId: number
     return () => window.clearTimeout(timeout);
   }, [historyQuery]);
 
-  useEffect(() => {
-    if (!drawerResult) {
-      setDrawerDetail(null);
-      setDrawerError(null);
-      setDrawerLoading(false);
-      return;
-    }
-
-    let cancelled = false;
-    setDrawerLoading(true);
-    setDrawerError(null);
-    getDocument(drawerResult.document.uuid)
-      .then((detail) => {
-        if (!cancelled) setDrawerDetail(detail);
-      })
-      .catch((err) => {
-        if (!cancelled) setDrawerError(err instanceof Error ? err.message : 'Could not load document');
-      })
-      .finally(() => {
-        if (!cancelled) setDrawerLoading(false);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [drawerResult?.document.uuid]);
-
-  useEffect(() => {
-    return () => {
-      if (drawerCloseTimeoutRef.current !== null) window.clearTimeout(drawerCloseTimeoutRef.current);
-    };
-  }, []);
-
   function openResultDrawer(result: SearchResult) {
-    if (drawerCloseTimeoutRef.current !== null) {
-      window.clearTimeout(drawerCloseTimeoutRef.current);
-      drawerCloseTimeoutRef.current = null;
-    }
-    setDrawerClosing(false);
-    setDrawerResult(result);
-    setDrawerDetail(null);
-    setDrawerError(null);
-  }
-
-  function closeResultDrawer() {
-    if (!drawerResult || drawerClosing) return;
-    setDrawerClosing(true);
-    drawerCloseTimeoutRef.current = window.setTimeout(() => {
-      setDrawerResult(null);
-      setDrawerDetail(null);
-      setDrawerError(null);
-      setDrawerClosing(false);
-      drawerCloseTimeoutRef.current = null;
-    }, 180);
+    onOpenDocument(result.document.uuid, naturalRelevance(result));
   }
 
   async function refreshHistory(nextQuery = historyQuery) {
@@ -203,7 +150,6 @@ export function SearchView({ onOpenProfile }: { onOpenProfile: (sourceId: number
     setStartedNewChat(true);
     setConversationId(undefined);
     setMessages([]);
-    closeResultDrawer();
     setError(null);
   }
 
@@ -382,7 +328,7 @@ export function SearchView({ onOpenProfile }: { onOpenProfile: (sourceId: number
                 {message.role === 'assistant' && message.results && message.results.length > 0 && (
                   <SearchResultsTable
                     results={message.results}
-                    selectedDocumentUuid={drawerResult?.document.uuid ?? null}
+                    selectedDocumentUuid={selectedDocumentUuid}
                     onOpenResult={openResultDrawer}
                   />
                 )}
@@ -406,20 +352,6 @@ export function SearchView({ onOpenProfile }: { onOpenProfile: (sourceId: number
       </Box>
         </div>
       </div>
-      {drawerResult && (
-        <>
-          <button className={drawerClosing ? 'drawer-backdrop drawer-closing' : 'drawer-backdrop'} type="button" aria-label="Close details" onClick={closeResultDrawer} />
-          <SearchResultDrawer
-            result={drawerResult}
-            detail={drawerDetail}
-            loading={drawerLoading}
-            error={drawerError}
-            closing={drawerClosing}
-            onClose={closeResultDrawer}
-            onOpenProfile={onOpenProfile}
-          />
-        </>
-      )}
     </Box>
   );
 }
@@ -527,118 +459,6 @@ function SearchResultsTable({
         })}
       </div>
     </div>
-  );
-}
-
-function SearchResultDrawer({
-  result,
-  detail,
-  loading,
-  error,
-  closing,
-  onClose,
-  onOpenProfile,
-}: {
-  result: SearchResult;
-  detail: DocumentDetail | null;
-  loading: boolean;
-  error: string | null;
-  closing: boolean;
-  onClose: () => void;
-  onOpenProfile: (sourceId: number, domain: string) => void;
-}) {
-  const document = detail ?? result.document;
-  return (
-    <aside className={closing ? 'bookshelf-detail-drawer search-result-drawer drawer-closing' : 'bookshelf-detail-drawer search-result-drawer'} aria-label="Search result details">
-      <div className="bookshelf-detail-header">
-        <div>
-          <button className="profile-link" type="button" onClick={() => onOpenProfile(document.source_id, document.source_domain)}>
-            {document.source_domain}
-          </button>
-          <h3>
-            {document.title ?? document.url}
-            <a href={document.url} target="_blank" rel="noreferrer" aria-label="Open document">
-              <ArrowUpRight size={15} />
-            </a>
-          </h3>
-        </div>
-        <button type="button" onClick={onClose} aria-label="Close details">
-          <X size={16} />
-        </button>
-      </div>
-
-      {loading && <div className="skeleton-stack" aria-label="Loading document details"><span className="skeleton-line" /><span className="skeleton-line" /><span className="skeleton-line" /></div>}
-      {error && <div className="error">{error}</div>}
-
-      <section className="bookshelf-detail-section">
-        <h4>Summary</h4>
-        <p>{document.summary || document.one_liner || 'No summary yet.'}</p>
-      </section>
-
-      <section className="bookshelf-detail-section search-result-match">
-        <h4>Why This Result</h4>
-        <p>{naturalRelevance(result)}</p>
-      </section>
-
-      {document.topics.length > 0 && (
-        <section className="bookshelf-detail-section">
-          <h4>Tags</h4>
-          <div className="bookshelf-detail-tags directory-document-drawer-tags">
-            {document.topics.map((topic) => <span key={topic}>{topic}</span>)}
-          </div>
-        </section>
-      )}
-
-      {detail && (
-        <div className="bookshelf-detail-reference-grid">
-          <section className="bookshelf-detail-section">
-            <div className="bookshelf-detail-section-heading bookshelf-detail-reference-heading">
-              <h4>References</h4>
-              <span>{detail.outgoing_links.length}</span>
-            </div>
-            {detail.outgoing_links.length ? (
-              <div className="bookshelf-detail-link-list">
-                {detail.outgoing_links.slice(0, 8).map((link, index) => (
-                  link.target_document_uuid ? (
-                    <button key={`${link.target_url}-${index}`} type="button" onClick={() => navigateTo(documentPath(link.target_document_uuid!))}>
-                      <strong>{link.anchor_text || link.target_domain || link.target_url}</strong>
-                      <small>{link.target_domain || link.target_url}</small>
-                      {link.context && <span>{link.context}</span>}
-                    </button>
-                  ) : (
-                    <a key={`${link.target_url}-${index}`} href={link.target_url} target="_blank" rel="noreferrer">
-                      <strong>{link.anchor_text || link.target_domain || link.target_url}</strong>
-                      <small>{link.target_domain || link.target_url}</small>
-                      {link.context && <span>{link.context}</span>}
-                    </a>
-                  )
-                ))}
-              </div>
-            ) : (
-              <p>No outgoing references indexed.</p>
-            )}
-          </section>
-          <section className="bookshelf-detail-section">
-            <div className="bookshelf-detail-section-heading bookshelf-detail-reference-heading">
-              <h4>Referenced By</h4>
-              <span>{detail.incoming_links.length}</span>
-            </div>
-            {detail.incoming_links.length ? (
-              <div className="bookshelf-detail-link-list">
-                {detail.incoming_links.slice(0, 8).map((link, index) => (
-                  <button key={`${link.source_document_uuid}-${index}`} type="button" onClick={() => navigateTo(documentPath(link.source_document_uuid))}>
-                    <strong>{link.anchor_text || link.target_url || 'Referenced document'}</strong>
-                    <small>{link.target_url}</small>
-                  </button>
-                ))}
-              </div>
-            ) : (
-              <p>No incoming references indexed.</p>
-            )}
-          </section>
-        </div>
-      )}
-    </aside>
   );
 }
 
