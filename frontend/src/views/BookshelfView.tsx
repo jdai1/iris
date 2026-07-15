@@ -411,54 +411,52 @@ export function BookshelfView({ onDiscover }: { onDiscover: () => void }) {
         </aside>
 
         <div className="bookshelf-table-panel">
-          {(activeCollection || selectedDocumentUuids.size > 0) && (
-            <div className="bookshelf-toolbar">
-              {activeCollection && (
-                <div className="bookshelf-toolbar-actions">
-                  <button
-                    className={confirmDeleteCollectionId === activeCollection.id ? 'bookshelf-icon-action bookshelf-icon-action-danger bookshelf-icon-action-confirm' : 'bookshelf-icon-action bookshelf-icon-action-danger'}
-                    type="button"
-                    onClick={deleteActiveCollection}
-                    disabled={saving}
-                    aria-label={confirmDeleteCollectionId === activeCollection.id ? 'Confirm delete collection' : 'Delete collection'}
-                    data-tooltip={confirmDeleteCollectionId === activeCollection.id ? 'Confirm delete' : 'Delete collection'}
-                  >
-                    {confirmDeleteCollectionId === activeCollection.id ? <Check size={15} /> : <Trash2 size={15} />}
-                  </button>
-                </div>
+          <div className="bookshelf-toolbar">
+            <div className="bookshelf-bulk-toolbar" aria-label="Selected document actions">
+              <span aria-live="polite">
+                {selectedDocumentUuids.size > 0 ? `${selectedDocumentUuids.size} selected` : 'Select documents to manage'}
+              </span>
+              {collections.length > (activeCollection ? 1 : 0) && (
+                <select
+                  value=""
+                  onChange={(event) => {
+                    const collectionId = Number(event.target.value);
+                    if (collectionId) void addSelectedToCollection(collectionId);
+                  }}
+                  disabled={selectedDocumentUuids.size === 0 || saving}
+                  aria-label="Add selected documents to collection"
+                >
+                  <option value="">Add to collection...</option>
+                  {collections
+                    .filter((collection) => collection.id !== activeCollection?.id)
+                    .map((collection) => (
+                      <option key={collection.id} value={collection.id}>{collection.name}</option>
+                    ))}
+                </select>
               )}
-              {selectedDocumentUuids.size > 0 && (
-                <div className="bookshelf-bulk-menu">
-                  <span>{selectedDocumentUuids.size} selected</span>
-                  {collections.length > (activeCollection ? 1 : 0) && (
-                    <select
-                      value=""
-                      onChange={(event) => {
-                        const collectionId = Number(event.target.value);
-                        if (collectionId) void addSelectedToCollection(collectionId);
-                      }}
-                      disabled={saving}
-                      aria-label="Add selected documents to collection"
-                    >
-                      <option value="">Add to playlist...</option>
-                      {collections
-                        .filter((collection) => collection.id !== activeCollection?.id)
-                        .map((collection) => (
-                          <option key={collection.id} value={collection.id}>{collection.name}</option>
-                        ))}
-                    </select>
-                  )}
-                  <button type="button" onClick={removeSelectedFromActiveCollection} disabled={saving}>
-                    <Trash2 size={13} />
-                    Remove
-                  </button>
-                  <button type="button" onClick={() => setSelectedDocumentUuids(new Set())}>
-                    Clear selection
-                  </button>
-                </div>
-              )}
+              <button type="button" onClick={removeSelectedFromActiveCollection} disabled={selectedDocumentUuids.size === 0 || saving}>
+                <Trash2 size={13} />
+                Remove
+              </button>
+              <button type="button" onClick={() => setSelectedDocumentUuids(new Set())} disabled={selectedDocumentUuids.size === 0}>
+                Clear
+              </button>
             </div>
-          )}
+            {activeCollection && (
+              <div className="bookshelf-toolbar-actions">
+                <button
+                  className={confirmDeleteCollectionId === activeCollection.id ? 'bookshelf-icon-action bookshelf-icon-action-danger bookshelf-icon-action-confirm' : 'bookshelf-icon-action bookshelf-icon-action-danger'}
+                  type="button"
+                  onClick={deleteActiveCollection}
+                  disabled={saving}
+                  aria-label={confirmDeleteCollectionId === activeCollection.id ? 'Confirm delete collection' : 'Delete collection'}
+                  data-tooltip={confirmDeleteCollectionId === activeCollection.id ? 'Confirm delete' : 'Delete collection'}
+                >
+                  {confirmDeleteCollectionId === activeCollection.id ? <Check size={15} /> : <Trash2 size={15} />}
+                </button>
+              </div>
+            )}
+          </div>
 
           <div className="bookshelf-collection-search">
             <form

@@ -1251,8 +1251,12 @@
 
 .bookshelf-toolbar {
   display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
   gap: 8px;
+  min-height: 38px;
   margin-bottom: 8px;
+  border-bottom: 1px solid var(--border-subtle);
 }
 
 .bookshelf-toolbar-actions {
@@ -1314,51 +1318,48 @@
   color: var(--status-red-text);
 }
 
-.bookshelf-bulk-menu {
-  justify-self: start;
-  display: grid;
-  gap: 0;
-  min-width: 190px;
-  border: 1px solid var(--border);
-  background: var(--bg-raised);
-  padding: 0;
+.bookshelf-bulk-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
   color: var(--text-muted);
   font-size: 12px;
-  box-shadow: var(--shadow-panel);
 }
 
-.bookshelf-bulk-menu > span {
-  min-height: var(--menu-row-min-h);
-  padding: 0 var(--menu-row-pad-x);
+.bookshelf-bulk-toolbar > span {
+  min-width: 150px;
   color: var(--text-subtle);
-  display: inline-flex;
-  align-items: center;
 }
 
-.bookshelf-bulk-menu select,
-.bookshelf-bulk-menu button {
+.bookshelf-bulk-toolbar select,
+.bookshelf-bulk-toolbar button {
   border: 1px solid var(--border);
   background: var(--bg-raised);
   color: var(--text-muted);
-  min-height: var(--menu-row-min-h);
-  padding: 0 var(--menu-row-pad-x);
+  min-height: 28px;
+  padding: 0 8px;
   font: inherit;
   font-size: 12px;
 }
 
-.bookshelf-bulk-menu button {
+.bookshelf-bulk-toolbar button {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 6px;
-  width: 100%;
-  border-color: transparent;
   background: transparent;
   color: var(--text-subtle);
 }
 
-.bookshelf-bulk-menu button:hover:not(:disabled) {
+.bookshelf-bulk-toolbar button:hover:not(:disabled) {
   color: var(--text);
   background: var(--bg-hover);
+}
+
+.bookshelf-bulk-toolbar :disabled {
+  cursor: default;
+  opacity: 0.45;
 }
 
 .bookshelf-collection-search {
