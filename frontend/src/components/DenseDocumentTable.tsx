@@ -1,4 +1,4 @@
-import { KeyboardEvent, MouseEvent, useRef, useState } from 'react';
+import { KeyboardEvent, MouseEvent, useEffect, useRef, useState } from 'react';
 import { ArrowUpRight, MoreVertical, Trash2 } from 'lucide-react';
 import { OverflowText } from './OverflowText';
 import type { Document } from '../types';
@@ -24,8 +24,8 @@ export function DenseDocumentTable({
   noteHeader = 'Notes',
   emptyNoteLabel = '—',
   onPrimaryClick,
-  onModifiedClick,
-  onDoubleClick,
+  onToggleSelection,
+  onToggleAll,
   onToggleFavorite,
   onRemove,
 }: {
@@ -40,29 +40,41 @@ export function DenseDocumentTable({
   noteHeader?: string;
   emptyNoteLabel?: string;
   onPrimaryClick: (row: DenseDocumentTableRow, event: MouseEvent<HTMLDivElement> | KeyboardEvent<HTMLDivElement>) => void;
-  onModifiedClick?: (row: DenseDocumentTableRow, event: MouseEvent<HTMLDivElement>) => void;
-  onDoubleClick?: (row: DenseDocumentTableRow, event: MouseEvent<HTMLDivElement>) => void;
+  onToggleSelection?: (row: DenseDocumentTableRow) => void;
+  onToggleAll?: () => void;
   onToggleFavorite?: (row: DenseDocumentTableRow) => void;
   onRemove?: (row: DenseDocumentTableRow) => void;
 }) {
   const [openActionDocumentId, setOpenActionDocumentId] = useState<number | null>(null);
-  const clickTimerRef = useRef<number | null>(null);
+  const allSelected = rows.length > 0 && rows.every((row) => row.selected);
+  const someSelected = rows.some((row) => row.selected);
+  const selectAllRef = useRef<HTMLInputElement | null>(null);
   const tableClassName = [
     'bookshelf-table',
     showFavorite || (showActions && showNote) ? '' : showActions ? 'bookshelf-table-actions-only' : showNote ? 'bookshelf-table-simple' : 'bookshelf-table-minimal',
     showSource ? '' : 'bookshelf-table-no-source',
+    selectionEnabled ? 'bookshelf-table-selectable' : '',
   ].filter(Boolean).join(' ');
 
-  function clearClickTimer() {
-    if (clickTimerRef.current !== null) {
-      window.clearTimeout(clickTimerRef.current);
-      clickTimerRef.current = null;
-    }
-  }
+  useEffect(() => {
+    if (selectAllRef.current) selectAllRef.current.indeterminate = someSelected && !allSelected;
+  }, [allSelected, someSelected]);
 
   return (
     <div className={tableClassName} role="table" aria-label={ariaLabel}>
       <div className="bookshelf-table-row bookshelf-table-head" role="row">
+        {selectionEnabled && (
+          <span className="bookshelf-table-select-cell">
+            <input
+              ref={selectAllRef}
+              type="checkbox"
+              checked={allSelected}
+              onChange={onToggleAll}
+              aria-checked={someSelected && !allSelected ? 'mixed' : allSelected}
+              aria-label={allSelected ? 'Deselect all documents' : 'Select all documents'}
+            />
+          </span>
+        )}
         <span>Title</span>
         <span>Tags</span>
         {showNote && <span>{noteHeader}</span>}
@@ -82,32 +94,28 @@ export function DenseDocumentTable({
             aria-selected={selectionEnabled ? row.selected : undefined}
             onClick={(event) => {
               const target = event.target as HTMLElement;
-              if (target.closest('a, button, select')) return;
-              if ((event.metaKey || event.ctrlKey || event.shiftKey) && onModifiedClick) {
-                onModifiedClick(row, event);
-                return;
-              }
-              clearClickTimer();
-              clickTimerRef.current = window.setTimeout(() => {
-                onPrimaryClick(row, event);
-                clickTimerRef.current = null;
-              }, 180);
-            }}
-            onMouseDown={(event) => {
-              if (event.detail > 1) event.preventDefault();
-            }}
-            onDoubleClick={(event) => {
-              event.preventDefault();
-              clearClickTimer();
-              onDoubleClick?.(row, event);
+              if (target.closest('a, button, select, input')) return;
+              onPrimaryClick(row, event);
             }}
             onKeyDown={(event) => {
+              if (event.target !== event.currentTarget) return;
               if (event.key === 'Enter' || event.key === ' ') {
                 event.preventDefault();
                 onPrimaryClick(row, event);
               }
             }}
           >
+            {selectionEnabled && (
+              <span className="bookshelf-table-select-cell">
+                <input
+                  type="checkbox"
+                  checked={Boolean(row.selected)}
+                  onChange={() => onToggleSelection?.(row)}
+                  onClick={(event) => event.stopPropagation()}
+                  aria-label={`${row.selected ? 'Deselect' : 'Select'} ${document.title ?? document.url}`}
+                />
+              </span>
+            )}
             <span
               className="bookshelf-table-title tooltip-overflow-cell"
               data-label="Title"

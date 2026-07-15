@@ -1,4 +1,4 @@
-import { FormEvent, MouseEvent, useEffect, useRef, useState } from 'react';
+import { FormEvent, useEffect, useRef, useState } from 'react';
 import { Check, Plus, Search, Trash2 } from 'lucide-react';
 import {
   addBookshelfCollectionItem,
@@ -43,10 +43,7 @@ export function BookshelfView({ onDiscover }: { onDiscover: () => void }) {
   const [addingDocumentId, setAddingDocumentId] = useState<number | null>(null);
   const [confirmDeleteCollectionId, setConfirmDeleteCollectionId] = useState<number | null>(null);
   const [selectedDocumentIds, setSelectedDocumentIds] = useState<Set<number>>(new Set());
-  const [lastSelectedDocumentId, setLastSelectedDocumentId] = useState<number | null>(null);
-  const [bulkMenuOpen, setBulkMenuOpen] = useState(false);
   const collectionDraftRef = useRef<HTMLInputElement | null>(null);
-  const bookshelfPanelRef = useRef<HTMLDivElement | null>(null);
 
   const tableRows = filterBookshelfEntries(entries, collections, activeView);
   const discoverLabel = 'Discover';
@@ -89,26 +86,15 @@ export function BookshelfView({ onDiscover }: { onDiscover: () => void }) {
     setCollectionSearchQuery('');
     setCollectionSearchResults([]);
     setSelectedDocumentIds(new Set());
-    setLastSelectedDocumentId(null);
-    setBulkMenuOpen(false);
   }, [activeView]);
 
   useEffect(() => {
-    if (selectedDocumentIds.size === 0) setBulkMenuOpen(false);
-  }, [selectedDocumentIds.size]);
-
-  useEffect(() => {
-    if (selectedDocumentIds.size === 0) return;
-    function clearSelectionOnOutsideClick(event: PointerEvent) {
-      const target = event.target;
-      if (target instanceof Node && bookshelfPanelRef.current?.contains(target)) return;
-      setSelectedDocumentIds(new Set());
-      setLastSelectedDocumentId(null);
-      setBulkMenuOpen(false);
-    }
-    document.addEventListener('pointerdown', clearSelectionOnOutsideClick);
-    return () => document.removeEventListener('pointerdown', clearSelectionOnOutsideClick);
-  }, [selectedDocumentIds.size]);
+    const visibleIds = new Set(tableRows.map((row) => row.document.id));
+    setSelectedDocumentIds((current) => {
+      const next = new Set(Array.from(current).filter((id) => visibleIds.has(id)));
+      return next.size === current.size ? current : next;
+    });
+  }, [entries, collections, activeView]);
 
   useEffect(() => {
     const query = collectionSearchQuery.trim();
@@ -254,7 +240,6 @@ export function BookshelfView({ onDiscover }: { onDiscover: () => void }) {
         next.delete(documentId);
         return next;
       });
-      setBulkMenuOpen(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not remove document');
     } finally {
@@ -273,7 +258,7 @@ export function BookshelfView({ onDiscover }: { onDiscover: () => void }) {
       if (collection) {
         setCollections((current) => current.map((item) => (item.id === collection.id ? collection : item)));
       }
-      setBulkMenuOpen(false);
+      setSelectedDocumentIds(new Set());
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not add selected documents');
     } finally {
@@ -301,8 +286,6 @@ export function BookshelfView({ onDiscover }: { onDiscover: () => void }) {
         setEntries((current) => mergeBookshelfEntryUpdates(current, updates));
       }
       setSelectedDocumentIds(new Set());
-      setLastSelectedDocumentId(null);
-      setBulkMenuOpen(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not remove selected documents');
     } finally {
@@ -310,40 +293,20 @@ export function BookshelfView({ onDiscover }: { onDiscover: () => void }) {
     }
   }
 
-  function selectBookshelfRow(entry: BookshelfEntry, event: MouseEvent<HTMLDivElement>, forceSelect = false) {
-    const target = event.target as HTMLElement;
-    if (target.closest('a, button, select')) return;
+  function toggleBookshelfRow(entry: BookshelfEntry) {
     const documentId = entry.document.id;
-    if (event.shiftKey && lastSelectedDocumentId !== null) {
-      event.preventDefault();
-      const startIndex = tableRows.findIndex((row) => row.document.id === lastSelectedDocumentId);
-      const endIndex = tableRows.findIndex((row) => row.document.id === documentId);
-      if (startIndex !== -1 && endIndex !== -1) {
-        const [start, end] = startIndex < endIndex ? [startIndex, endIndex] : [endIndex, startIndex];
-        setSelectedDocumentIds((current) => {
-          const next = new Set(current);
-          tableRows.slice(start, end + 1).forEach((row) => next.add(row.document.id));
-          return next;
-        });
-        setLastSelectedDocumentId(documentId);
-        return;
-      }
-    }
-    if (!forceSelect && !event.metaKey && !event.ctrlKey) return;
     setSelectedDocumentIds((current) => {
-      if (event.metaKey || event.ctrlKey) {
-        const next = new Set(current);
-        if (next.has(documentId)) {
-          next.delete(documentId);
-        } else {
-          next.add(documentId);
-        }
-        return next;
-      }
-      return new Set([documentId]);
+      const next = new Set(current);
+      if (next.has(documentId)) next.delete(documentId);
+      else next.add(documentId);
+      return next;
     });
-    setLastSelectedDocumentId(documentId);
-    if (forceSelect) setBulkMenuOpen(true);
+  }
+
+  function toggleAllBookshelfRows() {
+    const visibleIds = tableRows.map((row) => row.document.id);
+    const allSelected = visibleIds.length > 0 && visibleIds.every((id) => selectedDocumentIds.has(id));
+    setSelectedDocumentIds(allSelected ? new Set() : new Set(visibleIds));
   }
 
   function openBookshelfDrawer(entry: BookshelfEntry) {
@@ -447,8 +410,8 @@ export function BookshelfView({ onDiscover }: { onDiscover: () => void }) {
           ))}
         </aside>
 
-        <div className="bookshelf-table-panel" ref={bookshelfPanelRef}>
-          {(activeCollection || (selectedDocumentIds.size > 0 && bulkMenuOpen)) && (
+        <div className="bookshelf-table-panel">
+          {(activeCollection || selectedDocumentIds.size > 0) && (
             <div className="bookshelf-toolbar">
               {activeCollection && (
                 <div className="bookshelf-toolbar-actions">
@@ -464,7 +427,7 @@ export function BookshelfView({ onDiscover }: { onDiscover: () => void }) {
                   </button>
                 </div>
               )}
-              {selectedDocumentIds.size > 0 && bulkMenuOpen && (
+              {selectedDocumentIds.size > 0 && (
                 <div className="bookshelf-bulk-menu">
                   <span>{selectedDocumentIds.size} selected</span>
                   {collections.length > (activeCollection ? 1 : 0) && (
@@ -489,8 +452,8 @@ export function BookshelfView({ onDiscover }: { onDiscover: () => void }) {
                     <Trash2 size={13} />
                     Remove
                   </button>
-                  <button type="button" onClick={() => setBulkMenuOpen(false)}>
-                    Done
+                  <button type="button" onClick={() => setSelectedDocumentIds(new Set())}>
+                    Clear selection
                   </button>
                 </div>
               )}
@@ -571,7 +534,8 @@ export function BookshelfView({ onDiscover }: { onDiscover: () => void }) {
               selectedDocumentIds={selectedDocumentIds}
               selectionEnabled
               collectionMode={Boolean(activeCollection)}
-              onRowClick={selectBookshelfRow}
+              onToggleSelection={toggleBookshelfRow}
+              onToggleAll={toggleAllBookshelfRows}
               onOpenDetail={openBookshelfDrawer}
               onToggleFavorite={toggleFavorite}
               onRemoveFromCurrent={removeDocumentFromActiveView}
@@ -645,7 +609,8 @@ function BookshelfTable({
   selectedDocumentIds,
   selectionEnabled,
   collectionMode,
-  onRowClick,
+  onToggleSelection,
+  onToggleAll,
   onOpenDetail,
   onToggleFavorite,
   onRemoveFromCurrent,
@@ -654,7 +619,8 @@ function BookshelfTable({
   selectedDocumentIds: Set<number>;
   selectionEnabled: boolean;
   collectionMode: boolean;
-  onRowClick: (entry: BookshelfEntry, event: MouseEvent<HTMLDivElement>, forceSelect?: boolean) => void;
+  onToggleSelection: (entry: BookshelfEntry) => void;
+  onToggleAll: () => void;
   onOpenDetail: (entry: BookshelfEntry) => void;
   onToggleFavorite: (entry: BookshelfEntry) => void;
   onRemoveFromCurrent: (documentId: number) => void;
@@ -683,14 +649,11 @@ function BookshelfTable({
         const entry = entriesByDocumentId.get(row.document.id);
         if (entry) onOpenDetail(entry);
       }}
-      onModifiedClick={(row, event) => {
+      onToggleSelection={(row) => {
         const entry = entriesByDocumentId.get(row.document.id);
-        if (entry) onRowClick(entry, event);
+        if (entry) onToggleSelection(entry);
       }}
-      onDoubleClick={(row, event) => {
-        const entry = entriesByDocumentId.get(row.document.id);
-        if (entry) onRowClick(entry, event, true);
-      }}
+      onToggleAll={onToggleAll}
       onToggleFavorite={(row) => {
         const entry = entriesByDocumentId.get(row.document.id);
         if (entry) onToggleFavorite(entry);

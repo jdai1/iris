@@ -1,5 +1,5 @@
 import { FormEvent, MouseEvent, RefObject, useEffect, useRef, useState } from 'react';
-import { ArrowUpRight, GitFork, Orbit, Users } from 'lucide-react';
+import { ArrowUpRight, GitFork, Orbit, Plus, Users } from 'lucide-react';
 import { updateDocumentBookshelf } from '../api';
 import { navigateTo } from '../app/navigation';
 import type { BookshelfCollection, BookshelfEntry, Document, DocumentDetail } from '../types';
@@ -185,18 +185,19 @@ export function DocumentDetailDrawer({
       <section className="bookshelf-detail-section">
         <div className="bookshelf-detail-section-heading">
           <h4>Tags</h4>
+          {!tagDraftOpen && (
+            <button
+              type="button"
+              onClick={() => setTagDraftOpen(true)}
+              aria-label="Add tag"
+              data-tooltip="Add tag"
+            >
+              <Plus size={14} />
+            </button>
+          )}
         </div>
         <div
           className={tagDraftOpen ? 'bookshelf-detail-tags bookshelf-detail-tags-editing' : 'bookshelf-detail-tags'}
-          role="button"
-          tabIndex={0}
-          onClick={() => setTagDraftOpen(true)}
-          onKeyDown={(event) => {
-            if (event.key === 'Enter' || event.key === ' ') {
-              event.preventDefault();
-              setTagDraftOpen(true);
-            }
-          }}
         >
           {[...entry.tags, ...document.topics.filter((topic) => !entry.tags.includes(topic))].map((tag) => (
             <span key={tag}>{tag}</span>
@@ -211,9 +212,7 @@ export function DocumentDetailDrawer({
                 autoFocus
               />
             </form>
-          ) : (
-            <span className="bookshelf-detail-tag-placeholder">Add tag</span>
-          )}
+          ) : null}
         </div>
       </section>
 
