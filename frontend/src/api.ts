@@ -190,8 +190,8 @@ export function searchDocuments(query: string, limit = 8): Promise<SearchRespons
   return request<SearchResponse>(`/api/documents/search?${search.toString()}`);
 }
 
-export function getDocument(documentId: number): Promise<DocumentDetail> {
-  return cachedRequest<DocumentDetail>(`document:${documentId}`, `/api/documents/${documentId}`);
+export function getDocument(documentUuid: string): Promise<DocumentDetail> {
+  return cachedRequest<DocumentDetail>(`document:${documentUuid}`, `/api/documents/${documentUuid}`);
 }
 
 export function getBookshelf(params: { status?: BookshelfStatus | 'favorite'; limit?: number; offset?: number } = {}): Promise<Page<BookshelfEntry>> {
@@ -202,9 +202,9 @@ export function getBookshelf(params: { status?: BookshelfStatus | 'favorite'; li
   return cachedRequest<Page<BookshelfEntry>>(`bookshelf:entries:${search.toString()}`, `/api/bookshelf?${search.toString()}`);
 }
 
-export function updateDocumentBookshelf(documentId: number, payload: BookshelfUpdate): Promise<BookshelfEntry> {
+export function updateDocumentBookshelf(documentUuid: string, payload: BookshelfUpdate): Promise<BookshelfEntry> {
   clearBookshelfCache();
-  return request<BookshelfEntry>(`/api/documents/${documentId}/bookshelf`, {
+  return request<BookshelfEntry>(`/api/documents/${documentUuid}/bookshelf`, {
     method: 'PATCH',
     body: JSON.stringify(payload),
   });
@@ -245,17 +245,17 @@ export function deleteBookshelfCollection(collectionId: number): Promise<void> {
   });
 }
 
-export function addBookshelfCollectionItem(collectionId: number, documentId: number): Promise<BookshelfCollection> {
+export function addBookshelfCollectionItem(collectionId: number, documentUuid: string): Promise<BookshelfCollection> {
   clearBookshelfCache();
   return request<BookshelfCollection>(`/api/bookshelf/collections/${collectionId}/items`, {
     method: 'POST',
-    body: JSON.stringify({ document_id: documentId }),
+    body: JSON.stringify({ document_uuid: documentUuid }),
   });
 }
 
-export function removeBookshelfCollectionItem(collectionId: number, documentId: number): Promise<BookshelfCollection> {
+export function removeBookshelfCollectionItem(collectionId: number, documentUuid: string): Promise<BookshelfCollection> {
   clearBookshelfCache();
-  return request<BookshelfCollection>(`/api/bookshelf/collections/${collectionId}/items/${documentId}`, {
+  return request<BookshelfCollection>(`/api/bookshelf/collections/${collectionId}/items/${documentUuid}`, {
     method: 'DELETE',
   });
 }
@@ -267,17 +267,17 @@ export function getEmbeddingMap(limit = 3000): Promise<EmbeddingMap> {
   );
 }
 
-export function getEmbeddingNeighbors(documentId: number, limit = 5): Promise<EmbeddingNeighbor[]> {
-  return request<EmbeddingNeighbor[]>(`/api/documents/${documentId}/embedding-neighbors?limit=${limit}`);
+export function getEmbeddingNeighbors(documentUuid: string, limit = 5): Promise<EmbeddingNeighbor[]> {
+  return request<EmbeddingNeighbor[]>(`/api/documents/${documentUuid}/embedding-neighbors?limit=${limit}`);
 }
 
-export function getGraph(params: { mode?: 'sources' | 'documents'; limit?: number; domain?: string; sourceId?: number; documentId?: number; depth?: number } = {}): Promise<GraphResponse> {
+export function getGraph(params: { mode?: 'sources' | 'documents'; limit?: number; domain?: string; sourceId?: number; documentUuid?: string; depth?: number } = {}): Promise<GraphResponse> {
   const search = new URLSearchParams();
   search.set('mode', params.mode ?? 'documents');
   search.set('limit', String(params.limit ?? 140));
   if (params.domain) search.set('domain', params.domain);
   if (params.sourceId) search.set('source_id', String(params.sourceId));
-  if (params.documentId) search.set('document_id', String(params.documentId));
+  if (params.documentUuid) search.set('document_uuid', params.documentUuid);
   if (params.depth) search.set('depth', String(params.depth));
   const path = `/api/graph?${search.toString()}`;
   return cachedRequest<GraphResponse>(`graph:${search.toString()}`, path);

@@ -106,12 +106,14 @@ class DocumentOutgoingLinkSchema(BaseModel):
     target_url: str
     target_domain: str | None
     target_document_id: int | None
+    target_document_uuid: str | None
     anchor_text: str | None
     context: str | None
 
 
 class DocumentIncomingLinkSchema(BaseModel):
     source_document_id: int
+    source_document_uuid: str
     target_url: str
     anchor_text: str | None
 
@@ -231,7 +233,8 @@ class BookshelfCollectionUpdateSchema(BaseModel):
 
 
 class BookshelfCollectionItemCreateSchema(BaseModel):
-    document_id: int
+    document_uuid: str | None = None
+    document_id: int | None = None
     position: int | None = None
 
 

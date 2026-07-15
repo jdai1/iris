@@ -45,7 +45,7 @@ export function GraphExplorer({ onOpenProfile }: { onOpenProfile?: (sourceId: nu
         focusId && nextMode === 'sources'
           ? { mode: nextMode, sourceId: numericNodeId(focusId), limit: 160, depth: nextDepth }
           : focusId && nextMode === 'documents'
-            ? { mode: nextMode, documentId: numericNodeId(focusId), limit: 120 }
+            ? { mode: nextMode, documentUuid: documentUuidFromNodeId(focusId), limit: 120 }
             : { mode: nextMode, domain: nextDomain.trim(), limit: nextMode === 'sources' ? 160 : 120, depth: nextDepth };
       const data = await getGraph(params);
       setGraph(data);
@@ -60,10 +60,10 @@ export function GraphExplorer({ onOpenProfile }: { onOpenProfile?: (sourceId: nu
   }
 
   useEffect(() => {
-    const documentId = Number(new URLSearchParams(window.location.search).get('document'));
-    if (Number.isSafeInteger(documentId) && documentId > 0) {
+    const documentUuid = new URLSearchParams(window.location.search).get('document');
+    if (documentUuid) {
       setMode('documents');
-      refresh('documents', '', `doc:${documentId}`);
+      refresh('documents', '', `doc:${documentUuid}`);
       return;
     }
     refresh();
@@ -592,6 +592,10 @@ function edgeWidth(weight: number, mode: GraphMode) {
 function numericNodeId(id: string) {
   const value = Number(id.split(':')[1]);
   return Number.isFinite(value) ? value : undefined;
+}
+
+function documentUuidFromNodeId(id: string) {
+  return id.slice(id.indexOf(':') + 1);
 }
 
 function shortLabel(label: string) {

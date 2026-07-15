@@ -9,7 +9,7 @@ import { AdminView } from './views/AdminView';
 import { BookshelfView } from './views/BookshelfView';
 import { DirectoryView } from './views/DirectoryView';
 import { SearchView } from './views/SearchView';
-import { documentIdFromPath, initialView, navigateTo, profileTargetFromPath, VIEW_STORAGE_KEY, viewFromPath, viewPaths, type ProfileTarget, type View } from './app/navigation';
+import { documentUuidFromPath, initialView, navigateTo, profileTargetFromPath, VIEW_STORAGE_KEY, viewFromPath, viewPaths, type ProfileTarget, type View } from './app/navigation';
 import { DocumentRouteDrawer } from './components/DocumentRouteDrawer';
 import { AppShell, Sidebar, Workspace } from './layout';
 import { EmbeddingExplorer } from './EmbeddingExplorer';
@@ -30,8 +30,8 @@ function IrisApp({ currentUser, onSignOut }: { currentUser: IrisUser | null; onS
   const [profileTarget, setProfileTarget] = useState<ProfileTarget>(() =>
     typeof window === 'undefined' ? null : profileTargetFromPath(window.location.pathname),
   );
-  const [documentId, setDocumentId] = useState<number | null>(() =>
-    typeof window === 'undefined' ? null : documentIdFromPath(window.location.pathname),
+  const [documentUuid, setDocumentUuid] = useState<string | null>(() =>
+    typeof window === 'undefined' ? null : documentUuidFromPath(window.location.pathname),
   );
   const [themeMode, setThemeMode] = useState<ThemeMode>(initialTheme);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -39,7 +39,7 @@ function IrisApp({ currentUser, onSignOut }: { currentUser: IrisUser | null; onS
   const applyingPopState = useRef(false);
 
   useEffect(() => {
-    if (documentId !== null) return;
+    if (documentUuid !== null) return;
     window.localStorage.setItem(VIEW_STORAGE_KEY, view);
     const nextPath =
       view === 'directory' && profileTarget?.domain
@@ -57,9 +57,9 @@ function IrisApp({ currentUser, onSignOut }: { currentUser: IrisUser | null; onS
 
   useEffect(() => {
     function handlePopState() {
-      const nextDocumentId = documentIdFromPath(window.location.pathname);
-      setDocumentId(nextDocumentId);
-      if (nextDocumentId !== null) return;
+      const nextDocumentUuid = documentUuidFromPath(window.location.pathname);
+      setDocumentUuid(nextDocumentUuid);
+      if (nextDocumentUuid !== null) return;
       const nextView = viewFromPath(window.location.pathname) ?? 'search';
       setProfileTarget(profileTargetFromPath(window.location.pathname));
       applyingPopState.current = true;
@@ -93,13 +93,13 @@ function IrisApp({ currentUser, onSignOut }: { currentUser: IrisUser | null; onS
   }, [settingsOpen]);
 
   function openProfile(sourceId: number, domain: string) {
-    setDocumentId(null);
+    setDocumentUuid(null);
     setProfileTarget({ sourceId, domain });
     setView('directory');
   }
 
   function openDirectoryRoot() {
-    setDocumentId(null);
+    setDocumentUuid(null);
     setProfileTarget(null);
     setView('directory');
   }
@@ -133,7 +133,7 @@ function IrisApp({ currentUser, onSignOut }: { currentUser: IrisUser | null; onS
               key={item.view}
               type="button"
               onClick={() => {
-                setDocumentId(null);
+                setDocumentUuid(null);
                 if (item.view === 'directory') {
                   openDirectoryRoot();
                 } else {
@@ -200,7 +200,7 @@ function IrisApp({ currentUser, onSignOut }: { currentUser: IrisUser | null; onS
       <Workspace view={view}>
         {view === 'search' && <SearchView onOpenProfile={openProfile} />}
         {view === 'bookshelf' && <BookshelfView onDiscover={() => {
-          setDocumentId(null);
+          setDocumentUuid(null);
           setView('search');
         }} />}
         {view === 'directory' && <DirectoryView target={profileTarget} onOpenProfile={openProfile} onDirectoryRoot={openDirectoryRoot} />}
@@ -208,7 +208,7 @@ function IrisApp({ currentUser, onSignOut }: { currentUser: IrisUser | null; onS
         {view === 'graph' && <GraphExplorer onOpenProfile={openProfile} />}
         {view === 'admin' && currentUser?.is_admin && <AdminView />}
       </Workspace>
-      {documentId !== null && <DocumentRouteDrawer documentId={documentId} onClose={closeDocumentDrawer} />}
+      {documentUuid !== null && <DocumentRouteDrawer documentUuid={documentUuid} onClose={closeDocumentDrawer} />}
     </AppShell>
   );
 }

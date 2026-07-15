@@ -42,12 +42,14 @@ export interface DocumentOutgoingLink {
   target_url: string;
   target_domain: string | null;
   target_document_id: number | null;
+  target_document_uuid: string | null;
   anchor_text: string | null;
   context: string | null;
 }
 
 export interface DocumentIncomingLink {
   source_document_id: number;
+  source_document_uuid: string;
   target_url: string;
   anchor_text: string | null;
 }

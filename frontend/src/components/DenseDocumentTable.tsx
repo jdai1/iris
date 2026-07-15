@@ -45,7 +45,7 @@ export function DenseDocumentTable({
   onToggleFavorite?: (row: DenseDocumentTableRow) => void;
   onRemove?: (row: DenseDocumentTableRow) => void;
 }) {
-  const [openActionDocumentId, setOpenActionDocumentId] = useState<number | null>(null);
+  const [openActionDocumentUuid, setOpenActionDocumentUuid] = useState<string | null>(null);
   const allSelected = rows.length > 0 && rows.every((row) => row.selected);
   const someSelected = rows.some((row) => row.selected);
   const selectAllRef = useRef<HTMLInputElement | null>(null);
@@ -87,7 +87,7 @@ export function DenseDocumentTable({
         const menuOpensUp = rows.length - index <= 2;
         return (
           <div
-            key={document.id}
+            key={document.uuid}
             className={row.selected ? 'bookshelf-table-row bookshelf-table-row-selected' : 'bookshelf-table-row'}
             role="row"
             tabIndex={0}
@@ -158,22 +158,22 @@ export function DenseDocumentTable({
                 <button
                   type="button"
                   aria-label="Document actions"
-                  aria-expanded={openActionDocumentId === document.id}
+                  aria-expanded={openActionDocumentUuid === document.uuid}
                   onClick={(event) => {
                     event.stopPropagation();
-                    setOpenActionDocumentId((current) => (current === document.id ? null : document.id));
+                    setOpenActionDocumentUuid((current) => (current === document.uuid ? null : document.uuid));
                   }}
                 >
                   <MoreVertical size={14} />
                 </button>
-                {openActionDocumentId === document.id && (
+                {openActionDocumentUuid === document.uuid && (
                   <div className={menuOpensUp ? 'bookshelf-row-menu bookshelf-row-menu-up' : 'bookshelf-row-menu'}>
                     <button
                       type="button"
                       onClick={(event) => {
                         event.stopPropagation();
                         onRemove?.(row);
-                        setOpenActionDocumentId(null);
+                        setOpenActionDocumentUuid(null);
                       }}
                     >
                       <Trash2 size={13} />

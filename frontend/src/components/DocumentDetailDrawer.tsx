@@ -1,7 +1,7 @@
 import { FormEvent, MouseEvent, RefObject, useEffect, useRef, useState } from 'react';
 import { ArrowUpRight, GitFork, Orbit, Plus, Users } from 'lucide-react';
 import { updateDocumentBookshelf } from '../api';
-import { navigateTo } from '../app/navigation';
+import { documentPath, navigateTo } from '../app/navigation';
 import type { BookshelfCollection, BookshelfEntry, Document, DocumentDetail } from '../types';
 import { StateMessage } from './ui';
 
@@ -47,7 +47,7 @@ export function DocumentDetailDrawer({
 }) {
   const document = detail ?? entry.document;
   const containingCollections = collections.filter((collection) =>
-    collection.items.some((item) => item.document.id === entry.document.id),
+    collection.items.some((item) => item.document.uuid === entry.document.uuid),
   );
   const [noteDraft, setNoteDraft] = useState(entry.note ?? entry.intent_note ?? '');
   const [tagDraftOpen, setTagDraftOpen] = useState(false);
@@ -57,7 +57,7 @@ export function DocumentDetailDrawer({
   const [referenceLimit, setReferenceLimit] = useState(5);
   const [referencedByLimit, setReferencedByLimit] = useState(5);
   const tagFormRef = useRef<HTMLFormElement | null>(null);
-  const outgoingDocumentLinks = detail?.outgoing_links.filter((link) => link.target_document_id) ?? [];
+  const outgoingDocumentLinks = detail?.outgoing_links.filter((link) => link.target_document_uuid) ?? [];
   const incomingDocumentLinks = detail?.incoming_links ?? [];
 
   useEffect(() => {
@@ -66,7 +66,7 @@ export function DocumentDetailDrawer({
     setTagDraftOpen(false);
     setReferenceLimit(5);
     setReferencedByLimit(5);
-  }, [entry.document.id]);
+  }, [entry.document.uuid]);
 
   useEffect(() => {
     if (!tagDraftOpen) return;
@@ -95,12 +95,12 @@ export function DocumentDetailDrawer({
     if (nextNote === currentNote) return;
     const timeout = window.setTimeout(() => {
       setSavingNote(true);
-      updateDocumentBookshelf(entry.document.id, { note: noteDraft })
+      updateDocumentBookshelf(entry.document.uuid, { note: noteDraft })
         .then(onEntryChange)
         .finally(() => setSavingNote(false));
     }, 450);
     return () => window.clearTimeout(timeout);
-  }, [entry.document.id, entry.note, entry.intent_note, noteDraft, onEntryChange]);
+  }, [entry.document.uuid, entry.note, entry.intent_note, noteDraft, onEntryChange]);
 
   async function addTag(event: FormEvent) {
     event.preventDefault();
@@ -112,7 +112,7 @@ export function DocumentDetailDrawer({
     }
     setSavingTags(true);
     try {
-      const updated = await updateDocumentBookshelf(entry.document.id, { tags: [...entry.tags, tag] });
+      const updated = await updateDocumentBookshelf(entry.document.uuid, { tags: [...entry.tags, tag] });
       onEntryChange(updated);
       setTagDraft('');
       setTagDraftOpen(false);
@@ -147,11 +147,11 @@ export function DocumentDetailDrawer({
           <Users size={12} />
           Directory
         </a>
-        <a href={`/graph?document=${document.id}`} onClick={(event) => followInternalLink(event, `/graph?document=${document.id}`)}>
+        <a href={`/graph?document=${document.uuid}`} onClick={(event) => followInternalLink(event, `/graph?document=${document.uuid}`)}>
           <GitFork size={12} />
           Graph
         </a>
-        <a href={`/explore?document=${document.id}`} onClick={(event) => followInternalLink(event, `/explore?document=${document.id}`)}>
+        <a href={`/explore?document=${document.uuid}`} onClick={(event) => followInternalLink(event, `/explore?document=${document.uuid}`)}>
           <Orbit size={12} />
           Explore
         </a>
@@ -226,11 +226,11 @@ export function DocumentDetailDrawer({
             <>
               <div className="bookshelf-detail-link-list">
                 {outgoingDocumentLinks.slice(0, referenceLimit).map((link, index) => (
-                  <a key={`${link.target_url}-${index}`} href={link.target_url} target="_blank" rel="noreferrer">
+                  <button key={`${link.target_url}-${index}`} type="button" onClick={() => navigateTo(documentPath(link.target_document_uuid!))}>
                     <strong>{link.anchor_text || link.target_domain || link.target_url}</strong>
                     <small>{link.target_domain || link.target_url}</small>
                     {link.context && <span>{link.context}</span>}
-                  </a>
+                  </button>
                 ))}
               </div>
               {referenceLimit < outgoingDocumentLinks.length && (
@@ -253,8 +253,8 @@ export function DocumentDetailDrawer({
             <>
               <div className="bookshelf-detail-link-list">
                 {incomingDocumentLinks.slice(0, referencedByLimit).map((link, index) => (
-                  <button key={`${link.source_document_id}-${index}`} type="button">
-                    <strong>{link.anchor_text || `Document ${link.source_document_id}`}</strong>
+                  <button key={`${link.source_document_uuid}-${index}`} type="button" onClick={() => navigateTo(documentPath(link.source_document_uuid))}>
+                    <strong>{link.anchor_text || 'Referenced document'}</strong>
                     <small>{link.target_url}</small>
                   </button>
                 ))}

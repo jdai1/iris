@@ -12,11 +12,14 @@ export const viewPaths: Record<View, string> = {
   admin: '/admin',
 };
 
-export function documentIdFromPath(pathname: string): number | null {
-  const match = pathname.replace(/\/+$/, '').match(/^\/documents\/(\d+)$/);
+export function documentUuidFromPath(pathname: string): string | null {
+  const match = pathname.replace(/\/+$/, '').match(/^\/documents\/([^/]+)$/);
   if (!match) return null;
-  const documentId = Number(match[1]);
-  return Number.isSafeInteger(documentId) && documentId > 0 ? documentId : null;
+  try {
+    return decodeURIComponent(match[1]);
+  } catch {
+    return null;
+  }
 }
 
 export function collectionIdFromSearch(search: string): number | null {
@@ -34,8 +37,8 @@ export function navigateTo(path: string, { replace = false }: { replace?: boolea
   window.dispatchEvent(new PopStateEvent('popstate'));
 }
 
-export function documentPath(documentId: number) {
-  return `/documents/${documentId}`;
+export function documentPath(documentUuid: string) {
+  return `/documents/${encodeURIComponent(documentUuid)}`;
 }
 
 export function initialView(): View {

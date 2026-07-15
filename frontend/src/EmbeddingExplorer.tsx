@@ -92,15 +92,18 @@ function scenePosition(point: EmbeddingMapPoint) {
   return new THREE.Vector3(point.x * SCENE_SPREAD, point.y * SCENE_SPREAD, point.z * SCENE_SPREAD * Z_SPREAD);
 }
 
-function deterministicJitter(seed: number) {
-  const a = Math.sin(seed * 12.9898) * 43758.5453;
-  const b = Math.sin(seed * 78.233) * 24634.6345;
-  const c = Math.sin(seed * 37.719) * 19341.1234;
+function deterministicJitter(seed: string | number) {
+  const numericSeed = typeof seed === 'number'
+    ? seed
+    : Array.from(seed).reduce((hash, character) => (hash * 31 + character.charCodeAt(0)) >>> 0, 0);
+  const a = Math.sin(numericSeed * 12.9898) * 43758.5453;
+  const b = Math.sin(numericSeed * 78.233) * 24634.6345;
+  const c = Math.sin(numericSeed * 37.719) * 19341.1234;
   return new THREE.Vector3(a - Math.floor(a) - 0.5, b - Math.floor(b) - 0.5, c - Math.floor(c) - 0.5).multiplyScalar(1.35);
 }
 
 function separatedScenePositions(points: EmbeddingMapPoint[]) {
-  const positions = points.map((point) => scenePosition(point).add(deterministicJitter(point.document.id)));
+  const positions = points.map((point) => scenePosition(point).add(deterministicJitter(point.document.uuid)));
   for (let pass = 0; pass < 4; pass += 1) {
     for (let left = 0; left < positions.length; left += 1) {
       for (let right = left + 1; right < positions.length; right += 1) {
@@ -120,13 +123,13 @@ function separatedScenePositions(points: EmbeddingMapPoint[]) {
 function focusedPoint(
   camera: THREE.PerspectiveCamera,
   points: EmbeddingMapPoint[],
-  renderPositions: Map<number, THREE.Vector3>,
+  renderPositions: Map<string, THREE.Vector3>,
 ) {
   let best: EmbeddingMapPoint | null = null;
   let bestDistance = 0.08;
   const projected = new THREE.Vector3();
   for (const point of points) {
-    const position = renderPositions.get(point.document.id);
+    const position = renderPositions.get(point.document.uuid);
     if (!position) continue;
     projected.copy(position).project(camera);
     if (projected.z < -1 || projected.z > 1) continue;
@@ -142,14 +145,14 @@ function focusedPoint(
 function nearestRenderedNeighbors(
   selected: EmbeddingMapPoint | null,
   points: EmbeddingMapPoint[],
-  renderPositions: Map<number, THREE.Vector3>,
+  renderPositions: Map<string, THREE.Vector3>,
 ) {
   if (!selected) return [];
-  const selectedPosition = renderPositions.get(selected.document.id) ?? scenePosition(selected);
+  const selectedPosition = renderPositions.get(selected.document.uuid) ?? scenePosition(selected);
   return points
-    .filter((point) => point.document.id !== selected.document.id)
+    .filter((point) => point.document.uuid !== selected.document.uuid)
     .map((point) => {
-      const position = renderPositions.get(point.document.id) ?? scenePosition(point);
+      const position = renderPositions.get(point.document.uuid) ?? scenePosition(point);
       return {
         point,
         distance: selectedPosition.distanceTo(position),
@@ -234,7 +237,7 @@ export function EmbeddingExplorer() {
   const sceneRef = useRef<THREE.Scene | null>(null);
   const selectedRef = useRef<EmbeddingMapPoint | null>(null);
   const dataRef = useRef<EmbeddingMapPoint[]>([]);
-  const renderPositionsRef = useRef<Map<number, THREE.Vector3>>(new Map());
+  const renderPositionsRef = useRef<Map<string, THREE.Vector3>>(new Map());
   const yawRef = useRef(-0.75);
   const pitchRef = useRef(0.05);
   const cameraPositionRef = useRef(new THREE.Vector3(-155, 19, 136));
@@ -286,9 +289,9 @@ export function EmbeddingExplorer() {
     getEmbeddingMap()
       .then((payload) => {
         if (!mounted) return;
-        const documentId = Number(new URLSearchParams(window.location.search).get('document'));
-        const initialPoint = Number.isSafeInteger(documentId) && documentId > 0
-          ? payload.points.find((point) => point.document.id === documentId) ?? payload.points[0] ?? null
+        const documentUuid = new URLSearchParams(window.location.search).get('document');
+        const initialPoint = documentUuid
+          ? payload.points.find((point) => point.document.uuid === documentUuid) ?? payload.points[0] ?? null
           : payload.points[0] ?? null;
         setMap(payload);
         dataRef.current = payload.points;
@@ -309,7 +312,7 @@ export function EmbeddingExplorer() {
     }
     let mounted = true;
     setNeighborsLoading(true);
-    getEmbeddingNeighbors(selected.document.id, 5)
+    getEmbeddingNeighbors(selected.document.uuid, 5)
       .then((payload) => {
         if (mounted) setNeighbors(payload);
       })
@@ -347,7 +350,7 @@ export function EmbeddingExplorer() {
     const colors = new Float32Array(mapPoints.length * 3);
     const renderPositions = separatedScenePositions(mapPoints);
     renderPositionsRef.current = new Map(
-      mapPoints.map((point, index) => [point.document.id, renderPositions[index].clone()]),
+      mapPoints.map((point, index) => [point.document.uuid, renderPositions[index].clone()]),
     );
     setRenderPositionVersion((version) => version + 1);
     mapPoints.forEach((point, index) => {
@@ -472,7 +475,7 @@ export function EmbeddingExplorer() {
 
       if (selectedRef.current) {
         selectedMarker.visible = true;
-        selectedMarker.position.copy(renderPositionsRef.current.get(selectedRef.current.document.id) ?? scenePosition(selectedRef.current));
+        selectedMarker.position.copy(renderPositionsRef.current.get(selectedRef.current.document.uuid) ?? scenePosition(selectedRef.current));
       } else {
         selectedMarker.visible = false;
       }
@@ -482,8 +485,8 @@ export function EmbeddingExplorer() {
         const rect = canvas.getBoundingClientRect();
         const point = centerHit;
         centerHitRef.current = point;
-        hoverMarker.visible = selectedRef.current?.document.id !== point.document.id;
-        hoverMarker.position.copy(renderPositionsRef.current.get(point.document.id) ?? scenePosition(point));
+        hoverMarker.visible = selectedRef.current?.document.uuid !== point.document.uuid;
+        hoverMarker.position.copy(renderPositionsRef.current.get(point.document.uuid) ?? scenePosition(point));
         setHover({
           point,
           x: rect.width / 2,
@@ -559,7 +562,7 @@ export function EmbeddingExplorer() {
     } else {
       direction.set(0, 0, -1);
     }
-    cameraPositionRef.current.copy(renderPositionsRef.current.get(point.document.id) ?? scenePosition(point)).addScaledVector(direction, -42);
+    cameraPositionRef.current.copy(renderPositionsRef.current.get(point.document.uuid) ?? scenePosition(point)).addScaledVector(direction, -42);
   }
 
   function selectCenterHit() {
@@ -588,7 +591,7 @@ export function EmbeddingExplorer() {
           {searchMatches.length > 0 && (
             <div className="explorer-search-results">
               {searchMatches.map((point) => (
-                <button key={point.document.id} type="button" onClick={() => selectSearchMatch(point)}>
+                <button key={point.document.uuid} type="button" onClick={() => selectSearchMatch(point)}>
                   <span>{point.document.title || point.document.url}</span>
                   <small>{point.document.source_domain}</small>
                 </button>
@@ -680,10 +683,10 @@ export function EmbeddingExplorer() {
               {neighborsLoading && <span className="visually-hidden" aria-live="polite">Loading true nearest neighbors</span>}
               {!neighborsLoading && neighbors.map((neighbor) => (
                 <button
-                  key={neighbor.document.id}
+                  key={neighbor.document.uuid}
                   type="button"
                   onClick={() => {
-                    const point = map?.points.find((item) => item.document.id === neighbor.document.id);
+                    const point = map?.points.find((item) => item.document.uuid === neighbor.document.uuid);
                     if (point) selectPoint(point);
                   }}
                 >
@@ -700,7 +703,7 @@ export function EmbeddingExplorer() {
                 <span>Computed from visible map positions.</span>
               </div>
               {renderedNeighbors.map(({ point, distance }) => (
-                <button key={point.document.id} type="button" onClick={() => selectPoint(point)}>
+                <button key={point.document.uuid} type="button" onClick={() => selectPoint(point)}>
                   <span>{point.document.title || point.document.url}</span>
                   <small>{point.document.source_domain} · {distance.toFixed(1)} units</small>
                 </button>

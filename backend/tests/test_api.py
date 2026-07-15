@@ -79,6 +79,68 @@ def test_document_picker_search_returns_documents_without_answer(session):
     assert body["results"][0]["document"]["title"] == "Database search notes"
 
 
+def test_document_detail_uses_uuid_and_exposes_reference_uuids(session):
+    source = get_or_create_source("https://document-uuid.test", status="indexed")
+    referring = upsert_document(
+        source=source, url="https://document-uuid.test/referring", document_type="essay", crawl_status="fetched",
+        title="Referring", author=None, published_at=None, extracted_text="referring", summary="Referring.",
+        topics=[], embedding=None, content_hash="uuid-referring",
+    )
+    target = upsert_document(
+        source=source, url="https://document-uuid.test/target", document_type="essay", crawl_status="fetched",
+        title="Target", author=None, published_at=None, extracted_text="target", summary="Target.",
+        topics=[], embedding=None, content_hash="uuid-target",
+    )
+    upsert_link(source_document=referring, target_url=target.url, anchor_text="target", context="A citation")
+    session.commit()
+
+    client = TestClient(app)
+    response = client.get(f"/api/documents/{referring.uuid}")
+    assert response.status_code == 200
+    assert response.json()["outgoing_links"][0]["target_document_uuid"] == target.uuid
+
+    incoming = client.get(f"/api/documents/{target.uuid}")
+    assert incoming.status_code == 200
+    assert incoming.json()["incoming_links"][0]["source_document_uuid"] == referring.uuid
+
+    legacy = client.get(f"/api/documents/{target.id}")
+    assert legacy.status_code == 200
+    assert legacy.json()["uuid"] == target.uuid
+    assert client.get("/api/documents/not-a-document").status_code == 404
+
+    graph = client.get("/api/graph", params={"mode": "documents", "document_uuid": target.uuid})
+    assert graph.status_code == 200
+    assert {node["id"] for node in graph.json()["nodes"]} == {f"doc:{referring.uuid}", f"doc:{target.uuid}"}
+    assert graph.json()["edges"][0]["source"] == f"doc:{referring.uuid}"
+    assert graph.json()["edges"][0]["target"] == f"doc:{target.uuid}"
+    assert client.get("/api/graph", params={"mode": "documents", "document_uuid": "missing"}).status_code == 404
+
+
+def test_huge_numeric_document_uuid_returns_404_for_public_endpoints(session, monkeypatch):
+    client = TestClient(app)
+    headers = _bookshelf_auth(monkeypatch)
+    huge_uuid = "9" * 5000
+    collection = client.post(
+        "/api/bookshelf/collections",
+        json={"name": "UUID bounds", "visibility": "private"},
+        headers=headers,
+    ).json()
+
+    assert client.get(f"/api/documents/{huge_uuid}").status_code == 404
+    assert client.patch(f"/api/documents/{huge_uuid}/bookshelf", json={"status": "saved"}, headers=headers).status_code == 404
+    assert client.get(f"/api/documents/{huge_uuid}/embedding-neighbors").status_code == 404
+    assert client.get("/api/graph", params={"mode": "documents", "document_uuid": huge_uuid}).status_code == 404
+    assert client.post(
+        f"/api/bookshelf/collections/{collection['id']}/items",
+        json={"document_uuid": huge_uuid},
+        headers=headers,
+    ).status_code == 404
+    assert client.delete(
+        f"/api/bookshelf/collections/{collection['id']}/items/{huge_uuid}",
+        headers=headers,
+    ).status_code == 404
+
+
 def test_directory_sources_default_to_most_referenced(session):
     alpha = get_or_create_source("https://alpha.test", status="indexed")
     beta = get_or_create_source("https://beta.test", status="indexed")
@@ -417,7 +479,7 @@ def test_embedding_neighbors_api_uses_full_embeddings(session):
     session.commit()
 
     client = TestClient(app)
-    response = client.get(f"/api/documents/{anchor.id}/embedding-neighbors", params={"limit": 2})
+    response = client.get(f"/api/documents/{anchor.uuid}/embedding-neighbors", params={"limit": 2})
 
     assert response.status_code == 200
     body = response.json()
@@ -474,7 +536,7 @@ def test_bookshelf_collection_share_includes_notes_and_tags(session, monkeypatch
     headers = _bookshelf_auth(monkeypatch)
 
     update = client.patch(
-        f"/api/documents/{document.id}/bookshelf",
+        f"/api/documents/{document.uuid}/bookshelf",
         json={
             "status": "read",
             "note": "Writing made this stick.",
@@ -499,7 +561,7 @@ def test_bookshelf_collection_share_includes_notes_and_tags(session, monkeypatch
 
     added = client.post(
         f"/api/bookshelf/collections/{collection['id']}/items",
-        json={"document_id": document.id},
+        json={"document_uuid": document.uuid},
         headers=headers,
     )
     assert added.status_code == 200
@@ -511,6 +573,13 @@ def test_bookshelf_collection_share_includes_notes_and_tags(session, monkeypatch
     assert body["items"][0]["document"]["title"] == "Reflective reading"
     assert body["items"][0]["note"] == "Writing made this stick."
     assert body["items"][0]["tags"] == ["memory", "reading"]
+
+    removed = client.delete(
+        f"/api/bookshelf/collections/{collection['id']}/items/{document.uuid}",
+        headers=headers,
+    )
+    assert removed.status_code == 200
+    assert removed.json()["items"] == []
 
 
 def test_delete_bookshelf_collection_removes_collection(session, monkeypatch):

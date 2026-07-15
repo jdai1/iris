@@ -17,7 +17,7 @@ from iris.dao import directory as directory_dao
 from iris.dao import search as search_dao
 from iris.dao import source_profiles as profile_dao
 from iris.dao.user_state import get_or_create_firebase_user, get_or_create_local_user
-from iris.models import BookshelfCollection, BookshelfCollectionItem, BookshelfCollectionVisibility, BookshelfStatus, Document, User, UserDocumentMapping
+from iris.models import BookshelfCollection, BookshelfStatus, Document, User, UserDocumentMapping
 from iris.services.ingestion.crawler import Crawler
 from iris.dao.db import init_db
 from iris.schemas.enums import AgentMessageRole, CrawlJobStatus, SourceStatus
@@ -380,6 +380,20 @@ def _dump_search_results(results, user: User | None = None) -> list[SearchResult
         for item in results
     ]
 
+
+def _resolve_document_uuid(document_uuid: str) -> Document | None:
+    """Resolve a public UUID, while accepting a positive integer legacy ID."""
+    session = db.current_session()
+    document = session.scalar(select(Document).where(Document.uuid == document_uuid))
+    if document is not None:
+        return document
+    if len(document_uuid) <= 10 and document_uuid.isascii() and document_uuid.isdigit():
+        legacy_id = int(document_uuid)
+        if 0 < legacy_id <= 2_147_483_647:
+            return session.get(Document, legacy_id)
+    return None
+
+
 @app.get("/api/admin/index-runs", response_model=PageSchema[AdminIndexRunSchema])
 def admin_index_runs(
     limit: int = 50,
@@ -392,12 +406,16 @@ def admin_index_runs(
     return _page_response(items, total, limit, offset)
 
 
-@app.get("/api/documents/{document_id}", response_model=DocumentDetailSchema)
-def get_document(document_id: int, _bound_session=Depends(get_session)) -> DocumentDetailSchema:
-    document, outgoing, incoming = admin.get_document_detail(document_id)
+@app.get("/api/documents/{document_uuid}", response_model=DocumentDetailSchema)
+def get_document(document_uuid: str, _bound_session=Depends(get_session)) -> DocumentDetailSchema:
+    resolved = _resolve_document_uuid(document_uuid)
+    document, outgoing, incoming = admin.get_document_detail(resolved.id) if resolved else (None, [], [])
     if not document:
         raise HTTPException(status_code=404, detail="Document not found")
     payload = dump_document(document).model_dump()
+    linked_ids = {link.target_document_id for link in outgoing if link.target_document_id}
+    linked_ids.update(link.source_document_id for link in incoming)
+    linked_uuids = dict(db.current_session().execute(select(Document.id, Document.uuid).where(Document.id.in_(linked_ids))).all())
     return DocumentDetailSchema(
         **payload,
         extracted_text=document.extracted_text,
@@ -406,6 +424,7 @@ def get_document(document_id: int, _bound_session=Depends(get_session)) -> Docum
                 target_url=link.target_url,
                 target_domain=link.target_domain,
                 target_document_id=link.target_document_id,
+                target_document_uuid=linked_uuids.get(link.target_document_id),
                 anchor_text=link.anchor_text,
                 context=link.context,
             )
@@ -414,6 +433,7 @@ def get_document(document_id: int, _bound_session=Depends(get_session)) -> Docum
         incoming_links=[
             DocumentIncomingLinkSchema(
                 source_document_id=link.source_document_id,
+                source_document_uuid=linked_uuids[link.source_document_id],
                 target_url=link.target_url,
                 anchor_text=link.anchor_text,
             )
@@ -726,14 +746,14 @@ def list_bookshelf(
     return _page_response(_dump_bookshelf_entries(user, mappings), total, limit, offset)
 
 
-@app.patch("/api/documents/{document_id}/bookshelf", response_model=BookshelfEntrySchema)
+@app.patch("/api/documents/{document_uuid}/bookshelf", response_model=BookshelfEntrySchema)
 def update_document_bookshelf(
-    document_id: int,
+    document_uuid: str,
     payload: BookshelfUpdateSchema,
     _bound_session=Depends(get_session),
     user: User = Depends(get_current_user),
 ) -> BookshelfEntrySchema:
-    document = db.current_session().get(Document, document_id)
+    document = _resolve_document_uuid(document_uuid)
     if not document:
         raise HTTPException(status_code=404, detail="Document not found")
     fields = payload.model_fields_set
@@ -852,7 +872,9 @@ def add_bookshelf_collection_item(
     _bound_session=Depends(get_session),
     user: User = Depends(get_current_user),
 ) -> BookshelfCollectionSchema:
-    document = db.current_session().get(Document, payload.document_id)
+    document = _resolve_document_uuid(payload.document_uuid) if payload.document_uuid else (
+        db.current_session().get(Document, payload.document_id) if payload.document_id else None
+    )
     if not document:
         raise HTTPException(status_code=404, detail="Document not found")
     item = bookshelf_dao.add_collection_item(user, collection_id, document, position=payload.position)
@@ -864,14 +886,15 @@ def add_bookshelf_collection_item(
     return _dump_bookshelf_collection(collection)
 
 
-@app.delete("/api/bookshelf/collections/{collection_id}/items/{document_id}", response_model=BookshelfCollectionSchema)
+@app.delete("/api/bookshelf/collections/{collection_id}/items/{document_uuid}", response_model=BookshelfCollectionSchema)
 def remove_bookshelf_collection_item(
     collection_id: int,
-    document_id: int,
+    document_uuid: str,
     _bound_session=Depends(get_session),
     user: User = Depends(get_current_user),
 ) -> BookshelfCollectionSchema:
-    removed = bookshelf_dao.remove_collection_item(user, collection_id, document_id)
+    document = _resolve_document_uuid(document_uuid)
+    removed = document is not None and bookshelf_dao.remove_collection_item(user, collection_id, document.id)
     if not removed:
         raise HTTPException(status_code=404, detail="Collection item not found")
     collection = bookshelf_dao.get_collection(user, collection_id)
@@ -899,13 +922,16 @@ def embedding_map(
     return admin.get_embedding_map(limit=limit)
 
 
-@app.get("/api/documents/{document_id}/embedding-neighbors", response_model=list[EmbeddingNeighborSchema])
+@app.get("/api/documents/{document_uuid}/embedding-neighbors", response_model=list[EmbeddingNeighborSchema])
 def embedding_neighbors(
-    document_id: int,
+    document_uuid: str,
     limit: int = 5,
     _bound_session=Depends(get_session),
 ) -> list[EmbeddingNeighborSchema]:
-    neighbors = admin.get_embedding_neighbors(document_id, limit=limit)
+    document = _resolve_document_uuid(document_uuid)
+    if document is None:
+        raise HTTPException(status_code=404, detail="Document not found")
+    neighbors = admin.get_embedding_neighbors(document.id, limit=limit)
     if neighbors is None:
         raise HTTPException(status_code=404, detail="Document embedding not found")
     return neighbors
@@ -915,6 +941,7 @@ def embedding_neighbors(
 def graph(
     mode: str = "documents",
     document_id: int | None = None,
+    document_uuid: str | None = None,
     source_id: int | None = None,
     domain: str | None = None,
     limit: int = 120,
@@ -948,10 +975,14 @@ def graph(
         ]
         return GraphSchema(nodes=nodes, edges=graph_edges)
 
-    documents, links = admin.get_graph_rows(document_id, limit=limit)
+    focused_document = _resolve_document_uuid(document_uuid) if document_uuid else None
+    if document_uuid and focused_document is None:
+        raise HTTPException(status_code=404, detail="Document not found")
+    documents, links = admin.get_graph_rows(focused_document.id if focused_document else document_id, limit=limit)
+    document_uuids = {document.id: document.uuid for document in documents}
     nodes = [
         GraphNodeSchema(
-            id=f"doc:{document.id}",
+            id=f"doc:{document.uuid}",
             label=document.title or document.source.canonical_domain,
             type=document.document_type,
             domain=document.source.canonical_domain,
@@ -963,9 +994,9 @@ def graph(
         for document in documents
     ]
     edges = [
-        GraphEdgeSchema(source=f"doc:{link.source_document_id}", target=f"doc:{link.target_document_id}", label=link.anchor_text, weight=1.0)
+        GraphEdgeSchema(source=f"doc:{document_uuids[link.source_document_id]}", target=f"doc:{document_uuids[link.target_document_id]}", label=link.anchor_text, weight=1.0)
         for link in links
-        if link.target_document_id
+        if link.target_document_id in document_uuids and link.source_document_id in document_uuids
     ]
     return GraphSchema(nodes=nodes, edges=edges)
 
