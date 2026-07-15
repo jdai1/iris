@@ -40,9 +40,9 @@ export function BookshelfView({ onDiscover }: { onDiscover: () => void }) {
   const [collectionSearchQuery, setCollectionSearchQuery] = useState('');
   const [collectionSearchResults, setCollectionSearchResults] = useState<SearchResult[]>([]);
   const [collectionSearching, setCollectionSearching] = useState(false);
-  const [addingDocumentId, setAddingDocumentId] = useState<string | null>(null);
+  const [addingDocumentUuid, setAddingDocumentUuid] = useState<string | null>(null);
   const [confirmDeleteCollectionId, setConfirmDeleteCollectionId] = useState<number | null>(null);
-  const [selectedDocumentIds, setSelectedDocumentIds] = useState<Set<string>>(new Set());
+  const [selectedDocumentUuids, setSelectedDocumentUuids] = useState<Set<string>>(new Set());
   const collectionDraftRef = useRef<HTMLInputElement | null>(null);
 
   const tableRows = filterBookshelfEntries(entries, collections, activeView);
@@ -85,12 +85,12 @@ export function BookshelfView({ onDiscover }: { onDiscover: () => void }) {
     setConfirmDeleteCollectionId(null);
     setCollectionSearchQuery('');
     setCollectionSearchResults([]);
-    setSelectedDocumentIds(new Set());
+    setSelectedDocumentUuids(new Set());
   }, [activeView]);
 
   useEffect(() => {
     const visibleIds = new Set(tableRows.map((row) => row.document.uuid));
-    setSelectedDocumentIds((current) => {
+    setSelectedDocumentUuids((current) => {
       const next = new Set(Array.from(current).filter((id) => visibleIds.has(id)));
       return next.size === current.size ? current : next;
     });
@@ -193,8 +193,8 @@ export function BookshelfView({ onDiscover }: { onDiscover: () => void }) {
   }
 
   async function addResultToActiveView(result: SearchResult) {
-    if (saving || addingDocumentId === result.document.uuid) return;
-    setAddingDocumentId(result.document.uuid);
+    if (saving || addingDocumentUuid === result.document.uuid) return;
+    setAddingDocumentUuid(result.document.uuid);
     setError(null);
     try {
       if (activeCollection) {
@@ -215,29 +215,29 @@ export function BookshelfView({ onDiscover }: { onDiscover: () => void }) {
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not add document');
     } finally {
-      setAddingDocumentId(null);
+      setAddingDocumentUuid(null);
     }
   }
 
-  async function removeDocumentFromActiveView(documentId: string) {
+  async function removeDocumentFromActiveView(documentUuid: string) {
     if (saving) return;
     setSaving(true);
     setError(null);
     try {
       if (activeCollection) {
-        const collection = await removeBookshelfCollectionItem(activeCollection.id, documentId);
+        const collection = await removeBookshelfCollectionItem(activeCollection.id, documentUuid);
         setCollections((current) => current.map((item) => (item.id === collection.id ? collection : item)));
       } else if (activeView === 'favorites') {
-        const entry = await updateDocumentBookshelf(documentId, { favorited: false });
-        setEntries((current) => current.map((item) => (item.document.uuid === documentId ? entry : item)));
+        const entry = await updateDocumentBookshelf(documentUuid, { favorited: false });
+        setEntries((current) => current.map((item) => (item.document.uuid === documentUuid ? entry : item)));
       } else {
-        const entry = await updateDocumentBookshelf(documentId, { status: 'archived' });
-        setEntries((current) => current.map((item) => (item.document.uuid === documentId ? entry : item)));
+        const entry = await updateDocumentBookshelf(documentUuid, { status: 'archived' });
+        setEntries((current) => current.map((item) => (item.document.uuid === documentUuid ? entry : item)));
       }
-      setSelectedDocumentIds((current) => {
-        if (!current.has(documentId)) return current;
+      setSelectedDocumentUuids((current) => {
+        if (!current.has(documentUuid)) return current;
         const next = new Set(current);
-        next.delete(documentId);
+        next.delete(documentUuid);
         return next;
       });
     } catch (err) {
@@ -248,17 +248,17 @@ export function BookshelfView({ onDiscover }: { onDiscover: () => void }) {
   }
 
   async function addSelectedToCollection(collectionId: number) {
-    const documentIds = Array.from(selectedDocumentIds);
-    if (documentIds.length === 0 || saving) return;
+    const documentUuids = Array.from(selectedDocumentUuids);
+    if (documentUuids.length === 0 || saving) return;
     setSaving(true);
     setError(null);
     try {
-      const updates = await Promise.all(documentIds.map((documentId) => addBookshelfCollectionItem(collectionId, documentId)));
+      const updates = await Promise.all(documentUuids.map((documentUuid) => addBookshelfCollectionItem(collectionId, documentUuid)));
       const collection = updates.at(-1);
       if (collection) {
         setCollections((current) => current.map((item) => (item.id === collection.id ? collection : item)));
       }
-      setSelectedDocumentIds(new Set());
+      setSelectedDocumentUuids(new Set());
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not add selected documents');
     } finally {
@@ -267,25 +267,25 @@ export function BookshelfView({ onDiscover }: { onDiscover: () => void }) {
   }
 
   async function removeSelectedFromActiveCollection() {
-    if (selectedDocumentIds.size === 0 || saving) return;
-    const documentIds = Array.from(selectedDocumentIds);
+    if (selectedDocumentUuids.size === 0 || saving) return;
+    const documentUuids = Array.from(selectedDocumentUuids);
     setSaving(true);
     setError(null);
     try {
       if (activeCollection) {
-        const updates = await Promise.all(documentIds.map((documentId) => removeBookshelfCollectionItem(activeCollection.id, documentId)));
+        const updates = await Promise.all(documentUuids.map((documentUuid) => removeBookshelfCollectionItem(activeCollection.id, documentUuid)));
         const collection = updates.at(-1);
         if (collection) {
           setCollections((current) => current.map((item) => (item.id === collection.id ? collection : item)));
         }
       } else if (activeView === 'favorites') {
-        const updates = await Promise.all(documentIds.map((documentId) => updateDocumentBookshelf(documentId, { favorited: false })));
+        const updates = await Promise.all(documentUuids.map((documentUuid) => updateDocumentBookshelf(documentUuid, { favorited: false })));
         setEntries((current) => mergeBookshelfEntryUpdates(current, updates));
       } else {
-        const updates = await Promise.all(documentIds.map((documentId) => updateDocumentBookshelf(documentId, { status: 'archived' })));
+        const updates = await Promise.all(documentUuids.map((documentUuid) => updateDocumentBookshelf(documentUuid, { status: 'archived' })));
         setEntries((current) => mergeBookshelfEntryUpdates(current, updates));
       }
-      setSelectedDocumentIds(new Set());
+      setSelectedDocumentUuids(new Set());
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not remove selected documents');
     } finally {
@@ -294,19 +294,19 @@ export function BookshelfView({ onDiscover }: { onDiscover: () => void }) {
   }
 
   function toggleBookshelfRow(entry: BookshelfEntry) {
-    const documentId = entry.document.uuid;
-    setSelectedDocumentIds((current) => {
+    const documentUuid = entry.document.uuid;
+    setSelectedDocumentUuids((current) => {
       const next = new Set(current);
-      if (next.has(documentId)) next.delete(documentId);
-      else next.add(documentId);
+      if (next.has(documentUuid)) next.delete(documentUuid);
+      else next.add(documentUuid);
       return next;
     });
   }
 
   function toggleAllBookshelfRows() {
-    const visibleIds = tableRows.map((row) => row.document.uuid);
-    const allSelected = visibleIds.length > 0 && visibleIds.every((id) => selectedDocumentIds.has(id));
-    setSelectedDocumentIds(allSelected ? new Set() : new Set(visibleIds));
+    const visibleUuids = tableRows.map((row) => row.document.uuid);
+    const allSelected = visibleUuids.length > 0 && visibleUuids.every((uuid) => selectedDocumentUuids.has(uuid));
+    setSelectedDocumentUuids(allSelected ? new Set() : new Set(visibleUuids));
   }
 
   function openBookshelfDrawer(entry: BookshelfEntry) {
@@ -411,7 +411,7 @@ export function BookshelfView({ onDiscover }: { onDiscover: () => void }) {
         </aside>
 
         <div className="bookshelf-table-panel">
-          {(activeCollection || selectedDocumentIds.size > 0) && (
+          {(activeCollection || selectedDocumentUuids.size > 0) && (
             <div className="bookshelf-toolbar">
               {activeCollection && (
                 <div className="bookshelf-toolbar-actions">
@@ -427,9 +427,9 @@ export function BookshelfView({ onDiscover }: { onDiscover: () => void }) {
                   </button>
                 </div>
               )}
-              {selectedDocumentIds.size > 0 && (
+              {selectedDocumentUuids.size > 0 && (
                 <div className="bookshelf-bulk-menu">
-                  <span>{selectedDocumentIds.size} selected</span>
+                  <span>{selectedDocumentUuids.size} selected</span>
                   {collections.length > (activeCollection ? 1 : 0) && (
                     <select
                       value=""
@@ -452,7 +452,7 @@ export function BookshelfView({ onDiscover }: { onDiscover: () => void }) {
                     <Trash2 size={13} />
                     Remove
                   </button>
-                  <button type="button" onClick={() => setSelectedDocumentIds(new Set())}>
+                  <button type="button" onClick={() => setSelectedDocumentUuids(new Set())}>
                     Clear selection
                   </button>
                 </div>
@@ -504,7 +504,7 @@ export function BookshelfView({ onDiscover }: { onDiscover: () => void }) {
                           event.stopPropagation();
                           void addResultToActiveView(result);
                         }}
-                        disabled={alreadyAdded || addingDocumentId === result.document.uuid}
+                        disabled={alreadyAdded || addingDocumentUuid === result.document.uuid}
                         aria-label={alreadyAdded ? 'Document added' : 'Add document'}
                         data-tooltip={alreadyAdded ? 'Added' : 'Add document'}
                       >
@@ -531,7 +531,7 @@ export function BookshelfView({ onDiscover }: { onDiscover: () => void }) {
           ) : (
             <BookshelfTable
               rows={tableRows}
-              selectedDocumentIds={selectedDocumentIds}
+              selectedDocumentUuids={selectedDocumentUuids}
               selectionEnabled
               collectionMode={Boolean(activeCollection)}
               onToggleSelection={toggleBookshelfRow}
@@ -578,9 +578,9 @@ function bookshelfSearchPlaceholder(activeView: BookshelfViewKey, activeCollecti
   return 'Search corpus to add to Read next...';
 }
 
-function resultInActiveView(documentId: string, activeView: BookshelfViewKey, activeCollection: BookshelfCollection | null, entries: BookshelfEntry[]) {
-  if (activeCollection) return activeCollection.items.some((entry) => entry.document.uuid === documentId);
-  const entry = entries.find((item) => item.document.uuid === documentId);
+function resultInActiveView(documentUuid: string, activeView: BookshelfViewKey, activeCollection: BookshelfCollection | null, entries: BookshelfEntry[]) {
+  if (activeCollection) return activeCollection.items.some((entry) => entry.document.uuid === documentUuid);
+  const entry = entries.find((item) => item.document.uuid === documentUuid);
   if (!entry) return false;
   if (activeView === 'favorites') return entry.favorited;
   if (activeView === 'reading-log') return entry.status === 'read';
@@ -594,8 +594,8 @@ function notePreview(entry: BookshelfEntry): string {
 }
 
 function mergeBookshelfEntryUpdates(current: BookshelfEntry[], updates: BookshelfEntry[]): BookshelfEntry[] {
-  const byDocumentId = new Map(updates.map((entry) => [entry.document.uuid, entry]));
-  return current.map((entry) => byDocumentId.get(entry.document.uuid) ?? entry);
+  const byDocumentUuid = new Map(updates.map((entry) => [entry.document.uuid, entry]));
+  return current.map((entry) => byDocumentUuid.get(entry.document.uuid) ?? entry);
 }
 
 function entryDate(entry: BookshelfEntry): string {
@@ -606,7 +606,7 @@ function entryDate(entry: BookshelfEntry): string {
 
 function BookshelfTable({
   rows,
-  selectedDocumentIds,
+  selectedDocumentUuids,
   selectionEnabled,
   collectionMode,
   onToggleSelection,
@@ -616,23 +616,23 @@ function BookshelfTable({
   onRemoveFromCurrent,
 }: {
   rows: BookshelfEntry[];
-  selectedDocumentIds: Set<string>;
+  selectedDocumentUuids: Set<string>;
   selectionEnabled: boolean;
   collectionMode: boolean;
   onToggleSelection: (entry: BookshelfEntry) => void;
   onToggleAll: () => void;
   onOpenDetail: (entry: BookshelfEntry) => void;
   onToggleFavorite: (entry: BookshelfEntry) => void;
-  onRemoveFromCurrent: (documentId: string) => void;
+  onRemoveFromCurrent: (documentUuid: string) => void;
 }) {
-  const entriesByDocumentId = new Map(rows.map((entry) => [entry.document.uuid, entry]));
+  const entriesByDocumentUuid = new Map(rows.map((entry) => [entry.document.uuid, entry]));
   const tableRows = rows.map((entry) => ({
     document: entry.document,
     tags: entry.tags,
     note: entry.note || entry.intent_note ? notePreview(entry) : undefined,
     date: entryDate(entry),
     favorited: entry.favorited,
-    selected: selectedDocumentIds.has(entry.document.uuid),
+    selected: selectedDocumentUuids.has(entry.document.uuid),
   }));
 
   return (
@@ -646,16 +646,16 @@ function BookshelfTable({
       showSource={false}
       sourceAsTitle
       onPrimaryClick={(row, event) => {
-        const entry = entriesByDocumentId.get(row.document.uuid);
+        const entry = entriesByDocumentUuid.get(row.document.uuid);
         if (entry) onOpenDetail(entry);
       }}
       onToggleSelection={(row) => {
-        const entry = entriesByDocumentId.get(row.document.uuid);
+        const entry = entriesByDocumentUuid.get(row.document.uuid);
         if (entry) onToggleSelection(entry);
       }}
       onToggleAll={onToggleAll}
       onToggleFavorite={(row) => {
-        const entry = entriesByDocumentId.get(row.document.uuid);
+        const entry = entriesByDocumentUuid.get(row.document.uuid);
         if (entry) onToggleFavorite(entry);
       }}
       onRemove={(row) => onRemoveFromCurrent(row.document.uuid)}

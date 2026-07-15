@@ -45,7 +45,7 @@ export function GraphExplorer({ onOpenProfile }: { onOpenProfile?: (sourceId: nu
         focusId && nextMode === 'sources'
           ? { mode: nextMode, sourceId: numericNodeId(focusId), limit: 160, depth: nextDepth }
           : focusId && nextMode === 'documents'
-            ? { mode: nextMode, documentUuid: nodeIdentifier(focusId), limit: 120 }
+            ? { mode: nextMode, documentUuid: documentUuidFromNodeId(focusId), limit: 120 }
             : { mode: nextMode, domain: nextDomain.trim(), limit: nextMode === 'sources' ? 160 : 120, depth: nextDepth };
       const data = await getGraph(params);
       setGraph(data);
@@ -594,7 +594,7 @@ function numericNodeId(id: string) {
   return Number.isFinite(value) ? value : undefined;
 }
 
-function nodeIdentifier(id: string) {
+function documentUuidFromNodeId(id: string) {
   return id.slice(id.indexOf(':') + 1);
 }
 

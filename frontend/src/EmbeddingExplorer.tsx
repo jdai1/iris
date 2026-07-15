@@ -92,15 +92,18 @@ function scenePosition(point: EmbeddingMapPoint) {
   return new THREE.Vector3(point.x * SCENE_SPREAD, point.y * SCENE_SPREAD, point.z * SCENE_SPREAD * Z_SPREAD);
 }
 
-function deterministicJitter(seed: number) {
-  const a = Math.sin(seed * 12.9898) * 43758.5453;
-  const b = Math.sin(seed * 78.233) * 24634.6345;
-  const c = Math.sin(seed * 37.719) * 19341.1234;
+function deterministicJitter(seed: string | number) {
+  const numericSeed = typeof seed === 'number'
+    ? seed
+    : Array.from(seed).reduce((hash, character) => (hash * 31 + character.charCodeAt(0)) >>> 0, 0);
+  const a = Math.sin(numericSeed * 12.9898) * 43758.5453;
+  const b = Math.sin(numericSeed * 78.233) * 24634.6345;
+  const c = Math.sin(numericSeed * 37.719) * 19341.1234;
   return new THREE.Vector3(a - Math.floor(a) - 0.5, b - Math.floor(b) - 0.5, c - Math.floor(c) - 0.5).multiplyScalar(1.35);
 }
 
 function separatedScenePositions(points: EmbeddingMapPoint[]) {
-  const positions = points.map((point) => scenePosition(point).add(deterministicJitter(point.document.id)));
+  const positions = points.map((point) => scenePosition(point).add(deterministicJitter(point.document.uuid)));
   for (let pass = 0; pass < 4; pass += 1) {
     for (let left = 0; left < positions.length; left += 1) {
       for (let right = left + 1; right < positions.length; right += 1) {

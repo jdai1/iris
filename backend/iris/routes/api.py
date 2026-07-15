@@ -381,14 +381,14 @@ def _dump_search_results(results, user: User | None = None) -> list[SearchResult
     ]
 
 
-def _resolve_document(identifier: str) -> Document | None:
+def _resolve_document_uuid(document_uuid: str) -> Document | None:
     """Resolve a public UUID, while accepting a positive integer legacy ID."""
     session = db.current_session()
-    document = session.scalar(select(Document).where(Document.uuid == identifier))
+    document = session.scalar(select(Document).where(Document.uuid == document_uuid))
     if document is not None:
         return document
-    if len(identifier) <= 10 and identifier.isascii() and identifier.isdigit():
-        legacy_id = int(identifier)
+    if len(document_uuid) <= 10 and document_uuid.isascii() and document_uuid.isdigit():
+        legacy_id = int(document_uuid)
         if 0 < legacy_id <= 2_147_483_647:
             return session.get(Document, legacy_id)
     return None
@@ -406,9 +406,9 @@ def admin_index_runs(
     return _page_response(items, total, limit, offset)
 
 
-@app.get("/api/documents/{document_identifier}", response_model=DocumentDetailSchema)
-def get_document(document_identifier: str, _bound_session=Depends(get_session)) -> DocumentDetailSchema:
-    resolved = _resolve_document(document_identifier)
+@app.get("/api/documents/{document_uuid}", response_model=DocumentDetailSchema)
+def get_document(document_uuid: str, _bound_session=Depends(get_session)) -> DocumentDetailSchema:
+    resolved = _resolve_document_uuid(document_uuid)
     document, outgoing, incoming = admin.get_document_detail(resolved.id) if resolved else (None, [], [])
     if not document:
         raise HTTPException(status_code=404, detail="Document not found")
@@ -746,14 +746,14 @@ def list_bookshelf(
     return _page_response(_dump_bookshelf_entries(user, mappings), total, limit, offset)
 
 
-@app.patch("/api/documents/{document_identifier}/bookshelf", response_model=BookshelfEntrySchema)
+@app.patch("/api/documents/{document_uuid}/bookshelf", response_model=BookshelfEntrySchema)
 def update_document_bookshelf(
-    document_identifier: str,
+    document_uuid: str,
     payload: BookshelfUpdateSchema,
     _bound_session=Depends(get_session),
     user: User = Depends(get_current_user),
 ) -> BookshelfEntrySchema:
-    document = _resolve_document(document_identifier)
+    document = _resolve_document_uuid(document_uuid)
     if not document:
         raise HTTPException(status_code=404, detail="Document not found")
     fields = payload.model_fields_set
@@ -872,7 +872,7 @@ def add_bookshelf_collection_item(
     _bound_session=Depends(get_session),
     user: User = Depends(get_current_user),
 ) -> BookshelfCollectionSchema:
-    document = _resolve_document(payload.document_uuid) if payload.document_uuid else (
+    document = _resolve_document_uuid(payload.document_uuid) if payload.document_uuid else (
         db.current_session().get(Document, payload.document_id) if payload.document_id else None
     )
     if not document:
@@ -886,14 +886,14 @@ def add_bookshelf_collection_item(
     return _dump_bookshelf_collection(collection)
 
 
-@app.delete("/api/bookshelf/collections/{collection_id}/items/{document_identifier}", response_model=BookshelfCollectionSchema)
+@app.delete("/api/bookshelf/collections/{collection_id}/items/{document_uuid}", response_model=BookshelfCollectionSchema)
 def remove_bookshelf_collection_item(
     collection_id: int,
-    document_identifier: str,
+    document_uuid: str,
     _bound_session=Depends(get_session),
     user: User = Depends(get_current_user),
 ) -> BookshelfCollectionSchema:
-    document = _resolve_document(document_identifier)
+    document = _resolve_document_uuid(document_uuid)
     removed = document is not None and bookshelf_dao.remove_collection_item(user, collection_id, document.id)
     if not removed:
         raise HTTPException(status_code=404, detail="Collection item not found")
@@ -922,13 +922,13 @@ def embedding_map(
     return admin.get_embedding_map(limit=limit)
 
 
-@app.get("/api/documents/{document_identifier}/embedding-neighbors", response_model=list[EmbeddingNeighborSchema])
+@app.get("/api/documents/{document_uuid}/embedding-neighbors", response_model=list[EmbeddingNeighborSchema])
 def embedding_neighbors(
-    document_identifier: str,
+    document_uuid: str,
     limit: int = 5,
     _bound_session=Depends(get_session),
 ) -> list[EmbeddingNeighborSchema]:
-    document = _resolve_document(document_identifier)
+    document = _resolve_document_uuid(document_uuid)
     if document is None:
         raise HTTPException(status_code=404, detail="Document not found")
     neighbors = admin.get_embedding_neighbors(document.id, limit=limit)
@@ -975,7 +975,7 @@ def graph(
         ]
         return GraphSchema(nodes=nodes, edges=graph_edges)
 
-    focused_document = _resolve_document(document_uuid) if document_uuid else None
+    focused_document = _resolve_document_uuid(document_uuid) if document_uuid else None
     if document_uuid and focused_document is None:
         raise HTTPException(status_code=404, detail="Document not found")
     documents, links = admin.get_graph_rows(focused_document.id if focused_document else document_id, limit=limit)

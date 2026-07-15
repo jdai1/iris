@@ -382,7 +382,7 @@ export function SearchView({ onOpenProfile }: { onOpenProfile: (sourceId: number
                 {message.role === 'assistant' && message.results && message.results.length > 0 && (
                   <SearchResultsTable
                     results={message.results}
-                    selectedDocumentId={drawerResult?.document.uuid ?? null}
+                    selectedDocumentUuid={drawerResult?.document.uuid ?? null}
                     onOpenResult={openResultDrawer}
                   />
                 )}
@@ -471,11 +471,11 @@ function ResultSkeleton({ rows = 4 }: { rows?: number }) {
 
 function SearchResultsTable({
   results,
-  selectedDocumentId,
+  selectedDocumentUuid,
   onOpenResult,
 }: {
   results: SearchResult[];
-  selectedDocumentId: string | null;
+  selectedDocumentUuid: string | null;
   onOpenResult: (result: SearchResult) => void;
 }) {
   return (
@@ -491,7 +491,7 @@ function SearchResultsTable({
         </div>
         {results.map((result) => {
           const { document } = result;
-          const selected = selectedDocumentId === document.uuid;
+          const selected = selectedDocumentUuid === document.uuid;
           return (
             <div
               key={document.uuid}

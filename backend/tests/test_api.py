@@ -116,27 +116,27 @@ def test_document_detail_uses_uuid_and_exposes_reference_uuids(session):
     assert client.get("/api/graph", params={"mode": "documents", "document_uuid": "missing"}).status_code == 404
 
 
-def test_huge_numeric_document_identifier_returns_404_for_public_endpoints(session, monkeypatch):
+def test_huge_numeric_document_uuid_returns_404_for_public_endpoints(session, monkeypatch):
     client = TestClient(app)
     headers = _bookshelf_auth(monkeypatch)
-    huge_identifier = "9" * 5000
+    huge_uuid = "9" * 5000
     collection = client.post(
         "/api/bookshelf/collections",
         json={"name": "UUID bounds", "visibility": "private"},
         headers=headers,
     ).json()
 
-    assert client.get(f"/api/documents/{huge_identifier}").status_code == 404
-    assert client.patch(f"/api/documents/{huge_identifier}/bookshelf", json={"status": "saved"}, headers=headers).status_code == 404
-    assert client.get(f"/api/documents/{huge_identifier}/embedding-neighbors").status_code == 404
-    assert client.get("/api/graph", params={"mode": "documents", "document_uuid": huge_identifier}).status_code == 404
+    assert client.get(f"/api/documents/{huge_uuid}").status_code == 404
+    assert client.patch(f"/api/documents/{huge_uuid}/bookshelf", json={"status": "saved"}, headers=headers).status_code == 404
+    assert client.get(f"/api/documents/{huge_uuid}/embedding-neighbors").status_code == 404
+    assert client.get("/api/graph", params={"mode": "documents", "document_uuid": huge_uuid}).status_code == 404
     assert client.post(
         f"/api/bookshelf/collections/{collection['id']}/items",
-        json={"document_uuid": huge_identifier},
+        json={"document_uuid": huge_uuid},
         headers=headers,
     ).status_code == 404
     assert client.delete(
-        f"/api/bookshelf/collections/{collection['id']}/items/{huge_identifier}",
+        f"/api/bookshelf/collections/{collection['id']}/items/{huge_uuid}",
         headers=headers,
     ).status_code == 404
 
