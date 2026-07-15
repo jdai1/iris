@@ -5,7 +5,7 @@ import { emptyPage } from '../app/paging';
 import type { BookshelfCollection, BookshelfEntry, DocumentDetail } from '../types';
 import { DocumentDetailDrawer, entryFromDocument } from './DocumentDetailDrawer';
 
-export function DocumentRouteDrawer({ documentUuid, onClose }: { documentUuid: string; onClose: () => void }) {
+export function DocumentRouteDrawer({ documentUuid, reason, onClose }: { documentUuid: string; reason?: string | null; onClose: () => void }) {
   const [entry, setEntry] = useState<BookshelfEntry | null>(null);
   const [detail, setDetail] = useState<DocumentDetail | null>(null);
   const [collections, setCollections] = useState<BookshelfCollection[]>([]);
@@ -79,6 +79,7 @@ export function DocumentRouteDrawer({ documentUuid, onClose }: { documentUuid: s
         error={error}
         closing={closing}
         ariaLabel="Document details"
+        reason={reason}
         onEntryChange={updateEntry}
         onClose={closeDrawer}
       />

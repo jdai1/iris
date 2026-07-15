@@ -29,11 +29,11 @@ export function collectionIdFromSearch(search: string): number | null {
   return Number.isSafeInteger(collectionId) && collectionId > 0 ? collectionId : null;
 }
 
-export function navigateTo(path: string, { replace = false }: { replace?: boolean } = {}) {
+export function navigateTo(path: string, { replace = false, state = null }: { replace?: boolean; state?: unknown } = {}) {
   if (typeof window === 'undefined') return;
   const current = `${window.location.pathname}${window.location.search}`;
   if (current === path) return;
-  window.history[replace ? 'replaceState' : 'pushState'](null, '', path);
+  window.history[replace ? 'replaceState' : 'pushState'](state, '', path);
   window.dispatchEvent(new PopStateEvent('popstate'));
 }
 
