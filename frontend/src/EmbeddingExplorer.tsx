@@ -291,8 +291,8 @@ export function EmbeddingExplorer() {
         if (!mounted) return;
         const documentUuid = new URLSearchParams(window.location.search).get('document');
         const initialPoint = documentUuid
-          ? payload.points.find((point) => point.document.uuid === documentUuid) ?? payload.points[0] ?? null
-          : payload.points[0] ?? null;
+          ? payload.points.find((point) => point.document.uuid === documentUuid) ?? null
+          : null;
         setMap(payload);
         dataRef.current = payload.points;
         setSelected(initialPoint);

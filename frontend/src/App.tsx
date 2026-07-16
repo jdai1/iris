@@ -1,4 +1,4 @@
-import { ReactNode, useEffect, useRef, useState } from 'react';
+import { lazy, ReactNode, Suspense, useEffect, useRef, useState } from 'react';
 import {
   Box,
   Stack,
@@ -12,12 +12,12 @@ import { SearchView } from './views/SearchView';
 import { documentParentPath, documentPath, documentUuidFromPath, initialView, navigateTo, profileTargetFromPath, VIEW_STORAGE_KEY, viewFromPath, viewPaths, type ProfileTarget, type View } from './app/navigation';
 import { DocumentRouteDrawer } from './components/DocumentRouteDrawer';
 import { AppShell, Sidebar, Workspace } from './layout';
-import { EmbeddingExplorer } from './EmbeddingExplorer';
 import { GraphExplorer } from './GraphExplorer';
 import { Button } from './components/ui';
 import type { User as IrisUser } from './types';
 
 const THEME_STORAGE_KEY = 'iris.theme';
+const EmbeddingExplorer = lazy(() => import('./EmbeddingExplorer').then((module) => ({ default: module.EmbeddingExplorer })));
 type ThemeMode = 'light' | 'dark';
 
 function initialTheme(): ThemeMode {
@@ -208,7 +208,11 @@ function IrisApp({ currentUser, onSignOut }: { currentUser: IrisUser | null; onS
           setView('search');
         }} />}
         {view === 'directory' && <DirectoryView target={profileTarget} onOpenProfile={openProfile} onDirectoryRoot={openDirectoryRoot} />}
-        {view === 'explore' && <EmbeddingExplorer />}
+        {view === 'explore' && (
+          <Suspense fallback={null}>
+            <EmbeddingExplorer />
+          </Suspense>
+        )}
         {view === 'graph' && <GraphExplorer onOpenProfile={openProfile} />}
         {view === 'admin' && currentUser?.is_admin && <AdminView />}
       </Workspace>
