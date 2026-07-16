@@ -1143,6 +1143,7 @@
 }
 
 .bookshelf-table-panel {
+  position: relative;
   overflow-x: auto;
   overflow-y: visible;
 }
@@ -1267,6 +1268,25 @@
   min-height: 34px;
 }
 
+.bookshelf-toolbar-search {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  min-width: 0;
+  color: var(--text-muted);
+}
+
+.bookshelf-toolbar-search input {
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+}
+
 .bookshelf-add-link {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
@@ -1321,149 +1341,175 @@
 .bookshelf-bulk-toolbar {
   display: flex;
   align-items: center;
-  gap: 8px;
   min-width: 0;
   color: var(--text-muted);
   font-size: 12px;
 }
 
 .bookshelf-bulk-toolbar > span {
-  min-width: 150px;
   color: var(--text-subtle);
 }
 
-.bookshelf-bulk-toolbar select,
-.bookshelf-bulk-toolbar button {
+.bookshelf-bulk-actions {
+  position: relative;
+}
+
+.bookshelf-bulk-action-menu {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 4px);
+  right: 0;
+  display: grid;
+  min-width: 190px;
   border: 1px solid var(--border);
   background: var(--bg-raised);
-  color: var(--text-muted);
-  min-height: 28px;
-  padding: 0 8px;
+  box-shadow: var(--shadow-panel);
+}
+
+.bookshelf-bulk-action-menu select,
+.bookshelf-bulk-action-menu button {
+  width: 100%;
+  min-height: var(--menu-row-min-h);
+  border: 0;
+  border-bottom: 1px solid var(--border-subtle);
+  background: transparent;
+  color: var(--text-subtle);
+  padding: 0 var(--menu-row-pad-x);
   font: inherit;
+  font-size: 12px;
+  text-align: left;
+}
+
+.bookshelf-bulk-action-menu button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.bookshelf-bulk-action-menu button:last-child {
+  border-bottom: 0;
+}
+
+.bookshelf-bulk-action-menu button:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.bookshelf-add-drawer {
+  position: fixed;
+  z-index: 901;
+  top: 0;
+  right: 0;
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  gap: 18px;
+  width: min(430px, calc(100vw - 32px));
+  height: 100vh;
+  border-left: 1px solid var(--border);
+  background: var(--bg-raised);
+  padding: 22px 20px;
+  box-shadow: var(--shadow-floating);
+}
+
+.bookshelf-add-drawer > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.bookshelf-add-drawer > header div {
+  display: grid;
+  gap: 3px;
+}
+
+.bookshelf-add-drawer > header strong {
+  font-size: 16px;
+}
+
+.bookshelf-add-drawer > header small {
+  color: var(--text-subtle);
   font-size: 12px;
 }
 
-.bookshelf-bulk-toolbar button {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
+.bookshelf-add-drawer > header button,
+.bookshelf-add-drawer-result > button {
+  border: 0;
   background: transparent;
-  color: var(--text-subtle);
+  color: var(--text-muted);
+  padding: 4px;
 }
 
-.bookshelf-bulk-toolbar button:hover:not(:disabled) {
-  color: var(--text);
-  background: var(--bg-hover);
-}
-
-.bookshelf-bulk-toolbar :disabled {
-  cursor: default;
-  opacity: 0.45;
-}
-
-.bookshelf-collection-search {
+.bookshelf-add-drawer-search {
   display: grid;
-  gap: 8px;
-  margin-bottom: 14px;
-}
-
-.bookshelf-collection-search label {
-  color: var(--text-subtle);
-  font-size: 11px;
-  text-transform: uppercase;
-}
-
-.bookshelf-collection-search form > div:first-of-type {
-  display: grid;
-  grid-template-columns: 18px minmax(0, 1fr);
-  gap: 10px;
+  grid-template-columns: 20px minmax(0, 1fr);
   align-items: center;
-  width: 100%;
-  border-bottom: 1px solid var(--border-input);
-  padding: var(--control-bar-pad-y) 0;
+  gap: 8px;
+  border: 1px solid var(--border-input);
+  background: var(--bg-soft);
+  padding: 9px 11px;
+  color: var(--text-muted);
 }
 
-.bookshelf-collection-search input {
+.bookshelf-add-drawer-search input {
   min-width: 0;
   border: 0;
   outline: 0;
   background: transparent;
   color: var(--text);
   font: inherit;
-  font-size: 13px;
 }
 
-.bookshelf-collection-search button,
-.bookshelf-collection-result button {
-  border: 0;
-  background: transparent;
-  color: var(--text-muted);
-  padding: 0 2px;
-  font: inherit;
-  font-size: 12px;
+.bookshelf-add-drawer-results {
+  overflow-y: auto;
+  min-height: 0;
 }
 
-.bookshelf-collection-search button:hover:not(:disabled),
-.bookshelf-collection-result button:hover:not(:disabled) {
-  color: var(--text);
-}
-
-.bookshelf-collection-search button:disabled,
-.bookshelf-collection-result button:disabled {
-  color: var(--text-faint);
-}
-
-.bookshelf-collection-search p {
-  margin: 0;
+.bookshelf-add-drawer-results > p {
   color: var(--text-subtle);
   font-size: 12px;
 }
 
-.bookshelf-collection-results {
+.bookshelf-add-drawer-result {
   display: grid;
-  max-width: 760px;
-  border-top: 1px solid var(--border-subtle);
+  grid-template-columns: minmax(0, 1fr) 32px;
+  align-items: center;
+  gap: 8px;
+  border-bottom: 1px solid var(--border-subtle);
+  padding: 12px 0;
 }
 
-.bookshelf-collection-result {
+.bookshelf-add-drawer-result > button:first-child {
   display: grid;
-  grid-template-columns: minmax(180px, 1fr) minmax(220px, 1.25fr) 28px;
-  gap: 12px;
-  align-items: center;
-  min-height: 38px;
-  border-bottom: 1px solid var(--border-subtle);
-  color: var(--text-muted);
+  min-width: 0;
+  gap: 3px;
   text-align: left;
 }
 
-.bookshelf-collection-result span {
-  display: grid;
-  min-width: 0;
-}
-
-.bookshelf-collection-result strong,
-.bookshelf-collection-result small,
-.bookshelf-collection-result > span:nth-child(2) {
+.bookshelf-add-drawer-result strong,
+.bookshelf-add-drawer-result small,
+.bookshelf-add-drawer-result span {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.bookshelf-collection-result strong {
+.bookshelf-add-drawer-result strong {
   color: var(--text);
   font-size: 13px;
   font-weight: 500;
 }
 
-.bookshelf-collection-result small {
+.bookshelf-add-drawer-result small,
+.bookshelf-add-drawer-result span {
   color: var(--text-subtle);
   font-size: 11px;
 }
 
-.bookshelf-collection-result > span:nth-child(2) {
-  color: var(--text-subtle);
-  font-size: 12px;
+@media (prefers-reduced-motion: no-preference) {
+  .bookshelf-add-drawer {
+    animation: drawer-slide-in 190ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
 }
 
 .bookshelf-table {

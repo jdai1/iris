@@ -313,15 +313,18 @@ export function SearchView({
                   <details className="chat-activity">
                     <summary>Activity</summary>
                     <div className="chat-activity-body">
-                      {message.steps.map((step, index) => (
-                        <div key={`${step.kind}-${step.title}-${index}`} className="activity-row">
-                          <span className="activity-dot" />
-                          <div>
-                            <strong>{activityTitle(step)}</strong>
-                            <small>{activityMeta(step)}</small>
+                      {message.steps.map((step, index) => {
+                        const meta = activityMeta(step);
+                        return (
+                          <div key={`${step.kind}-${step.title}-${index}`} className="activity-row">
+                            <span className="activity-dot" />
+                            <div>
+                              <strong>{activityTitle(step)}</strong>
+                              {meta && <small>{meta}</small>}
+                            </div>
                           </div>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   </details>
                 )}
@@ -555,7 +558,12 @@ function activityTitle(step: AgentStep): string {
 
 function activityMeta(step: AgentStep): string {
   if (typeof step.hits === 'number') return `${step.hits}`;
-  return step.detail.replace(/^Top hits:\s*/i, '');
+  return step.detail
+    .replace(/^Top hits:\s*/i, '')
+    // Older conversations persisted internal database IDs in activity details.
+    .replace(/\b(?:source_|target_)?document_id\s*=\s*\d+\b/gi, '')
+    .replace(/^[\s·•:,-]+|[\s·•:,-]+$/g, '')
+    .trim();
 }
 
 function isLegacySyntheticAssistantMessage(message: AgentConversation['messages'][number]): boolean {

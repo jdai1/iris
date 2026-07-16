@@ -13,7 +13,7 @@ export const viewPaths: Record<View, string> = {
 };
 
 export function documentUuidFromPath(pathname: string): string | null {
-  const match = pathname.replace(/\/+$/, '').match(/^\/documents\/([^/]+)$/);
+  const match = pathname.replace(/\/+$/, '').match(/\/documents\/([^/]+)$/);
   if (!match) return null;
   try {
     return decodeURIComponent(match[1]);
@@ -38,7 +38,17 @@ export function navigateTo(path: string, { replace = false, state = null }: { re
 }
 
 export function documentPath(documentUuid: string) {
-  return `/documents/${encodeURIComponent(documentUuid)}`;
+  const pathname = typeof window === 'undefined' ? '/search' : window.location.pathname;
+  const search = typeof window === 'undefined' ? '' : window.location.search;
+  const parentPath = documentParentPath(pathname);
+  return `${parentPath}/documents/${encodeURIComponent(documentUuid)}${search}`;
+}
+
+export function documentParentPath(pathname: string): string {
+  const normalized = pathname.replace(/\/+$/, '') || '/search';
+  const withoutDocument = normalized.replace(/\/documents\/[^/]+$/, '');
+  if (viewFromPath(withoutDocument)) return withoutDocument;
+  return '/search';
 }
 
 export function initialView(): View {
@@ -52,15 +62,15 @@ export function initialView(): View {
 export function viewFromPath(pathname: string): View | null {
   const normalized = pathname.replace(/\/+$/, '') || '/';
   if (normalized === '/') return null;
-  if (normalized.startsWith('/directory/')) return 'directory';
-  const match = views.find((view) => viewPaths[view] === normalized);
+  const match = views.find((view) => normalized === viewPaths[view] || normalized.startsWith(`${viewPaths[view]}/`));
   return match ?? null;
 }
 
 export function profileTargetFromPath(pathname: string): ProfileTarget {
   const normalized = pathname.replace(/\/+$/, '');
   if (!normalized.startsWith('/directory/')) return null;
-  const domain = decodeURIComponent(normalized.slice('/directory/'.length)).trim();
+  const domainSegment = normalized.slice('/directory/'.length).split('/documents/')[0];
+  const domain = decodeURIComponent(domainSegment).trim();
   return domain ? { sourceId: 0, domain } : null;
 }
 

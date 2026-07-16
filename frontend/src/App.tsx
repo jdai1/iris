@@ -9,7 +9,7 @@ import { AdminView } from './views/AdminView';
 import { BookshelfView } from './views/BookshelfView';
 import { DirectoryView } from './views/DirectoryView';
 import { SearchView } from './views/SearchView';
-import { documentPath, documentUuidFromPath, initialView, navigateTo, profileTargetFromPath, VIEW_STORAGE_KEY, viewFromPath, viewPaths, type ProfileTarget, type View } from './app/navigation';
+import { documentParentPath, documentPath, documentUuidFromPath, initialView, navigateTo, profileTargetFromPath, VIEW_STORAGE_KEY, viewFromPath, viewPaths, type ProfileTarget, type View } from './app/navigation';
 import { DocumentRouteDrawer } from './components/DocumentRouteDrawer';
 import { AppShell, Sidebar, Workspace } from './layout';
 import { EmbeddingExplorer } from './EmbeddingExplorer';
@@ -63,7 +63,6 @@ function IrisApp({ currentUser, onSignOut }: { currentUser: IrisUser | null; onS
       const nextDocumentUuid = documentUuidFromPath(window.location.pathname);
       setDocumentUuid(nextDocumentUuid);
       setDocumentReason(nextDocumentUuid === null ? null : readDocumentReason(window.history.state));
-      if (nextDocumentUuid !== null) return;
       const nextView = viewFromPath(window.location.pathname) ?? 'search';
       setProfileTarget(profileTargetFromPath(window.location.pathname));
       applyingPopState.current = true;
@@ -109,10 +108,7 @@ function IrisApp({ currentUser, onSignOut }: { currentUser: IrisUser | null; onS
   }
 
   function closeDocumentDrawer() {
-    const fallbackPath = view === 'directory' && profileTarget?.domain
-      ? `/directory/${encodeURIComponent(profileTarget.domain)}`
-      : viewPaths[view];
-    navigateTo(fallbackPath, { replace: true });
+    navigateTo(`${documentParentPath(window.location.pathname)}${window.location.search}`, { replace: true });
   }
 
   function openSearchDocument(documentUuid: string, reason: string) {
@@ -150,11 +146,11 @@ function IrisApp({ currentUser, onSignOut }: { currentUser: IrisUser | null; onS
               }}
               uiVariant="nav"
               justifyContent="flex-start"
-              data-active={documentUuid === null && view === item.view ? 'true' : undefined}
+              data-active={view === item.view ? 'true' : undefined}
               bg="transparent"
-              color={documentUuid === null && view === item.view ? 'iris.900' : 'iris.500'}
+              color={view === item.view ? 'iris.900' : 'iris.500'}
               fontSize="14px"
-              fontWeight={documentUuid === null && view === item.view ? '600' : '500'}
+              fontWeight={view === item.view ? '600' : '500'}
               lineHeight="1"
               _hover={{
                 bg: 'transparent',

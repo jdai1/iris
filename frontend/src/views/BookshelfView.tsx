@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useRef, useState } from 'react';
-import { Check, Plus, Search, Trash2 } from 'lucide-react';
+import { Check, MoreHorizontal, Plus, Search, Trash2, X } from 'lucide-react';
 import {
   addBookshelfCollectionItem,
   createBookshelfCollection,
@@ -20,7 +20,7 @@ import type { BookshelfCollection, BookshelfEntry, BookshelfStatus, SearchResult
 type BookshelfViewKey = 'unread' | 'favorites' | 'reading-log' | `collection:${number}`;
 
 function collectionViewFromLocation(): BookshelfViewKey | null {
-  if (window.location.pathname !== '/bookshelf') return null;
+  if (!window.location.pathname.startsWith('/bookshelf')) return null;
   const collectionId = collectionIdFromSearch(window.location.search);
   return collectionId ? `collection:${collectionId}` : 'unread';
 }
@@ -37,15 +37,20 @@ export function BookshelfView({ onDiscover }: { onDiscover: () => void }) {
   const [linkUrl, setLinkUrl] = useState('');
   const [linkTitle, setLinkTitle] = useState('');
   const [collectionName, setCollectionName] = useState('');
+  const [filterQuery, setFilterQuery] = useState('');
   const [collectionSearchQuery, setCollectionSearchQuery] = useState('');
   const [collectionSearchResults, setCollectionSearchResults] = useState<SearchResult[]>([]);
   const [collectionSearching, setCollectionSearching] = useState(false);
+  const [addDrawerOpen, setAddDrawerOpen] = useState(false);
   const [addingDocumentUuid, setAddingDocumentUuid] = useState<string | null>(null);
   const [confirmDeleteCollectionId, setConfirmDeleteCollectionId] = useState<number | null>(null);
   const [selectedDocumentUuids, setSelectedDocumentUuids] = useState<Set<string>>(new Set());
+  const [bulkActionsOpen, setBulkActionsOpen] = useState(false);
   const collectionDraftRef = useRef<HTMLInputElement | null>(null);
+  const bulkActionsRef = useRef<HTMLDivElement | null>(null);
 
-  const tableRows = filterBookshelfEntries(entries, collections, activeView);
+  const scopedRows = filterBookshelfEntries(entries, collections, activeView);
+  const tableRows = filterVisibleBookshelfEntries(scopedRows, filterQuery);
   const discoverLabel = 'Discover';
   const activeCollection = activeView.startsWith('collection:')
     ? collections.find((collection) => collection.id === Number(activeView.slice('collection:'.length))) ?? null
@@ -83,8 +88,10 @@ export function BookshelfView({ onDiscover }: { onDiscover: () => void }) {
 
   useEffect(() => {
     setConfirmDeleteCollectionId(null);
+    setFilterQuery('');
     setCollectionSearchQuery('');
     setCollectionSearchResults([]);
+    setAddDrawerOpen(false);
     setSelectedDocumentUuids(new Set());
   }, [activeView]);
 
@@ -97,7 +104,30 @@ export function BookshelfView({ onDiscover }: { onDiscover: () => void }) {
   }, [entries, collections, activeView]);
 
   useEffect(() => {
+    if (selectedDocumentUuids.size === 0) setBulkActionsOpen(false);
+  }, [selectedDocumentUuids.size]);
+
+  useEffect(() => {
+    if (!bulkActionsOpen) return;
+    function closeBulkActions(event: PointerEvent) {
+      const target = event.target;
+      if (target instanceof Node && bulkActionsRef.current?.contains(target)) return;
+      setBulkActionsOpen(false);
+    }
+    function closeBulkActionsOnEscape(event: KeyboardEvent) {
+      if (event.key === 'Escape') setBulkActionsOpen(false);
+    }
+    window.addEventListener('pointerdown', closeBulkActions);
+    window.addEventListener('keydown', closeBulkActionsOnEscape);
+    return () => {
+      window.removeEventListener('pointerdown', closeBulkActions);
+      window.removeEventListener('keydown', closeBulkActionsOnEscape);
+    };
+  }, [bulkActionsOpen]);
+
+  useEffect(() => {
     const query = collectionSearchQuery.trim();
+    if (!addDrawerOpen) return;
     if (!query) {
       setCollectionSearchResults([]);
       setCollectionSearching(false);
@@ -116,12 +146,12 @@ export function BookshelfView({ onDiscover }: { onDiscover: () => void }) {
         .finally(() => {
           if (!cancelled) setCollectionSearching(false);
         });
-    }, 160);
+    }, 60);
     return () => {
       cancelled = true;
       window.clearTimeout(timeout);
     };
-  }, [collectionSearchQuery]);
+  }, [addDrawerOpen, collectionSearchQuery]);
 
   async function submitLink(event: FormEvent) {
     event.preventDefault();
@@ -412,38 +442,79 @@ export function BookshelfView({ onDiscover }: { onDiscover: () => void }) {
 
         <div className="bookshelf-table-panel">
           <div className="bookshelf-toolbar">
-            <div className="bookshelf-bulk-toolbar" aria-label="Selected document actions">
-              <span aria-live="polite">
-                {selectedDocumentUuids.size > 0 ? `${selectedDocumentUuids.size} selected` : 'Select documents to manage'}
-              </span>
-              {collections.length > (activeCollection ? 1 : 0) && (
-                <select
-                  value=""
-                  onChange={(event) => {
-                    const collectionId = Number(event.target.value);
-                    if (collectionId) void addSelectedToCollection(collectionId);
-                  }}
-                  disabled={selectedDocumentUuids.size === 0 || saving}
-                  aria-label="Add selected documents to collection"
-                >
-                  <option value="">Add to collection...</option>
-                  {collections
-                    .filter((collection) => collection.id !== activeCollection?.id)
-                    .map((collection) => (
-                      <option key={collection.id} value={collection.id}>{collection.name}</option>
-                    ))}
-                </select>
+            <form
+              className="bookshelf-toolbar-search"
+              onSubmit={(event) => event.preventDefault()}
+            >
+              <label className="visually-hidden" htmlFor="bookshelf-collection-search">Add documents</label>
+              <Search size={14} />
+              <input
+                id="bookshelf-collection-search"
+                value={filterQuery}
+                onChange={(event) => setFilterQuery(event.target.value)}
+                placeholder={bookshelfFilterPlaceholder(activeView, activeCollection)}
+              />
+            </form>
+            <div className="bookshelf-toolbar-actions">
+              <button
+                className="bookshelf-icon-action"
+                type="button"
+                onClick={() => setAddDrawerOpen(true)}
+                aria-label="Add documents"
+                data-tooltip="Add documents"
+              >
+                <Plus size={16} />
+              </button>
+              {selectedDocumentUuids.size > 0 && (
+                <>
+                  <div className="bookshelf-bulk-toolbar" aria-label="Selected documents">
+                    <span aria-live="polite">{selectedDocumentUuids.size} selected</span>
+                  </div>
+                  <div className="bookshelf-bulk-actions" ref={bulkActionsRef}>
+                    <button
+                      className="bookshelf-icon-action"
+                      type="button"
+                      onClick={() => setBulkActionsOpen((open) => !open)}
+                      aria-label="Selected document actions"
+                      aria-haspopup="menu"
+                      aria-expanded={bulkActionsOpen}
+                      data-tooltip="Actions"
+                    >
+                      <MoreHorizontal size={16} />
+                    </button>
+                    {bulkActionsOpen && (
+                      <div className="bookshelf-bulk-action-menu" role="menu">
+                    {collections.length > (activeCollection ? 1 : 0) && (
+                      <select
+                        value=""
+                        onChange={(event) => {
+                          const collectionId = Number(event.target.value);
+                          if (collectionId) void addSelectedToCollection(collectionId);
+                        }}
+                        disabled={saving}
+                        aria-label="Add selected documents to collection"
+                      >
+                        <option value="">Add to collection...</option>
+                        {collections
+                          .filter((collection) => collection.id !== activeCollection?.id)
+                          .map((collection) => (
+                            <option key={collection.id} value={collection.id}>{collection.name}</option>
+                          ))}
+                      </select>
+                    )}
+                    <button type="button" role="menuitem" onClick={() => {
+                      setBulkActionsOpen(false);
+                      void removeSelectedFromActiveCollection();
+                    }} disabled={saving}>
+                      <Trash2 size={13} />
+                      Remove
+                    </button>
+                      </div>
+                    )}
+                  </div>
+                </>
               )}
-              <button type="button" onClick={removeSelectedFromActiveCollection} disabled={selectedDocumentUuids.size === 0 || saving}>
-                <Trash2 size={13} />
-                Remove
-              </button>
-              <button type="button" onClick={() => setSelectedDocumentUuids(new Set())} disabled={selectedDocumentUuids.size === 0}>
-                Clear
-              </button>
-            </div>
-            {activeCollection && (
-              <div className="bookshelf-toolbar-actions">
+              {activeCollection && (
                 <button
                   className={confirmDeleteCollectionId === activeCollection.id ? 'bookshelf-icon-action bookshelf-icon-action-danger bookshelf-icon-action-confirm' : 'bookshelf-icon-action bookshelf-icon-action-danger'}
                   type="button"
@@ -454,65 +525,8 @@ export function BookshelfView({ onDiscover }: { onDiscover: () => void }) {
                 >
                   {confirmDeleteCollectionId === activeCollection.id ? <Check size={15} /> : <Trash2 size={15} />}
                 </button>
-              </div>
-            )}
-          </div>
-
-          <div className="bookshelf-collection-search">
-            <form
-              onSubmit={(event) => {
-                event.preventDefault();
-              }}
-            >
-              <label className="visually-hidden" htmlFor="bookshelf-collection-search">Add documents</label>
-              <div>
-                <Search size={14} />
-                <input
-                  id="bookshelf-collection-search"
-                  value={collectionSearchQuery}
-                  onChange={(event) => setCollectionSearchQuery(event.target.value)}
-                  placeholder={bookshelfSearchPlaceholder(activeView, activeCollection)}
-                />
-              </div>
-            </form>
-            {collectionSearching && <p>Searching...</p>}
-            {collectionSearchResults.length > 0 && (
-              <div className="bookshelf-collection-results">
-                {collectionSearchResults.map((result) => {
-                  const alreadyAdded = resultInActiveView(result.document.uuid, activeView, activeCollection, entries);
-                  return (
-                    <div
-                      key={result.document.uuid}
-                      className="bookshelf-collection-result"
-                      role="button"
-                      tabIndex={0}
-                      onClick={() => openSearchResultDrawer(result)}
-                      onKeyDown={(event) => {
-                        if (event.key === 'Enter' || event.key === ' ') openSearchResultDrawer(result);
-                      }}
-                    >
-                      <span>
-                        <strong>{result.document.title ?? result.document.url}</strong>
-                        <small>{result.document.source_domain}</small>
-                      </span>
-                      <span>{result.document.summary}</span>
-                      <button
-                        type="button"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          void addResultToActiveView(result);
-                        }}
-                        disabled={alreadyAdded || addingDocumentUuid === result.document.uuid}
-                        aria-label={alreadyAdded ? 'Document added' : 'Add document'}
-                        data-tooltip={alreadyAdded ? 'Added' : 'Add document'}
-                      >
-                        {alreadyAdded ? <Check size={14} /> : <Plus size={14} />}
-                      </button>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
+              )}
+            </div>
           </div>
 
           {addingLink && (
@@ -550,6 +564,52 @@ export function BookshelfView({ onDiscover }: { onDiscover: () => void }) {
           )}
         </div>
       </div>
+      {addDrawerOpen && (
+        <aside className="bookshelf-add-drawer" aria-label="Add documents">
+          <header>
+            <div>
+              <strong>Add documents</strong>
+              <small>{activeCollection?.name ?? bookshelfViewLabel(activeView)}</small>
+            </div>
+            <button type="button" onClick={() => setAddDrawerOpen(false)} aria-label="Close add documents">
+              <X size={18} />
+            </button>
+          </header>
+          <label className="bookshelf-add-drawer-search">
+            <Search size={15} />
+            <input
+              value={collectionSearchQuery}
+              onChange={(event) => setCollectionSearchQuery(event.target.value)}
+              placeholder="Search the corpus..."
+              autoFocus
+            />
+          </label>
+          <div className="bookshelf-add-drawer-results">
+            {collectionSearching && <p>Searching...</p>}
+            {!collectionSearching && collectionSearchQuery.trim() && collectionSearchResults.length === 0 && <p>No documents found.</p>}
+            {collectionSearchResults.map((result) => {
+              const alreadyAdded = resultInActiveView(result.document.uuid, activeView, activeCollection, entries);
+              return (
+                <div key={result.document.uuid} className="bookshelf-add-drawer-result">
+                  <button type="button" onClick={() => openSearchResultDrawer(result)}>
+                    <strong>{result.document.title ?? result.document.url}</strong>
+                    <small>{result.document.source_domain}</small>
+                    <span>{result.document.summary}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void addResultToActiveView(result)}
+                    disabled={alreadyAdded || addingDocumentUuid === result.document.uuid}
+                    aria-label={alreadyAdded ? 'Document added' : 'Add document'}
+                  >
+                    {alreadyAdded ? <Check size={16} /> : <Plus size={16} />}
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        </aside>
+      )}
     </section>
   );
 }
@@ -569,11 +629,23 @@ function filterBookshelfEntries(entries: BookshelfEntry[], collections: Bookshel
   return scoped;
 }
 
-function bookshelfSearchPlaceholder(activeView: BookshelfViewKey, activeCollection: BookshelfCollection | null) {
-  if (activeCollection) return `Search corpus to add to ${activeCollection.name}...`;
-  if (activeView === 'favorites') return 'Search corpus to favorite...';
-  if (activeView === 'reading-log') return 'Search corpus to mark read...';
-  return 'Search corpus to add to Read next...';
+function filterVisibleBookshelfEntries(entries: BookshelfEntry[], query: string): BookshelfEntry[] {
+  const normalized = query.trim().toLowerCase();
+  if (!normalized) return entries;
+  return entries.filter((entry) =>
+    [entry.document.title, entry.document.url, entry.document.source_domain, entry.document.summary, entry.note, entry.intent_note]
+      .some((value) => value?.toLowerCase().includes(normalized)),
+  );
+}
+
+function bookshelfFilterPlaceholder(activeView: BookshelfViewKey, activeCollection: BookshelfCollection | null) {
+  return `Filter ${activeCollection?.name ?? bookshelfViewLabel(activeView)}...`;
+}
+
+function bookshelfViewLabel(activeView: BookshelfViewKey) {
+  if (activeView === 'favorites') return 'Favorites';
+  if (activeView === 'reading-log') return 'Reading log';
+  return 'Read next';
 }
 
 function resultInActiveView(documentUuid: string, activeView: BookshelfViewKey, activeCollection: BookshelfCollection | null, entries: BookshelfEntry[]) {
