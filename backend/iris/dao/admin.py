@@ -7,7 +7,7 @@ from collections import Counter
 from collections import defaultdict
 
 from sqlalchemy import desc, func, select
-from sqlalchemy.orm import joinedload
+from sqlalchemy.orm import joinedload, load_only
 
 from iris.dao import db
 from iris.dao import search as search_dao
@@ -19,6 +19,7 @@ from iris.schemas.api import (
     AdminOverviewSchema,
     AdminSourceSchema,
     DocumentSchema,
+    EmbeddingMapDocumentSchema,
     EmbeddingNeighborSchema,
     EmbeddingMapPointSchema,
     EmbeddingMapSchema,
@@ -115,14 +116,29 @@ def get_admin_overview() -> AdminOverviewSchema:
 def get_embedding_map(*, limit: int) -> EmbeddingMapSchema:
     """Return embedded essay documents projected into a compact 3D map."""
     session = db.current_session()
+    normalized_limit = clamped_embedding_limit(limit)
     statement = (
         select(Document)
-        .options(joinedload(Document.source))
+        .options(
+            load_only(
+                Document.id,
+                Document.uuid,
+                Document.source_id,
+                Document.url,
+                Document.content_hash,
+                Document.embedding_vector,
+                Document.document_type,
+                Document.title,
+                Document.summary,
+                Document.topics,
+            ),
+            joinedload(Document.source).load_only(Source.canonical_domain),
+        )
         .where(Document.embedding_vector.is_not(None))
         .where(Document.document_type == DocumentType.ESSAY.value)
         .order_by(Document.id.asc())
     )
-    documents = session.execute(statement.limit(clamped_embedding_limit(limit))).scalars().all()
+    documents = session.execute(statement.limit(normalized_limit)).scalars().all()
 
     loaded: list[tuple[Document, list[float]]] = []
     for document in documents:
@@ -164,7 +180,7 @@ def get_embedding_neighbors(document_id: int, *, limit: int = 5) -> list[Embeddi
     """Return nearest essay documents by full-dimensional embedding cosine similarity."""
     session = db.current_session()
     selected = session.get(Document, document_id)
-    if not selected or not selected.embedding_vector:
+    if not selected or selected.embedding_vector is None:
         return None
     try:
         selected_vector = loads_embedding(selected.embedding_vector)
@@ -174,7 +190,7 @@ def get_embedding_neighbors(document_id: int, *, limit: int = 5) -> list[Embeddi
     if vector_rows:
         return [
             EmbeddingNeighborSchema(
-                document=_embedding_map_document(document),
+                document=_embedding_neighbor_document(document),
                 similarity=round(score, 4),
             )
             for document, score in vector_rows[: max(1, min(limit, 20))]
@@ -197,7 +213,7 @@ def get_embedding_neighbors(document_id: int, *, limit: int = 5) -> list[Embeddi
         score = cosine(selected_vector, vector)
         neighbors.append(
             EmbeddingNeighborSchema(
-                document=_embedding_map_document(document),
+                document=_embedding_neighbor_document(document),
                 similarity=round(score, 4),
             )
         )
@@ -573,7 +589,19 @@ def clamped_embedding_limit(limit: int) -> int:
     return max(1, min(limit, 5000))
 
 
-def _embedding_map_document(document: Document) -> DocumentSchema:
+def _embedding_map_document(document: Document) -> EmbeddingMapDocumentSchema:
+    return EmbeddingMapDocumentSchema(
+        uuid=document.uuid,
+        source_domain=document.source.canonical_domain,
+        url=document.url,
+        document_type=document.document_type,
+        title=document.title,
+        summary=document.summary,
+        topics=document.topics or [],
+    )
+
+
+def _embedding_neighbor_document(document: Document) -> DocumentSchema:
     return DocumentSchema(
         id=document.id,
         uuid=document.uuid,

@@ -249,8 +249,18 @@ class BookshelfCollectionSchema(BaseModel):
     items: list[BookshelfEntrySchema] = []
 
 
+class EmbeddingMapDocumentSchema(BaseModel):
+    uuid: str
+    source_domain: str
+    url: str
+    document_type: str
+    title: str | None
+    summary: str | None
+    topics: list[str]
+
+
 class EmbeddingMapPointSchema(BaseModel):
-    document: DocumentSchema
+    document: EmbeddingMapDocumentSchema
     x: float
     y: float
     z: float

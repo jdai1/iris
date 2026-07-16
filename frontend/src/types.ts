@@ -210,7 +210,7 @@ export interface BookshelfLinkCreate {
 }
 
 export interface EmbeddingMapPoint {
-  document: Document;
+  document: Pick<Document, 'uuid' | 'source_domain' | 'url' | 'document_type' | 'title' | 'summary' | 'topics'>;
   x: number;
   y: number;
   z: number;
