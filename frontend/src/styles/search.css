@@ -1440,6 +1440,22 @@
   padding: 4px;
 }
 
+.bookshelf-add-drawer > header .bookshelf-add-drawer-close {
+  display: inline-grid;
+  flex: 0 0 auto;
+  width: 32px;
+  height: 32px;
+  margin: -6px -6px 0 0;
+  place-items: center;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.bookshelf-add-drawer > header .bookshelf-add-drawer-close:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
 .bookshelf-add-drawer-search {
   display: grid;
   grid-template-columns: 20px minmax(0, 1fr);

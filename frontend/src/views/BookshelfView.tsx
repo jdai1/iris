@@ -1,4 +1,5 @@
 import { FormEvent, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Check, MoreHorizontal, Plus, Search, Trash2, X } from 'lucide-react';
 import {
   addBookshelfCollectionItem,
@@ -124,6 +125,15 @@ export function BookshelfView({ onDiscover }: { onDiscover: () => void }) {
       window.removeEventListener('keydown', closeBulkActionsOnEscape);
     };
   }, [bulkActionsOpen]);
+
+  useEffect(() => {
+    if (!addDrawerOpen) return;
+    function closeAddDrawerOnEscape(event: KeyboardEvent) {
+      if (event.key === 'Escape') setAddDrawerOpen(false);
+    }
+    window.addEventListener('keydown', closeAddDrawerOnEscape);
+    return () => window.removeEventListener('keydown', closeAddDrawerOnEscape);
+  }, [addDrawerOpen]);
 
   useEffect(() => {
     const query = collectionSearchQuery.trim();
@@ -564,14 +574,21 @@ export function BookshelfView({ onDiscover }: { onDiscover: () => void }) {
           )}
         </div>
       </div>
-      {addDrawerOpen && (
-        <aside className="bookshelf-add-drawer" aria-label="Add documents">
+      {addDrawerOpen && createPortal(
+        <>
+          <button
+            className="drawer-backdrop"
+            type="button"
+            aria-label="Close add documents"
+            onClick={() => setAddDrawerOpen(false)}
+          />
+          <aside className="bookshelf-add-drawer" aria-label="Add documents">
           <header>
             <div>
               <strong>Add documents</strong>
               <small>{activeCollection?.name ?? bookshelfViewLabel(activeView)}</small>
             </div>
-            <button type="button" onClick={() => setAddDrawerOpen(false)} aria-label="Close add documents">
+            <button className="bookshelf-add-drawer-close" type="button" onClick={() => setAddDrawerOpen(false)} aria-label="Close add documents">
               <X size={18} />
             </button>
           </header>
@@ -608,7 +625,9 @@ export function BookshelfView({ onDiscover }: { onDiscover: () => void }) {
               );
             })}
           </div>
-        </aside>
+          </aside>
+        </>,
+        document.body,
       )}
     </section>
   );
