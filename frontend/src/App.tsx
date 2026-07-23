@@ -1,24 +1,22 @@
-import { lazy, ReactNode, Suspense, useEffect, useRef, useState } from 'react';
+import { ReactNode, useEffect, useRef, useState } from 'react';
 import {
   Box,
   Stack,
 } from '@chakra-ui/react';
-import { BookOpen, GitFork, LayoutDashboard, LogOut, Moon, Orbit, Search, Settings, Sun, UserCircle, Users } from 'lucide-react';
+import { BookOpen, LayoutDashboard, LogOut, Moon, Orbit, Search, Settings, Sun, UserCircle, Users } from 'lucide-react';
 import { AuthGate } from './auth';
 import { AdminView } from './views/AdminView';
 import { BookshelfView } from './views/BookshelfView';
-import { DirectoryView } from './views/DirectoryView';
+import { DirectoryHub } from './views/DirectoryHub';
 import { PeopleView } from './views/PeopleView';
 import { SearchView } from './views/SearchView';
-import { documentParentPath, documentPath, documentUuidFromPath, initialView, navigateTo, profileTargetFromPath, VIEW_STORAGE_KEY, viewFromPath, viewPaths, type ProfileTarget, type View } from './app/navigation';
+import { directoryModeFromLocation, documentParentPath, documentPath, documentUuidFromPath, initialView, navigateTo, profileTargetFromPath, VIEW_STORAGE_KEY, viewFromPath, viewPaths, type DirectoryMode, type ProfileTarget, type View } from './app/navigation';
 import { DocumentRouteDrawer } from './components/DocumentRouteDrawer';
 import { AppShell, Sidebar, Workspace } from './layout';
-import { GraphExplorer } from './GraphExplorer';
 import { Button } from './components/ui';
 import type { User as IrisUser } from './types';
 
 const THEME_STORAGE_KEY = 'iris.theme';
-const EmbeddingExplorer = lazy(() => import('./EmbeddingExplorer').then((module) => ({ default: module.EmbeddingExplorer })));
 type ThemeMode = 'light' | 'dark';
 
 function initialTheme(): ThemeMode {
@@ -28,6 +26,11 @@ function initialTheme(): ThemeMode {
 
 function IrisApp({ currentUser, onSignOut }: { currentUser: IrisUser | null; onSignOut: () => void }) {
   const [view, setView] = useState<View>(initialView);
+  const [directoryMode, setDirectoryMode] = useState<DirectoryMode>(() =>
+    typeof window === 'undefined'
+      ? 'sources'
+      : directoryModeFromLocation(window.location.pathname, window.location.search),
+  );
   const [profileTarget, setProfileTarget] = useState<ProfileTarget>(() =>
     typeof window === 'undefined' ? null : profileTargetFromPath(window.location.pathname),
   );
@@ -45,11 +48,17 @@ function IrisApp({ currentUser, onSignOut }: { currentUser: IrisUser | null; onS
   useEffect(() => {
     if (documentUuid !== null) return;
     window.localStorage.setItem(VIEW_STORAGE_KEY, view);
-    const nextPath =
-      view === 'directory' && profileTarget?.domain
+    const nextPath = view === 'directory'
+      ? directoryMode === 'sources' && profileTarget?.domain
         ? `/directory/${encodeURIComponent(profileTarget.domain)}`
-        : viewPaths[view];
-    if (window.location.pathname !== nextPath) {
+        : directoryMode === 'sources'
+          ? '/directory'
+          : `/directory?mode=${directoryMode}`
+      : viewPaths[view];
+    const currentPath = view === 'directory'
+      ? `${window.location.pathname}${window.location.search}`
+      : window.location.pathname;
+    if (currentPath !== nextPath) {
       if (applyingPopState.current) {
         window.history.replaceState(null, '', nextPath);
       } else {
@@ -57,7 +66,7 @@ function IrisApp({ currentUser, onSignOut }: { currentUser: IrisUser | null; onS
       }
     }
     applyingPopState.current = false;
-  }, [view, profileTarget?.domain]);
+  }, [directoryMode, view, profileTarget?.domain]);
 
   useEffect(() => {
     function handlePopState() {
@@ -65,6 +74,7 @@ function IrisApp({ currentUser, onSignOut }: { currentUser: IrisUser | null; onS
       setDocumentUuid(nextDocumentUuid);
       setDocumentReason(nextDocumentUuid === null ? null : readDocumentReason(window.history.state));
       const nextView = viewFromPath(window.location.pathname) ?? 'search';
+      setDirectoryMode(directoryModeFromLocation(window.location.pathname, window.location.search));
       setProfileTarget(profileTargetFromPath(window.location.pathname));
       applyingPopState.current = true;
       setView(nextView);
@@ -98,13 +108,21 @@ function IrisApp({ currentUser, onSignOut }: { currentUser: IrisUser | null; onS
 
   function openProfile(sourceId: number, domain: string) {
     setDocumentUuid(null);
+    setDirectoryMode('sources');
     setProfileTarget({ sourceId, domain });
     setView('directory');
   }
 
   function openDirectoryRoot() {
     setDocumentUuid(null);
+    setDirectoryMode('sources');
     setProfileTarget(null);
+    setView('directory');
+  }
+
+  function openDirectoryMode(mode: DirectoryMode) {
+    setDocumentUuid(null);
+    setDirectoryMode(mode);
     setView('directory');
   }
 
@@ -120,8 +138,6 @@ function IrisApp({ currentUser, onSignOut }: { currentUser: IrisUser | null; onS
     { view: 'search', label: 'Search', icon: <Search size={15} /> },
     { view: 'bookshelf', label: 'Bookshelf', icon: <BookOpen size={15} /> },
     { view: 'people', label: 'People', icon: <Users size={15} /> },
-    { view: 'explore', label: 'Explore', icon: <Orbit size={15} /> },
-    { view: 'graph', label: 'Graph', icon: <GitFork size={15} /> },
     { view: 'directory', label: 'Directory', icon: <Orbit size={15} /> },
     { view: 'admin', label: 'Admin', icon: <LayoutDashboard size={15} />, adminOnly: true },
   ];
@@ -210,13 +226,15 @@ function IrisApp({ currentUser, onSignOut }: { currentUser: IrisUser | null; onS
           setView('search');
         }} />}
         {view === 'people' && <PeopleView />}
-        {view === 'directory' && <DirectoryView target={profileTarget} onOpenProfile={openProfile} onDirectoryRoot={openDirectoryRoot} />}
-        {view === 'explore' && (
-          <Suspense fallback={null}>
-            <EmbeddingExplorer />
-          </Suspense>
+        {view === 'directory' && (
+          <DirectoryHub
+            mode={directoryMode}
+            target={profileTarget}
+            onModeChange={openDirectoryMode}
+            onOpenProfile={openProfile}
+            onDirectoryRoot={openDirectoryRoot}
+          />
         )}
-        {view === 'graph' && <GraphExplorer onOpenProfile={openProfile} />}
         {view === 'admin' && currentUser?.is_admin && <AdminView />}
       </Workspace>
       {documentUuid !== null && <DocumentRouteDrawer documentUuid={documentUuid} reason={documentReason} onClose={closeDocumentDrawer} />}
