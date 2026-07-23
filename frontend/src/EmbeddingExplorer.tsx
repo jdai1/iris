@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowUpRight, Crosshair, HelpCircle, Loader2, MousePointer2 } from 'lucide-react';
+import { Crosshair, HelpCircle, Loader2, MousePointer2 } from 'lucide-react';
 import * as THREE from 'three';
-import { getEmbeddingMap, getEmbeddingNeighbors } from './api';
+import { getEmbeddingMap } from './api';
+import { documentParentPath, documentPath, documentUuidFromPath, navigateTo } from './app/navigation';
 import { CorpusSearchForm } from './CorpusSearchForm';
-import { Button, Chip, ChipList, StateMessage } from './components/ui';
-import type { EmbeddingMap, EmbeddingMapPoint, EmbeddingNeighbor } from './types';
+import { Button, StateMessage } from './components/ui';
+import type { EmbeddingMap, EmbeddingMapPoint } from './types';
 
 type HoverState = {
   point: EmbeddingMapPoint;
@@ -142,26 +143,6 @@ function focusedPoint(
   return best;
 }
 
-function nearestRenderedNeighbors(
-  selected: EmbeddingMapPoint | null,
-  points: EmbeddingMapPoint[],
-  renderPositions: Map<string, THREE.Vector3>,
-) {
-  if (!selected) return [];
-  const selectedPosition = renderPositions.get(selected.document.uuid) ?? scenePosition(selected);
-  return points
-    .filter((point) => point.document.uuid !== selected.document.uuid)
-    .map((point) => {
-      const position = renderPositions.get(point.document.uuid) ?? scenePosition(point);
-      return {
-        point,
-        distance: selectedPosition.distanceTo(position),
-      };
-    })
-    .sort((left, right) => left.distance - right.distance)
-    .slice(0, 5);
-}
-
 function createHolographicPointTexture(mode: ThemeMode) {
   const theme = explorerTheme(mode);
   const canvas = document.createElement('canvas');
@@ -250,13 +231,9 @@ export function EmbeddingExplorer() {
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const [hover, setHover] = useState<HoverState>(null);
-  const [selected, setSelected] = useState<EmbeddingMapPoint | null>(null);
-  const [neighbors, setNeighbors] = useState<EmbeddingNeighbor[]>([]);
-  const [neighborsLoading, setNeighborsLoading] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
   const [flightActive, setFlightActive] = useState(false);
   const [themeMode, setThemeMode] = useState<ThemeMode>(currentThemeMode);
-  const [renderPositionVersion, setRenderPositionVersion] = useState(0);
 
   const searchMatches = useMemo(() => {
     const normalized = normalizeUrlForLookup(query);
@@ -267,11 +244,6 @@ export function EmbeddingExplorer() {
       })
       .slice(0, 6);
   }, [map, query]);
-
-  const renderedNeighbors = useMemo(
-    () => nearestRenderedNeighbors(selected, map?.points ?? [], renderPositionsRef.current),
-    [map, renderPositionVersion, selected],
-  );
 
   useEffect(() => {
     const updateTheme = () => setThemeMode(currentThemeMode());
@@ -295,7 +267,6 @@ export function EmbeddingExplorer() {
           : null;
         setMap(payload);
         dataRef.current = payload.points;
-        setSelected(initialPoint);
         selectedRef.current = initialPoint;
       })
       .catch((err) => setError(err instanceof Error ? err.message : 'Embedding map failed'))
@@ -304,28 +275,6 @@ export function EmbeddingExplorer() {
       mounted = false;
     };
   }, []);
-
-  useEffect(() => {
-    if (!selected) {
-      setNeighbors([]);
-      return;
-    }
-    let mounted = true;
-    setNeighborsLoading(true);
-    getEmbeddingNeighbors(selected.document.uuid, 5)
-      .then((payload) => {
-        if (mounted) setNeighbors(payload);
-      })
-      .catch(() => {
-        if (mounted) setNeighbors([]);
-      })
-      .finally(() => {
-        if (mounted) setNeighborsLoading(false);
-      });
-    return () => {
-      mounted = false;
-    };
-  }, [selected]);
 
   useEffect(() => {
     if (!canvasRef.current || !map) return;
@@ -352,7 +301,6 @@ export function EmbeddingExplorer() {
     renderPositionsRef.current = new Map(
       mapPoints.map((point, index) => [point.document.uuid, renderPositions[index].clone()]),
     );
-    setRenderPositionVersion((version) => version + 1);
     mapPoints.forEach((point, index) => {
       positions[index * 3] = renderPositions[index].x;
       positions[index * 3 + 1] = renderPositions[index].y;
@@ -507,6 +455,22 @@ export function EmbeddingExplorer() {
       const target = event.target as HTMLElement | null;
       const editing = target?.tagName === 'INPUT' || target?.tagName === 'TEXTAREA' || target?.tagName === 'SELECT';
       if (editing && document.pointerLockElement !== canvas) return;
+      const focusedDocument = centerHitRef.current ?? selectedRef.current;
+      if (key === 'q') {
+        event.preventDefault();
+        document.exitPointerLock?.();
+        if (documentUuidFromPath(window.location.pathname)) {
+          navigateTo(`${documentParentPath(window.location.pathname)}${window.location.search}`, { replace: true });
+        } else if (focusedDocument) {
+          navigateTo(documentPath(focusedDocument.document.uuid));
+        }
+        return;
+      }
+      if (key === 'o' && focusedDocument) {
+        event.preventDefault();
+        window.open(focusedDocument.document.url, '_blank', 'noopener,noreferrer');
+        return;
+      }
       if (flightKeys.has(key)) event.preventDefault();
       keysRef.current.add(key);
     };
@@ -552,7 +516,6 @@ export function EmbeddingExplorer() {
   }, [map, themeMode]);
 
   function selectPoint(point: EmbeddingMapPoint, options: { teleport?: boolean } = {}) {
-    setSelected(point);
     selectedRef.current = point;
     if (!options.teleport) return;
     const camera = cameraRef.current;
@@ -659,58 +622,6 @@ export function EmbeddingExplorer() {
           <StateMessage className="explorer-empty">No embedded essays yet. Run an embedding batch, then refresh this map.</StateMessage>
         )}
 
-        {selected && (
-          <aside className="explorer-panel">
-            <div className="document-meta">
-              <span>{selected.document.source_domain}</span>
-              <span>{selected.document.document_type}</span>
-            </div>
-            <div className="explorer-panel-title">
-              <h2>{selected.document.title || selected.document.url}</h2>
-              <a href={selected.document.url} target="_blank" rel="noreferrer" aria-label="Open document">
-                <ArrowUpRight size={16} />
-              </a>
-            </div>
-            {selected.document.summary && <p>{selected.document.summary}</p>}
-            <ChipList className="topics">
-              {selected.document.topics.map((topic) => <Chip key={topic}>{topic}</Chip>)}
-            </ChipList>
-            <div className="embedding-neighborhood">
-              <div>
-                <strong>Nearest by full embedding</strong>
-                <span>Computed from original vectors, not the compressed 3D map.</span>
-              </div>
-              {neighborsLoading && <span className="visually-hidden" aria-live="polite">Loading true nearest neighbors</span>}
-              {!neighborsLoading && neighbors.map((neighbor) => (
-                <button
-                  key={neighbor.document.uuid}
-                  type="button"
-                  onClick={() => {
-                    const point = map?.points.find((item) => item.document.uuid === neighbor.document.uuid);
-                    if (point) selectPoint(point);
-                  }}
-                >
-                  <span>{neighbor.document.title || neighbor.document.url}</span>
-                  <small>
-                    {neighbor.document.source_domain} · cosine {(neighbor.similarity * 100).toFixed(1)}%
-                  </small>
-                </button>
-              ))}
-            </div>
-            <div className="embedding-neighborhood">
-              <div>
-                <strong>Nearest in 3D map</strong>
-                <span>Computed from visible map positions.</span>
-              </div>
-              {renderedNeighbors.map(({ point, distance }) => (
-                <button key={point.document.uuid} type="button" onClick={() => selectPoint(point)}>
-                  <span>{point.document.title || point.document.url}</span>
-                  <small>{point.document.source_domain} · {distance.toFixed(1)} units</small>
-                </button>
-              ))}
-            </div>
-          </aside>
-        )}
       </div>
 
       <div className="explorer-bottom-dock">
@@ -722,6 +633,8 @@ export function EmbeddingExplorer() {
           <span><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> Move</span>
           <span><kbd>Space</kbd><kbd>Ctrl</kbd> Up/down</span>
           <span><kbd>Shift</kbd> Boost</span>
+          <span><kbd>Q</kbd> Details</span>
+          <span><kbd>O</kbd> Open link</span>
         </div>
         <Button className="explorer-help" uiVariant="rowAction" type="button" onClick={() => setShowHelp((current) => !current)}>
           <HelpCircle size={16} />
@@ -733,6 +646,7 @@ export function EmbeddingExplorer() {
           <strong>Controls</strong>
           <span>Click the scene to capture the mouse. Press Esc to release it.</span>
           <span>Use WASD to fly, Space/Control to move vertically, Shift to boost, and scroll for quick forward/back movement.</span>
+          <span>Center a document, then press Q for details or O to open the original link.</span>
           <span>Paste an exact URL to teleport to its document.</span>
         </div>
       )}

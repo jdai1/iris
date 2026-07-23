@@ -224,11 +224,6 @@ export interface EmbeddingMap {
   projection_method: string;
 }
 
-export interface EmbeddingNeighbor {
-  document: Document;
-  similarity: number;
-}
-
 export interface GraphNode {
   id: string;
   label: string;

@@ -19,7 +19,6 @@ import type {
   Document,
   DocumentDetail,
   EmbeddingMap,
-  EmbeddingNeighbor,
   GraphResponse,
   Page,
   SearchResponse,
@@ -265,10 +264,6 @@ export function getEmbeddingMap(limit = 3000): Promise<EmbeddingMap> {
     `embedding-map:${limit}:essay`,
     `/api/embedding-map?limit=${limit}&document_type=essay`,
   );
-}
-
-export function getEmbeddingNeighbors(documentUuid: string, limit = 5): Promise<EmbeddingNeighbor[]> {
-  return request<EmbeddingNeighbor[]>(`/api/documents/${documentUuid}/embedding-neighbors?limit=${limit}`);
 }
 
 export function getGraph(params: { mode?: 'sources' | 'documents'; limit?: number; domain?: string; sourceId?: number; documentUuid?: string; depth?: number } = {}): Promise<GraphResponse> {

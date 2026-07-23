@@ -128,7 +128,6 @@ def test_huge_numeric_document_uuid_returns_404_for_public_endpoints(session, mo
 
     assert client.get(f"/api/documents/{huge_uuid}").status_code == 404
     assert client.patch(f"/api/documents/{huge_uuid}/bookshelf", json={"status": "saved"}, headers=headers).status_code == 404
-    assert client.get(f"/api/documents/{huge_uuid}/embedding-neighbors").status_code == 404
     assert client.get("/api/graph", params={"mode": "documents", "document_uuid": huge_uuid}).status_code == 404
     assert client.post(
         f"/api/bookshelf/collections/{collection['id']}/items",
@@ -430,61 +429,6 @@ def test_embedding_map_api_projects_embedded_documents(session):
     assert body["dimensions"] > 0
     assert {point["document"]["title"] for point in body["points"]} == {"Map doc 1", "Map doc 2", "Map doc 3"}
     assert all({"x", "y", "z"}.issubset(point) for point in body["points"])
-
-
-def test_embedding_neighbors_api_uses_full_embeddings(session):
-    source = get_or_create_source("https://neighbors.test", status="indexed")
-    anchor = upsert_document(
-        source=source,
-        url="https://neighbors.test/anchor",
-        document_type="essay",
-        crawl_status="fetched",
-        title="Durable software",
-        author=None,
-        published_at=None,
-        extracted_text="durable software infrastructure resilience maintenance stewardship",
-        summary="Durable software.",
-        topics=["software"],
-        embedding=dumps_embedding([1.0, 0.0, 0.0]),
-        content_hash="neighbors-anchor",
-    )
-    upsert_document(
-        source=source,
-        url="https://neighbors.test/near",
-        document_type="essay",
-        crawl_status="fetched",
-        title="Resilient infrastructure",
-        author=None,
-        published_at=None,
-        extracted_text="resilient software infrastructure maintenance durable systems",
-        summary="Resilient infrastructure.",
-        topics=["software"],
-        embedding=dumps_embedding([0.95, 0.05, 0.0]),
-        content_hash="neighbors-near",
-    )
-    upsert_document(
-        source=source,
-        url="https://neighbors.test/far",
-        document_type="essay",
-        crawl_status="fetched",
-        title="Cooking notes",
-        author=None,
-        published_at=None,
-        extracted_text="tomato pasta kitchen dinner recipe olive oil",
-        summary="Cooking notes.",
-        topics=["cooking"],
-        embedding=dumps_embedding([-1.0, 0.0, 0.0]),
-        content_hash="neighbors-far",
-    )
-    session.commit()
-
-    client = TestClient(app)
-    response = client.get(f"/api/documents/{anchor.uuid}/embedding-neighbors", params={"limit": 2})
-
-    assert response.status_code == 200
-    body = response.json()
-    assert [item["document"]["title"] for item in body] == ["Resilient infrastructure", "Cooking notes"]
-    assert body[0]["similarity"] > body[1]["similarity"]
 
 
 def test_bookshelf_link_api_captures_external_url_with_notes_and_tags(session):
