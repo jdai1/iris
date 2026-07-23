@@ -694,6 +694,8 @@
 }
 
 .chat-composer {
+  display: grid;
+  gap: 8px;
   width: 100%;
   min-width: 0;
   background: var(--bg-raised);
@@ -724,6 +726,37 @@
 .chat-composer-start .chat-input,
 .chat-composer-bottom .chat-input {
   width: 100%;
+}
+
+.chat-scope-control {
+  display: inline-flex;
+  justify-self: start;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-sunken);
+}
+
+.chat-scope-option {
+  min-height: 26px;
+  padding: 0 9px;
+  border: 0;
+  background: transparent;
+  color: var(--text-subtle);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.chat-scope-option:hover,
+.chat-scope-option-active {
+  background: var(--bg-raised);
+  color: var(--text);
+}
+
+.chat-scope-option:disabled {
+  cursor: wait;
+  opacity: 0.55;
 }
 
 @container (max-width: 860px) {

@@ -6,7 +6,7 @@ import re
 from collections.abc import Mapping
 
 import httpx
-from sqlalchemy import select
+from sqlalchemy import or_, select
 
 from iris.dao import db
 from iris.dao import search as search_dao
@@ -21,8 +21,8 @@ from iris.services.common.config import (
 )
 from iris.services.common.langfuse_tracing import agent_search_observation, finish_agent_search_observation, instrument_openai_agents
 from iris.services.ingestion.embedding import cosine, embed_text, loads_embedding
-from iris.models import Category, Document, DocumentCategoryAssignment, DocumentTag, Source, Tag
-from iris.schemas.enums import AgentStepKind, AgentToolName, DocumentType
+from iris.models import Category, Document, DocumentCategoryAssignment, DocumentTag, Source, Tag, User
+from iris.schemas.enums import AgentStepKind, AgentToolName, DocumentType, SearchScope
 from iris.schemas.retrieval import AgentChatResult, AgentChatStreamEvent, AgentSearchOutput, AgentStep, AgentToolRun, RankedDocument
 
 AGENT_RESULT_SAFETY_CAP = 20
@@ -108,14 +108,23 @@ def _document_search_payload(document: Document) -> dict[str, object]:
     }
 
 
-def search_documents(query: str, limit: int = 12, persist: bool = True) -> tuple[None, list[RankedDocument]]:
+def search_documents(
+    query: str,
+    limit: int = 12,
+    persist: bool = True,
+    user: User | None = None,
+) -> tuple[None, list[RankedDocument]]:
     query_vector = embed_text(query)
     query_terms = _terms(query)
     vector_rows = search_dao.vector_search_documents(query_vector, limit=max(limit * 8, 80))
-    documents = [document for document, _score in vector_rows] if vector_rows else search_dao.get_searchable_documents()
+    documents = (
+        [document for document, _score in vector_rows]
+        if vector_rows
+        else search_dao.get_searchable_documents()
+    )
     vector_scores = {document.id: score for document, score in vector_rows}
-    saved_ids = search_dao.get_favorited_document_ids()
-    dismissed_ids = search_dao.get_dismissed_document_ids()
+    saved_ids = search_dao.get_favorited_document_ids(user)
+    dismissed_ids = search_dao.get_dismissed_document_ids(user)
 
     ranked: list[RankedDocument] = []
     for document in documents:
@@ -149,6 +158,8 @@ def agentic_chat(
     message: str,
     limit: int | None = None,
     conversation_context: str | None = None,
+    user: User | None = None,
+    scope: SearchScope = SearchScope.ALL,
     session_id: str | None = None,
     user_id: str | None = None,
     trace_metadata: Mapping[str, object] | None = None,
@@ -160,6 +171,8 @@ def agentic_chat(
         message,
         limit=limit or AGENT_RESULT_SAFETY_CAP,
         conversation_context=conversation_context,
+        user=user,
+        scope=scope,
         session_id=session_id,
         user_id=user_id,
         trace_metadata=trace_metadata,
@@ -170,6 +183,8 @@ async def stream_openai_agentic_chat(
     message: str,
     limit: int | None = None,
     conversation_context: str | None = None,
+    user: User | None = None,
+    scope: SearchScope = SearchScope.ALL,
     session_id: str | None = None,
     user_id: str | None = None,
     trace_metadata: Mapping[str, object] | None = None,
@@ -183,8 +198,12 @@ async def stream_openai_agentic_chat(
     if key:
         os.environ.setdefault("OPENAI_API_KEY", key)
 
-    documents = search_dao.get_searchable_documents()
+    documents = search_dao.get_searchable_documents(user=user, scope=scope)
     documents_by_id = {document.id: document for document in documents}
+    sources_by_domain = {document.source.canonical_domain: document.source for document in documents}
+    documents_by_domain: dict[str, list[Document]] = {}
+    for document in documents:
+        documents_by_domain.setdefault(document.source.canonical_domain, []).append(document)
     tool_runs: list[AgentToolRun] = []
     steps: list[AgentStep] = []
 
@@ -211,7 +230,12 @@ async def stream_openai_agentic_chat(
     @function_tool
     def semantic_search(query: str, max_results: int = 12) -> str:
         """Search Iris documents by semantic similarity using a standalone resolved query that preserves the user's specific subject and constraints."""
-        rows = _semantic_search(query, documents, limit=max(1, min(max_results, 30)))
+        rows = _semantic_search(
+            query,
+            documents,
+            limit=max(1, min(max_results, 30)),
+            use_pgvector=scope == SearchScope.ALL,
+        )
         tool_runs.append(AgentToolRun(tool=AgentToolName.SEMANTIC, query=query, rows=rows))
         return serialize_rows(rows)
 
@@ -219,7 +243,12 @@ async def stream_openai_agentic_chat(
     def tag_search(terms: str, max_results: int = 12) -> str:
         """Search Iris documents by comma-separated topic or tag terms."""
         normalized = {term.strip().lower() for term in terms.split(",") if term.strip()}
-        rows = _tag_search(normalized, documents, limit=max(1, min(max_results, 30)))
+        rows = _tag_search(
+            normalized,
+            documents,
+            limit=max(1, min(max_results, 30)),
+            user=user if scope == SearchScope.MINE else None,
+        )
         tool_runs.append(AgentToolRun(tool=AgentToolName.TAGS, query=terms, rows=rows))
         return serialize_rows(rows)
 
@@ -251,11 +280,14 @@ async def stream_openai_agentic_chat(
     def get_source_metadata(domain: str) -> str:
         """Fetch metadata about a source/blog by canonical domain."""
         normalized = domain.strip().lower()
-        source = db.current_session().scalar(select(Source).where(Source.canonical_domain == normalized))
+        source = sources_by_domain.get(normalized)
         tool_runs.append(AgentToolRun(tool=AgentToolName.SOURCE_METADATA, query=normalized, rows=[]))
         if source is None:
             return json.dumps({"error": "source not found", "domain": normalized})
-        return _serialize_source_metadata(source)
+        return _serialize_source_metadata(
+            source,
+            documents=documents_by_domain.get(normalized, []),
+        )
 
     agent = Agent(
         name="Iris corpus search agent",
@@ -272,7 +304,7 @@ async def stream_openai_agentic_chat(
             get_source_metadata,
         ],
     )
-    agent_input = _agent_input(message, conversation_context)
+    agent_input = _agent_input(message, conversation_context, scope)
     with agent_search_observation(
         mode="stream",
         message=message,
@@ -325,6 +357,8 @@ def _openai_agentic_chat(
     message: str,
     limit: int = AGENT_RESULT_SAFETY_CAP,
     conversation_context: str | None = None,
+    user: User | None = None,
+    scope: SearchScope = SearchScope.ALL,
     session_id: str | None = None,
     user_id: str | None = None,
     trace_metadata: Mapping[str, object] | None = None,
@@ -337,8 +371,12 @@ def _openai_agentic_chat(
     if key:
         os.environ.setdefault("OPENAI_API_KEY", key)
 
-    documents = search_dao.get_searchable_documents()
+    documents = search_dao.get_searchable_documents(user=user, scope=scope)
     documents_by_id = {document.id: document for document in documents}
+    sources_by_domain = {document.source.canonical_domain: document.source for document in documents}
+    documents_by_domain: dict[str, list[Document]] = {}
+    for document in documents:
+        documents_by_domain.setdefault(document.source.canonical_domain, []).append(document)
     tool_runs: list[AgentToolRun] = []
 
     def serialize_rows(rows: list[RankedDocument]) -> str:
@@ -364,7 +402,12 @@ def _openai_agentic_chat(
     @function_tool
     def semantic_search(query: str, max_results: int = 12) -> str:
         """Search Iris documents by semantic similarity using a standalone resolved query that preserves the user's specific subject and constraints."""
-        rows = _semantic_search(query, documents, limit=max(1, min(max_results, 30)))
+        rows = _semantic_search(
+            query,
+            documents,
+            limit=max(1, min(max_results, 30)),
+            use_pgvector=scope == SearchScope.ALL,
+        )
         tool_runs.append(AgentToolRun(tool=AgentToolName.SEMANTIC, query=query, rows=rows))
         return serialize_rows(rows)
 
@@ -372,7 +415,12 @@ def _openai_agentic_chat(
     def tag_search(terms: str, max_results: int = 12) -> str:
         """Search Iris documents by comma-separated topic or tag terms."""
         normalized = {term.strip().lower() for term in terms.split(",") if term.strip()}
-        rows = _tag_search(normalized, documents, limit=max(1, min(max_results, 30)))
+        rows = _tag_search(
+            normalized,
+            documents,
+            limit=max(1, min(max_results, 30)),
+            user=user if scope == SearchScope.MINE else None,
+        )
         tool_runs.append(AgentToolRun(tool=AgentToolName.TAGS, query=terms, rows=rows))
         return serialize_rows(rows)
 
@@ -404,11 +452,14 @@ def _openai_agentic_chat(
     def get_source_metadata(domain: str) -> str:
         """Fetch metadata about a source/blog by canonical domain."""
         normalized = domain.strip().lower()
-        source = db.current_session().scalar(select(Source).where(Source.canonical_domain == normalized))
+        source = sources_by_domain.get(normalized)
         tool_runs.append(AgentToolRun(tool=AgentToolName.SOURCE_METADATA, query=normalized, rows=[]))
         if source is None:
             return json.dumps({"error": "source not found", "domain": normalized})
-        return _serialize_source_metadata(source)
+        return _serialize_source_metadata(
+            source,
+            documents=documents_by_domain.get(normalized, []),
+        )
 
     agent = Agent(
         name="Iris corpus search agent",
@@ -425,7 +476,7 @@ def _openai_agentic_chat(
             get_source_metadata,
         ],
     )
-    agent_input = _agent_input(message, conversation_context)
+    agent_input = _agent_input(message, conversation_context, scope)
     with agent_search_observation(
         mode="sync",
         message=message,
@@ -459,10 +510,19 @@ def _openai_agentic_chat(
     return AgentChatResult(answer=answer, results=ranked, steps=steps)
 
 
-def _agent_input(message: str, conversation_context: str | None) -> str:
+def _agent_input(
+    message: str,
+    conversation_context: str | None,
+    scope: SearchScope,
+) -> str:
+    scope_context = (
+        f"Search scope: {scope.value}. The retrieval tools are already access-filtered "
+        "to this corpus. Do not infer or describe private material outside it."
+    )
     if not conversation_context:
-        return message
+        return f"{scope_context}\n\nCurrent user message:\n{message}"
     return (
+        f"{scope_context}\n\n"
         "Use this full conversation transcript to interpret the current user message. "
         "The current message may be elliptical and may depend on earlier user constraints.\n\n"
         "Conversation transcript before the current message:\n"
@@ -496,9 +556,18 @@ def _serialize_document_metadata(document: Document) -> str:
     )
 
 
-def _serialize_source_metadata(source: Source) -> str:
+def _serialize_source_metadata(
+    source: Source,
+    *,
+    documents: list[Document] | None = None,
+) -> str:
     profile = source.profile_analysis
-    recent_documents = sorted(source.documents, key=lambda document: document.published_at or document.first_seen_at, reverse=True)[:10]
+    visible_documents = source.documents if documents is None else documents
+    recent_documents = sorted(
+        visible_documents,
+        key=lambda document: document.published_at or document.first_seen_at,
+        reverse=True,
+    )[:10]
     return json.dumps(
         {
             "source_id": source.id,
@@ -603,7 +672,12 @@ def _agent_sdk_steps(tool_runs: list[AgentToolRun], ranked: list[RankedDocument]
     return steps
 
 
-def _merge_tool_outputs(tool_outputs: list[tuple[str, list[RankedDocument]]], query: str, limit: int) -> list[RankedDocument]:
+def _merge_tool_outputs(
+    tool_outputs: list[tuple[str, list[RankedDocument]]],
+    query: str,
+    limit: int,
+    user: User | None = None,
+) -> list[RankedDocument]:
     merged: dict[int, RankedDocument] = {}
     tool_weights = {
         AgentToolName.KEYWORD: 1.0,
@@ -626,8 +700,8 @@ def _merge_tool_outputs(tool_outputs: list[tuple[str, list[RankedDocument]]], qu
                     reason=f"{existing.reason}; {reason}",
                 )
 
-    saved_ids = search_dao.get_favorited_document_ids()
-    dismissed_ids = search_dao.get_dismissed_document_ids()
+    saved_ids = search_dao.get_favorited_document_ids(user)
+    dismissed_ids = search_dao.get_dismissed_document_ids(user)
     adjusted = [
         RankedDocument(
             document=row.document,
@@ -650,9 +724,19 @@ def _keyword_search(query_terms: set[str], documents: list[Document], *, limit: 
     return [row for row in sorted(rows, key=lambda item: item.score, reverse=True) if row.score > 0][:limit]
 
 
-def _semantic_search(query: str, documents: list[Document], *, limit: int) -> list[RankedDocument]:
+def _semantic_search(
+    query: str,
+    documents: list[Document],
+    *,
+    limit: int,
+    use_pgvector: bool = True,
+) -> list[RankedDocument]:
     query_vector = embed_text(query)
-    vector_rows = search_dao.vector_search_documents(query_vector, limit=limit)
+    vector_rows = (
+        search_dao.vector_search_documents(query_vector, limit=limit)
+        if use_pgvector
+        else []
+    )
     if vector_rows:
         return [
             RankedDocument(document=document, score=similarity, reason=f"pgvector cosine {similarity:.2f}")
@@ -670,7 +754,13 @@ def _semantic_search(query: str, documents: list[Document], *, limit: int) -> li
     return rows[:limit]
 
 
-def _tag_search(tag_terms: set[str], documents: list[Document], *, limit: int) -> list[RankedDocument]:
+def _tag_search(
+    tag_terms: set[str],
+    documents: list[Document],
+    *,
+    limit: int,
+    user: User | None = None,
+) -> list[RankedDocument]:
     if not tag_terms:
         return []
     docs_by_id = {document.id: document for document in documents}
@@ -682,10 +772,19 @@ def _tag_search(tag_terms: set[str], documents: list[Document], *, limit: int) -
         if overlap:
             rows[document.id] = RankedDocument(document=document, score=0.28 + 0.12 * (len(overlap) / max(1, len(tag_terms))), reason=f"topic match: {', '.join(sorted(overlap))}")
     session = db.current_session()
+    assignment_scope = DocumentTag.assigned_by_user_id.is_(None)
+    if user is not None:
+        assignment_scope = or_(
+            assignment_scope,
+            DocumentTag.assigned_by_user_id == user.id,
+        )
     tag_rows = session.execute(
         select(DocumentTag.document_id, Tag.name, Tag.slug)
         .join(Tag, Tag.id == DocumentTag.tag_id)
-        .where(DocumentTag.document_id.in_(document_ids))
+        .where(
+            DocumentTag.document_id.in_(document_ids),
+            assignment_scope,
+        )
     ).all()
     for document_id, name, slug in tag_rows:
         terms = {str(name).lower(), str(slug).lower()}

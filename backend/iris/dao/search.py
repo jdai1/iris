@@ -2,29 +2,68 @@
 
 from __future__ import annotations
 
-from sqlalchemy import select, text
+from sqlalchemy import or_, select, text
 from sqlalchemy.orm import joinedload
 
 from iris.dao import db
 from iris.dao.user_state import get_or_create_local_user
-from iris.models import Document, Link, UserDocumentMapping
-from iris.schemas.enums import CrawlStatus, DocumentType
+from iris.models import Document, Friendship, Link, User, UserDocumentMapping
+from iris.schemas.enums import (
+    BookshelfStatus,
+    CrawlStatus,
+    DocumentType,
+    FriendshipStatus,
+    SearchScope,
+)
 from iris.schemas.retrieval import RankedDocument
 
 
-def get_searchable_documents() -> list[Document]:
-    """Return fetched essay documents eligible for search ranking."""
+def get_searchable_documents(
+    *,
+    user: User | None = None,
+    scope: SearchScope = SearchScope.ALL,
+) -> list[Document]:
+    """Return fetched essays visible within one explicit AI-search scope."""
     session = db.current_session()
-    return (
-        session.execute(
-            select(Document)
-            .where(Document.document_type == DocumentType.ESSAY.value)
-            .where(Document.crawl_status == CrawlStatus.FETCHED.value)
-            .where(Document.embedding_vector.is_not(None))
-        )
-        .scalars()
-        .all()
+    statement = (
+        select(Document)
+        .options(joinedload(Document.source))
+        .where(Document.document_type == DocumentType.ESSAY.value)
+        .where(Document.crawl_status == CrawlStatus.FETCHED.value)
     )
+    if scope == SearchScope.ALL:
+        return list(session.execute(statement).scalars().all())
+    if user is None:
+        return []
+
+    owner_ids = [user.id] if scope == SearchScope.MINE else _connected_user_ids(user)
+    if not owner_ids:
+        return []
+    statement = (
+        statement.join(UserDocumentMapping, UserDocumentMapping.document_id == Document.id)
+        .where(
+            UserDocumentMapping.user_id.in_(owner_ids),
+            UserDocumentMapping.bookshelf_status.in_(
+                [BookshelfStatus.SAVED.value, BookshelfStatus.READ.value]
+            ),
+            UserDocumentMapping.dismissed_at.is_(None),
+        )
+        .distinct()
+    )
+    return list(session.execute(statement).scalars().all())
+
+
+def _connected_user_ids(user: User) -> list[int]:
+    rows = db.current_session().execute(
+        select(Friendship.requester_id, Friendship.recipient_id).where(
+            Friendship.status == FriendshipStatus.CONNECTED,
+            or_(Friendship.requester_id == user.id, Friendship.recipient_id == user.id),
+        )
+    ).all()
+    return [
+        recipient_id if requester_id == user.id else requester_id
+        for requester_id, recipient_id in rows
+    ]
 
 
 def search_documents_for_picker(query: str, *, limit: int = 8) -> list[RankedDocument]:
@@ -163,10 +202,10 @@ def _picker_keyword_score(terms: list[str], document: Document) -> float:
     return score
 
 
-def get_favorited_document_ids() -> set[int]:
-    """Return document ids favorited by the local user."""
+def get_favorited_document_ids(user: User | None = None) -> set[int]:
+    """Return document ids favorited by the active user."""
     session = db.current_session()
-    user = get_or_create_local_user()
+    user = user or get_or_create_local_user()
     return set(
         session.execute(
             select(UserDocumentMapping.document_id)
@@ -178,10 +217,10 @@ def get_favorited_document_ids() -> set[int]:
     )
 
 
-def get_dismissed_document_ids() -> set[int]:
-    """Return document ids dismissed by the local user."""
+def get_dismissed_document_ids(user: User | None = None) -> set[int]:
+    """Return document ids dismissed by the active user."""
     session = db.current_session()
-    user = get_or_create_local_user()
+    user = user or get_or_create_local_user()
     return set(
         session.execute(
             select(UserDocumentMapping.document_id)
