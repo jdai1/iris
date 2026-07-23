@@ -76,11 +76,18 @@ export function directoryModeFromLocation(pathname: string, search: string): Dir
   return mode === 'explore' || mode === 'graph' ? mode : 'sources';
 }
 
-export function profileTargetFromPath(pathname: string): ProfileTarget {
+export function profileTargetFromPath(pathname: string, search = ''): ProfileTarget {
   const normalized = pathname.replace(/\/+$/, '');
-  if (!normalized.startsWith('/directory/')) return null;
-  const domainSegment = normalized.slice('/directory/'.length).split('/documents/')[0];
-  const domain = decodeURIComponent(domainSegment).trim();
+  const supportsDomainQuery = normalized === '/directory'
+    || normalized === '/graph'
+    || normalized.startsWith('/graph/')
+    || normalized === '/explore'
+    || normalized.startsWith('/explore/');
+  const domain = normalized.startsWith('/directory/')
+    ? decodeURIComponent(normalized.slice('/directory/'.length).split('/documents/')[0]).trim()
+    : supportsDomainQuery
+      ? new URLSearchParams(search).get('domain')?.trim()
+      : null;
   return domain ? { sourceId: 0, domain } : null;
 }
 

@@ -11,7 +11,7 @@ export function ProfileAnalysisCard({ analysis }: { analysis: SourceProfileAnaly
   if (!analysis) {
     return (
       <Box className="profile-analysis-card" display="grid" gap="4">
-        <StateMessage className="profile-empty">Loading profile...</StateMessage>
+        <StateMessage className="profile-empty">No profile analysis yet.</StateMessage>
       </Box>
     );
   }
