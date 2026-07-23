@@ -342,6 +342,80 @@ def test_friend_request_pair_is_unique_in_both_directions(session, monkeypatch):
     assert inverse.json()["detail"] == "A friend request already exists"
 
 
+def test_friends_feed_only_returns_connected_reading_without_notes(session, monkeypatch):
+    from iris.dao import bookshelf as bookshelf_dao
+    from iris.models import BookshelfStatus, User
+
+    client = TestClient(app)
+    auth = _social_auth(monkeypatch)
+    alice_payload = client.get("/api/me", headers=auth["alice"]).json()
+    bob_payload = client.get("/api/me", headers=auth["bob"]).json()
+    alice = session.get(User, alice_payload["id"])
+    bob = session.get(User, bob_payload["id"])
+    stranger = User(email="feed-stranger@example.com", display_name="Feed Stranger")
+    session.add(stranger)
+    session.flush()
+
+    source = get_or_create_source("https://friends-feed.test", status="indexed")
+    friend_document = upsert_document(
+        source=source,
+        url="https://friends-feed.test/friend",
+        document_type="essay",
+        crawl_status="fetched",
+        title="Friend reading",
+        author=None,
+        published_at=None,
+        extracted_text="friend reading",
+        summary="A friend-visible reading item.",
+        topics=[],
+        embedding=dumps_embedding(embed_text("friend reading")),
+        content_hash="friend-feed-visible",
+    )
+    stranger_document = upsert_document(
+        source=source,
+        url="https://friends-feed.test/stranger",
+        document_type="essay",
+        crawl_status="fetched",
+        title="Stranger reading",
+        author=None,
+        published_at=None,
+        extracted_text="stranger reading",
+        summary="A stranger reading item.",
+        topics=[],
+        embedding=dumps_embedding(embed_text("stranger reading")),
+        content_hash="friend-feed-hidden",
+    )
+    bookshelf_dao.update_entry(
+        bob,
+        friend_document,
+        status=BookshelfStatus.READ,
+        note="This note must remain private.",
+        update_note=True,
+    )
+    bookshelf_dao.save_document(stranger, stranger_document)
+    session.flush()
+
+    request = client.post(
+        "/api/friends/requests",
+        json={"user_id": bob.id},
+        headers=auth["alice"],
+    ).json()
+    assert client.post(
+        f"/api/friends/requests/{request['id']}/accept",
+        headers=auth["bob"],
+    ).status_code == 200
+
+    response = client.get("/api/friends/feed", headers=auth["alice"])
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["total"] == 1
+    assert body["items"][0]["person"]["user_id"] == bob.id
+    assert body["items"][0]["document"]["title"] == "Friend reading"
+    assert body["items"][0]["status"] == "read"
+    assert "note" not in body["items"][0]
+
+
 def test_agent_chat_persists_conversation_and_results(session, monkeypatch):
     from iris.dao import agent as agent_dao
     from iris.routes import api as api_routes

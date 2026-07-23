@@ -19,12 +19,18 @@ import type {
   Document,
   DocumentDetail,
   EmbeddingMap,
+  FriendFeedItem,
+  FriendRequests,
+  Friendship,
   GraphResponse,
   Page,
+  Person,
   SearchResponse,
   SearchScope,
   SourceProfileAnalysis,
   User,
+  UserProfile,
+  UserWebsite,
 } from './types';
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? 'http://127.0.0.1:8000';
@@ -77,6 +83,83 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 
 export function getMe(): Promise<User> {
   return request<User>('/api/me');
+}
+
+export function getMyProfile(): Promise<UserProfile> {
+  return request<UserProfile>('/api/profile');
+}
+
+export function updateMyProfile(payload: {
+  username?: string;
+  display_name?: string | null;
+  bio?: string | null;
+}): Promise<UserProfile> {
+  return request<UserProfile>('/api/profile', {
+    method: 'PATCH',
+    body: JSON.stringify(payload),
+  });
+}
+
+export function attachProfileWebsite(payload: {
+  url: string;
+  label?: string | null;
+}): Promise<UserWebsite> {
+  return request<UserWebsite>('/api/profile/websites', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export function deleteProfileWebsite(websiteId: number): Promise<void> {
+  return request<void>(`/api/profile/websites/${websiteId}`, { method: 'DELETE' });
+}
+
+export function findUsers(q: string, limit = 20): Promise<Person[]> {
+  const search = new URLSearchParams({ q, limit: String(limit) });
+  return request<Person[]>(`/api/users?${search.toString()}`);
+}
+
+export function getUserProfile(username: string): Promise<UserProfile> {
+  return request<UserProfile>(`/api/users/${encodeURIComponent(username)}`);
+}
+
+export function getFriends(): Promise<Friendship[]> {
+  return request<Friendship[]>('/api/friends');
+}
+
+export function getFriendRequests(): Promise<FriendRequests> {
+  return request<FriendRequests>('/api/friends/requests');
+}
+
+export function sendFriendRequest(userId: number): Promise<Friendship> {
+  return request<Friendship>('/api/friends/requests', {
+    method: 'POST',
+    body: JSON.stringify({ user_id: userId }),
+  });
+}
+
+export function acceptFriendRequest(friendshipId: number): Promise<Friendship> {
+  return request<Friendship>(`/api/friends/requests/${friendshipId}/accept`, {
+    method: 'POST',
+  });
+}
+
+export function removeFriendRequest(friendshipId: number): Promise<void> {
+  return request<void>(`/api/friends/requests/${friendshipId}`, {
+    method: 'DELETE',
+  });
+}
+
+export function disconnectFriend(friendshipId: number): Promise<void> {
+  return request<void>(`/api/friends/${friendshipId}`, { method: 'DELETE' });
+}
+
+export function getFriendsFeed(params: { limit?: number; offset?: number } = {}): Promise<Page<FriendFeedItem>> {
+  const search = new URLSearchParams({
+    limit: String(params.limit ?? 50),
+    offset: String(params.offset ?? 0),
+  });
+  return request<Page<FriendFeedItem>>(`/api/friends/feed?${search.toString()}`);
 }
 
 function cachedRequest<T>(key: string, path: string): Promise<T> {
