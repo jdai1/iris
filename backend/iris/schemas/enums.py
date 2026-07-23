@@ -97,6 +97,11 @@ class BookshelfCollectionVisibility(StringEnum):
     SHARE_LINK = "share_link"
 
 
+class FriendshipStatus(StringEnum):
+    REQUESTED = "requested"
+    CONNECTED = "connected"
+
+
 class CategoryStatus(StringEnum):
     ACTIVE = "active"
     ARCHIVED = "archived"

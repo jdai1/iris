@@ -17,9 +17,20 @@ from iris.dao import highlights as highlights_dao
 from iris.dao import db
 from iris.dao import directory as directory_dao
 from iris.dao import search as search_dao
+from iris.dao import social as social_dao
 from iris.dao import source_profiles as profile_dao
 from iris.dao.user_state import get_or_create_firebase_user, get_or_create_local_user
-from iris.models import BookshelfCollection, BookshelfStatus, Document, User, UserDocumentMapping
+from iris.models import (
+    BookshelfCollection,
+    BookshelfStatus,
+    Document,
+    Friendship,
+    FriendshipStatus,
+    User,
+    UserDocumentMapping,
+    UserProfile,
+    UserWebsite,
+)
 from iris.services.ingestion.crawler import Crawler
 from iris.dao.db import init_db
 from iris.schemas.enums import AgentMessageRole, CrawlJobStatus, SourceStatus
@@ -51,6 +62,9 @@ from iris.schemas.api import (
     DocumentSchema,
     DirectorySourceSchema,
     EmbeddingMapSchema,
+    FriendRequestCreateSchema,
+    FriendRequestsSchema,
+    FriendshipSchema,
     GraphEdgeSchema,
     GraphNodeSchema,
     GraphSchema,
@@ -59,12 +73,17 @@ from iris.schemas.api import (
     HighlightSchema,
     HighlightUpdateSchema,
     PageSchema,
+    PersonSchema,
     SearchResultSchema,
     SearchSchema,
     SourceCreateSchema,
     SourceProfileAnalysisSchema,
     SourceSchema,
     UserSchema,
+    UserProfileSchema,
+    UserProfileUpdateSchema,
+    UserWebsiteCreateSchema,
+    UserWebsiteSchema,
 )
 from iris.services.auth import verify_firebase_token
 from iris.services.common.config import ADMIN_EMAILS, firebase_auth_enabled, openai_api_key
@@ -145,13 +164,65 @@ def require_admin(user: User = Depends(get_current_user)) -> User:
 
 
 def dump_user(user: User) -> UserSchema:
+    profile = social_dao.get_or_create_profile(user)
     return UserSchema(
         id=user.id,
         firebase_uid=user.firebase_uid,
         email=user.email,
         display_name=user.display_name,
         photo_url=user.photo_url,
+        username=profile.username,
         is_admin=is_admin_user(user),
+    )
+
+
+def _dump_website(website: UserWebsite) -> UserWebsiteSchema:
+    status_value = (
+        website.source.status.value
+        if hasattr(website.source.status, "value")
+        else str(website.source.status)
+    )
+    return UserWebsiteSchema(
+        id=website.id,
+        source_id=website.source_id,
+        url=website.source.url,
+        canonical_domain=website.source.canonical_domain,
+        label=website.label,
+        source_status=status_value,
+        created_at=website.created_at,
+    )
+
+
+def _dump_person(viewer: User, person: User) -> PersonSchema:
+    profile = social_dao.get_or_create_profile(person)
+    return PersonSchema(
+        user_id=person.id,
+        username=profile.username,
+        display_name=person.display_name,
+        photo_url=person.photo_url,
+        relationship=social_dao.relationship_state(viewer, person),
+    )
+
+
+def _dump_profile(viewer: User, profile: UserProfile) -> UserProfileSchema:
+    return UserProfileSchema(
+        user_id=profile.user_id,
+        username=profile.username,
+        display_name=profile.user.display_name,
+        photo_url=profile.user.photo_url,
+        bio=profile.bio,
+        relationship=social_dao.relationship_state(viewer, profile.user),
+        websites=[_dump_website(website) for website in profile.websites],
+    )
+
+
+def _dump_friendship(viewer: User, friendship: Friendship) -> FriendshipSchema:
+    return FriendshipSchema(
+        id=friendship.id,
+        status=friendship.status,
+        created_at=friendship.created_at,
+        updated_at=friendship.updated_at,
+        person=_dump_person(viewer, social_dao.other_user(friendship, viewer)),
     )
 
 
@@ -164,6 +235,163 @@ def health(_bound_session=Depends(get_session)) -> HealthSchema:
 @app.get("/api/me", response_model=UserSchema)
 def me(_bound_session=Depends(get_session), user: User = Depends(get_current_user)) -> UserSchema:
     return dump_user(user)
+
+
+@app.get("/api/profile", response_model=UserProfileSchema)
+def my_profile(
+    _bound_session=Depends(get_session),
+    user: User = Depends(get_current_user),
+) -> UserProfileSchema:
+    return _dump_profile(user, social_dao.get_or_create_profile(user))
+
+
+@app.patch("/api/profile", response_model=UserProfileSchema)
+def update_my_profile(
+    payload: UserProfileUpdateSchema,
+    _bound_session=Depends(get_session),
+    user: User = Depends(get_current_user),
+) -> UserProfileSchema:
+    fields = payload.model_fields_set
+    try:
+        profile = social_dao.update_profile(
+            user,
+            username=payload.username,
+            display_name=payload.display_name,
+            bio=payload.bio,
+            update_username="username" in fields,
+            update_display_name="display_name" in fields,
+            update_bio="bio" in fields,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _dump_profile(user, profile)
+
+
+@app.post("/api/profile/websites", response_model=UserWebsiteSchema)
+def attach_profile_website(
+    payload: UserWebsiteCreateSchema,
+    _bound_session=Depends(get_session),
+    user: User = Depends(get_current_user),
+) -> UserWebsiteSchema:
+    try:
+        website = social_dao.attach_website(user, url=payload.url, label=payload.label)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _dump_website(website)
+
+
+@app.delete("/api/profile/websites/{website_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_profile_website(
+    website_id: int,
+    _bound_session=Depends(get_session),
+    user: User = Depends(get_current_user),
+) -> Response:
+    if not social_dao.remove_website(user, website_id):
+        raise HTTPException(status_code=404, detail="Website not found")
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@app.get("/api/users", response_model=list[PersonSchema])
+def find_users(
+    q: str,
+    limit: int = 20,
+    _bound_session=Depends(get_session),
+    user: User = Depends(get_current_user),
+) -> list[PersonSchema]:
+    return [
+        _dump_person(user, person)
+        for person in social_dao.search_people(user, query=q, limit=limit)
+    ]
+
+
+@app.get("/api/users/{username}", response_model=UserProfileSchema)
+def get_user_profile(
+    username: str,
+    _bound_session=Depends(get_session),
+    user: User = Depends(get_current_user),
+) -> UserProfileSchema:
+    profile = social_dao.get_visible_profile(user, username)
+    if profile is None:
+        raise HTTPException(status_code=404, detail="Profile not found")
+    return _dump_profile(user, profile)
+
+
+@app.get("/api/friends", response_model=list[FriendshipSchema])
+def list_friends(
+    _bound_session=Depends(get_session),
+    user: User = Depends(get_current_user),
+) -> list[FriendshipSchema]:
+    return [
+        _dump_friendship(user, friendship)
+        for friendship in social_dao.connected_friendships(user)
+    ]
+
+
+@app.get("/api/friends/requests", response_model=FriendRequestsSchema)
+def list_friend_requests(
+    _bound_session=Depends(get_session),
+    user: User = Depends(get_current_user),
+) -> FriendRequestsSchema:
+    return FriendRequestsSchema(
+        incoming=[
+            _dump_friendship(user, friendship)
+            for friendship in social_dao.requested_friendships(user, incoming=True)
+        ],
+        outgoing=[
+            _dump_friendship(user, friendship)
+            for friendship in social_dao.requested_friendships(user, incoming=False)
+        ],
+    )
+
+
+@app.post("/api/friends/requests", response_model=FriendshipSchema)
+def create_friend_request(
+    payload: FriendRequestCreateSchema,
+    _bound_session=Depends(get_session),
+    user: User = Depends(get_current_user),
+) -> FriendshipSchema:
+    recipient = db.current_session().get(User, payload.user_id)
+    if recipient is None:
+        raise HTTPException(status_code=404, detail="User not found")
+    try:
+        friendship = social_dao.request_friendship(user, recipient)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _dump_friendship(user, friendship)
+
+
+@app.post("/api/friends/requests/{friendship_id}/accept", response_model=FriendshipSchema)
+def accept_friend_request(
+    friendship_id: int,
+    _bound_session=Depends(get_session),
+    user: User = Depends(get_current_user),
+) -> FriendshipSchema:
+    friendship = social_dao.accept_friendship(user, friendship_id)
+    if friendship is None:
+        raise HTTPException(status_code=404, detail="Friend request not found")
+    return _dump_friendship(user, friendship)
+
+
+@app.delete("/api/friends/requests/{friendship_id}", status_code=status.HTTP_204_NO_CONTENT)
+def remove_friend_request(
+    friendship_id: int,
+    _bound_session=Depends(get_session),
+    user: User = Depends(get_current_user),
+) -> Response:
+    if not social_dao.remove_friendship(user, friendship_id, status=FriendshipStatus.REQUESTED):
+        raise HTTPException(status_code=404, detail="Friend request not found")
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@app.delete("/api/friends/{friendship_id}", status_code=status.HTTP_204_NO_CONTENT)
+def disconnect_friend(
+    friendship_id: int,
+    _bound_session=Depends(get_session),
+    user: User = Depends(get_current_user),
+) -> Response:
+    if not social_dao.remove_friendship(user, friendship_id, status=FriendshipStatus.CONNECTED):
+        raise HTTPException(status_code=404, detail="Friendship not found")
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @app.post("/api/sources", response_model=SourceSchema)

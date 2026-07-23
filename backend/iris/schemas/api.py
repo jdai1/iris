@@ -10,6 +10,7 @@ from iris.schemas.enums import (
     AgentStepKind,
     BookshelfCollectionVisibility,
     BookshelfStatus,
+    FriendshipStatus,
     SourceProfileAnalysisStatus,
     SourceProfileLinkKind,
 )
@@ -43,7 +44,64 @@ class UserSchema(BaseModel):
     email: str
     display_name: str | None = None
     photo_url: str | None = None
+    username: str | None = None
     is_admin: bool = False
+
+
+class UserWebsiteSchema(BaseModel):
+    id: int
+    source_id: int
+    url: str
+    canonical_domain: str
+    label: str | None = None
+    source_status: str
+    created_at: datetime
+
+
+class UserProfileSchema(BaseModel):
+    user_id: int
+    username: str
+    display_name: str | None = None
+    photo_url: str | None = None
+    bio: str | None = None
+    relationship: str
+    websites: list[UserWebsiteSchema] = Field(default_factory=list)
+
+
+class UserProfileUpdateSchema(BaseModel):
+    username: str | None = None
+    display_name: str | None = None
+    bio: str | None = None
+
+
+class UserWebsiteCreateSchema(BaseModel):
+    url: str
+    label: str | None = None
+
+
+class PersonSchema(BaseModel):
+    user_id: int
+    username: str
+    display_name: str | None = None
+    photo_url: str | None = None
+    relationship: str
+
+
+class FriendRequestCreateSchema(BaseModel):
+    user_id: int
+
+
+class FriendshipSchema(BaseModel):
+    id: int
+    status: FriendshipStatus
+    created_at: datetime
+    updated_at: datetime
+    person: PersonSchema
+
+
+class FriendRequestsSchema(BaseModel):
+    incoming: list[FriendshipSchema] = Field(default_factory=list)
+    outgoing: list[FriendshipSchema] = Field(default_factory=list)
 
 
 class SourceCreateSchema(BaseModel):

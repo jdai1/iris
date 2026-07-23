@@ -24,6 +24,28 @@ def _bookshelf_auth(monkeypatch):
     return {"Authorization": "Bearer bookshelf-token"}
 
 
+def _social_auth(monkeypatch):
+    from iris.routes import api as api_routes
+
+    identities = {
+        "alice-token": FirebaseIdentity(
+            uid="alice-user",
+            email="alice@example.com",
+            display_name="Alice Reader",
+        ),
+        "bob-token": FirebaseIdentity(
+            uid="bob-user",
+            email="bob@example.com",
+            display_name="Bob Writer",
+        ),
+    }
+    monkeypatch.setattr(api_routes, "verify_firebase_token", lambda token: identities[token])
+    return {
+        "alice": {"Authorization": "Bearer alice-token"},
+        "bob": {"Authorization": "Bearer bob-token"},
+    }
+
+
 def test_health_and_search_api(session):
     source = get_or_create_source("https://api.test", status="indexed")
     upsert_document(
@@ -225,6 +247,99 @@ def test_me_maps_firebase_identity_to_user(session, monkeypatch):
     assert body["firebase_uid"] == "firebase-user-1"
     assert body["email"] == "jane@example.com"
     assert body["display_name"] == "Jane Example"
+
+
+def test_private_profiles_websites_and_friend_request_lifecycle(session, monkeypatch):
+    client = TestClient(app)
+    auth = _social_auth(monkeypatch)
+
+    alice = client.get("/api/me", headers=auth["alice"]).json()
+    bob = client.get("/api/me", headers=auth["bob"]).json()
+    assert alice["username"] == "alice-reader"
+    assert bob["username"] == "bob-writer"
+
+    updated = client.patch(
+        "/api/profile",
+        json={"username": "alice", "bio": "Reading about systems."},
+        headers=auth["alice"],
+    )
+    assert updated.status_code == 200
+    assert updated.json()["username"] == "alice"
+    assert updated.json()["relationship"] == "self"
+
+    website = client.post(
+        "/api/profile/websites",
+        json={"url": "https://alice.example.com/writing", "label": "Writing"},
+        headers=auth["alice"],
+    )
+    assert website.status_code == 200
+    assert website.json()["canonical_domain"] == "alice.example.com"
+    assert website.json()["source_status"] == "queued"
+
+    hidden = client.get("/api/users/alice", headers=auth["bob"])
+    assert hidden.status_code == 404
+
+    people = client.get("/api/users", params={"q": "Alice"}, headers=auth["bob"])
+    assert people.status_code == 200
+    assert people.json()[0]["username"] == "alice"
+    assert people.json()[0]["relationship"] == "none"
+
+    requested = client.post(
+        "/api/friends/requests",
+        json={"user_id": alice["id"]},
+        headers=auth["bob"],
+    )
+    assert requested.status_code == 200
+    friendship_id = requested.json()["id"]
+    assert requested.json()["status"] == "requested"
+    assert requested.json()["person"]["username"] == "alice"
+
+    alice_requests = client.get("/api/friends/requests", headers=auth["alice"]).json()
+    assert alice_requests["incoming"][0]["id"] == friendship_id
+    assert alice_requests["incoming"][0]["person"]["username"] == "bob-writer"
+    assert alice_requests["outgoing"] == []
+
+    accepted = client.post(
+        f"/api/friends/requests/{friendship_id}/accept",
+        headers=auth["alice"],
+    )
+    assert accepted.status_code == 200
+    assert accepted.json()["status"] == "connected"
+
+    visible = client.get("/api/users/alice", headers=auth["bob"])
+    assert visible.status_code == 200
+    assert visible.json()["bio"] == "Reading about systems."
+    assert visible.json()["websites"][0]["canonical_domain"] == "alice.example.com"
+
+    bob_friends = client.get("/api/friends", headers=auth["bob"])
+    assert bob_friends.status_code == 200
+    assert bob_friends.json()[0]["person"]["username"] == "alice"
+
+    disconnected = client.delete(f"/api/friends/{friendship_id}", headers=auth["bob"])
+    assert disconnected.status_code == 204
+    assert client.get("/api/users/alice", headers=auth["bob"]).status_code == 404
+
+
+def test_friend_request_pair_is_unique_in_both_directions(session, monkeypatch):
+    client = TestClient(app)
+    auth = _social_auth(monkeypatch)
+    alice = client.get("/api/me", headers=auth["alice"]).json()
+    bob = client.get("/api/me", headers=auth["bob"]).json()
+
+    first = client.post(
+        "/api/friends/requests",
+        json={"user_id": bob["id"]},
+        headers=auth["alice"],
+    )
+    assert first.status_code == 200
+
+    inverse = client.post(
+        "/api/friends/requests",
+        json={"user_id": alice["id"]},
+        headers=auth["bob"],
+    )
+    assert inverse.status_code == 400
+    assert inverse.json()["detail"] == "A friend request already exists"
 
 
 def test_agent_chat_persists_conversation_and_results(session, monkeypatch):
