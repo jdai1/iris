@@ -17,10 +17,16 @@ type DragState =
 const WIDTH = 1800;
 const HEIGHT = 1000;
 
-export function GraphExplorer({ onOpenProfile }: { onOpenProfile?: (sourceId: number, domain: string) => void }) {
+export function GraphExplorer({
+  onOpenProfile,
+  initialDomain = '',
+}: {
+  onOpenProfile?: (sourceId: number, domain: string) => void;
+  initialDomain?: string;
+}) {
   const [mode, setMode] = useState<GraphMode>('sources');
   const [depth, setDepth] = useState(1);
-  const [domain, setDomain] = useState('');
+  const [domain, setDomain] = useState(initialDomain);
   const [graph, setGraph] = useState<GraphResponse>({ nodes: [], edges: [] });
   const [sourceMatches, setSourceMatches] = useState<AdminSource[]>([]);
   const [searchOpen, setSearchOpen] = useState(false);

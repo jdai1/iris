@@ -1,15 +1,14 @@
-export type View = 'search' | 'bookshelf' | 'people' | 'directory' | 'explore' | 'graph' | 'admin';
+export type View = 'search' | 'bookshelf' | 'people' | 'directory' | 'admin';
+export type DirectoryMode = 'sources' | 'explore' | 'graph';
 export type ProfileTarget = { sourceId: number; domain: string } | null;
 
 export const VIEW_STORAGE_KEY = 'iris.activeView';
-export const views: View[] = ['search', 'bookshelf', 'people', 'directory', 'explore', 'graph', 'admin'];
+export const views: View[] = ['search', 'bookshelf', 'people', 'directory', 'admin'];
 export const viewPaths: Record<View, string> = {
   search: '/search',
   bookshelf: '/bookshelf',
   people: '/people',
   directory: '/directory',
-  explore: '/explore',
-  graph: '/graph',
   admin: '/admin',
 };
 
@@ -63,15 +62,32 @@ export function initialView(): View {
 export function viewFromPath(pathname: string): View | null {
   const normalized = pathname.replace(/\/+$/, '') || '/';
   if (normalized === '/') return null;
+  if (normalized === '/explore' || normalized.startsWith('/explore/')) return 'directory';
+  if (normalized === '/graph' || normalized.startsWith('/graph/')) return 'directory';
   const match = views.find((view) => normalized === viewPaths[view] || normalized.startsWith(`${viewPaths[view]}/`));
   return match ?? null;
 }
 
-export function profileTargetFromPath(pathname: string): ProfileTarget {
+export function directoryModeFromLocation(pathname: string, search: string): DirectoryMode {
+  const normalized = pathname.replace(/\/+$/, '') || '/';
+  if (normalized === '/explore' || normalized.startsWith('/explore/')) return 'explore';
+  if (normalized === '/graph' || normalized.startsWith('/graph/')) return 'graph';
+  const mode = new URLSearchParams(search).get('mode');
+  return mode === 'explore' || mode === 'graph' ? mode : 'sources';
+}
+
+export function profileTargetFromPath(pathname: string, search = ''): ProfileTarget {
   const normalized = pathname.replace(/\/+$/, '');
-  if (!normalized.startsWith('/directory/')) return null;
-  const domainSegment = normalized.slice('/directory/'.length).split('/documents/')[0];
-  const domain = decodeURIComponent(domainSegment).trim();
+  const supportsDomainQuery = normalized === '/directory'
+    || normalized === '/graph'
+    || normalized.startsWith('/graph/')
+    || normalized === '/explore'
+    || normalized.startsWith('/explore/');
+  const domain = normalized.startsWith('/directory/')
+    ? decodeURIComponent(normalized.slice('/directory/'.length).split('/documents/')[0]).trim()
+    : supportsDomainQuery
+      ? new URLSearchParams(search).get('domain')?.trim()
+      : null;
   return domain ? { sourceId: 0, domain } : null;
 }
 
