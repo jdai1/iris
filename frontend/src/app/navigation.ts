@@ -1,11 +1,12 @@
-export type View = 'search' | 'bookshelf' | 'directory' | 'explore' | 'graph' | 'admin';
+export type View = 'search' | 'bookshelf' | 'people' | 'directory' | 'explore' | 'graph' | 'admin';
 export type ProfileTarget = { sourceId: number; domain: string } | null;
 
 export const VIEW_STORAGE_KEY = 'iris.activeView';
-export const views: View[] = ['search', 'bookshelf', 'directory', 'explore', 'graph', 'admin'];
+export const views: View[] = ['search', 'bookshelf', 'people', 'directory', 'explore', 'graph', 'admin'];
 export const viewPaths: Record<View, string> = {
   search: '/search',
   bookshelf: '/bookshelf',
+  people: '/people',
   directory: '/directory',
   explore: '/explore',
   graph: '/graph',

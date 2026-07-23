@@ -1,0 +1,305 @@
+.people-view {
+  display: grid;
+  gap: 22px;
+  width: min(1180px, 100%);
+  margin: 0 auto;
+  padding: 28px 0 48px;
+}
+
+.people-header {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 24px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.people-header h1,
+.people-panel h2,
+.people-profile-summary h3 {
+  margin: 0;
+  color: var(--text);
+}
+
+.people-header h1 {
+  font-size: 24px;
+}
+
+.people-header p {
+  margin: 6px 0 18px;
+  color: var(--text-subtle);
+  font-size: 13px;
+}
+
+.people-tabs {
+  display: flex;
+  align-items: end;
+  gap: 2px;
+}
+
+.people-tab {
+  min-height: 38px;
+  padding: 0 12px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--text-subtle);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: capitalize;
+}
+
+.people-tab:hover,
+.people-tab-active {
+  border-bottom-color: var(--text);
+  color: var(--text);
+}
+
+.people-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 24px;
+  align-items: start;
+}
+
+.people-panel,
+.people-feed {
+  display: grid;
+  align-content: start;
+  gap: 14px;
+  min-width: 0;
+}
+
+.people-panel {
+  padding: 18px;
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-raised);
+}
+
+.people-panel h2 {
+  font-size: 15px;
+}
+
+.people-search {
+  width: 100%;
+  margin: 0;
+}
+
+.people-list,
+.people-websites {
+  display: grid;
+  gap: 0;
+}
+
+.people-row,
+.people-website-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  min-height: 54px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.people-row:last-child,
+.people-website-row:last-child {
+  border-bottom: 0;
+}
+
+.people-row > span:not(.people-avatar),
+.people-row-profile > span:not(.people-avatar),
+.people-feed-copy,
+.people-website-row a {
+  display: grid;
+  min-width: 0;
+}
+
+.people-row strong,
+.people-feed-copy strong,
+.people-website-row strong {
+  overflow: hidden;
+  color: var(--text);
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.people-row small,
+.people-feed-copy small,
+.people-website-row small,
+.people-panel > small,
+.people-form small,
+.people-profile-summary small {
+  color: var(--text-subtle);
+  font-size: 11px;
+}
+
+.people-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border: 1px solid var(--border);
+  background: var(--bg-sunken);
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.people-row-profile {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  text-align: left;
+}
+
+.people-actions {
+  display: flex !important;
+  gap: 6px;
+}
+
+.people-relationship {
+  justify-self: end;
+}
+
+.people-feed-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 12px;
+  width: 100%;
+  padding: 14px 0;
+  border: 0;
+  border-bottom: 1px solid var(--border-subtle);
+  background: transparent;
+  text-align: left;
+}
+
+.people-feed-row:hover {
+  background: var(--bg-hover);
+}
+
+.people-feed-copy {
+  gap: 3px;
+}
+
+.people-feed-copy > span {
+  color: var(--text-subtle);
+  font-size: 12px;
+}
+
+.people-feed-copy > span strong {
+  font-size: inherit;
+}
+
+.people-form label,
+.people-website-form {
+  display: grid;
+  gap: 6px;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.people-form input,
+.people-form textarea {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+}
+
+.people-form input {
+  min-height: 36px;
+  padding: 0 10px;
+}
+
+.people-form textarea {
+  resize: vertical;
+  padding: 9px 10px;
+}
+
+.people-form input:focus,
+.people-form textarea:focus {
+  border-color: var(--text);
+  outline: 0;
+}
+
+.people-website-form {
+  gap: 10px;
+}
+
+.people-website-row a {
+  grid-template-columns: minmax(0, 1fr) auto;
+  color: inherit;
+  text-decoration: none;
+}
+
+.people-website-row a strong,
+.people-website-row a small {
+  grid-column: 1;
+}
+
+.people-website-row a svg {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  align-self: center;
+}
+
+.people-profile-summary {
+  display: grid;
+  gap: 5px;
+  margin-top: 8px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.people-profile-summary h3 {
+  font-size: 15px;
+}
+
+.people-profile-summary p {
+  margin: 7px 0;
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.people-profile-summary a {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  width: fit-content;
+  color: var(--text);
+  font-size: 12px;
+}
+
+@media (max-width: 780px) {
+  .people-view {
+    padding-top: 12px;
+  }
+
+  .people-header {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .people-tabs {
+    overflow-x: auto;
+  }
+
+  .people-grid {
+    grid-template-columns: 1fr;
+  }
+}

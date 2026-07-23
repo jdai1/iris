@@ -1,6 +1,7 @@
 @import "./styles/base.css";
 @import "./styles/search.css";
 @import "./styles/directory.css";
+@import "./styles/people.css";
 @import "./styles/admin.css";
 @import "./styles/graph.css";
 @import "./styles/explorer.css";
