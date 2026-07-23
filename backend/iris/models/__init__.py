@@ -14,6 +14,7 @@ from iris.schemas.enums import (
     IndexMode,
     IndexRunStatus,
     LinkType,
+    SearchScope,
     SourceStatus,
     TagScope,
 )
@@ -75,6 +76,7 @@ __all__ = [
     "IndexRunStatus",
     "Link",
     "LinkType",
+    "SearchScope",
     "Source",
     "SourceProfileAnalysis",
     "SourceStatus",

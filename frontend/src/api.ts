@@ -22,6 +22,7 @@ import type {
   GraphResponse,
   Page,
   SearchResponse,
+  SearchScope,
   SourceProfileAnalysis,
   User,
 } from './types';
@@ -103,17 +104,22 @@ function clearConversationCache() {
   clearCachePrefix('agent-conversations:');
 }
 
-export function chatSearch(message: string, conversationUuid?: string): Promise<AgentChatResponse> {
+export function chatSearch(
+  message: string,
+  conversationUuid?: string,
+  scope: SearchScope = 'all',
+): Promise<AgentChatResponse> {
   clearConversationCache();
   return request<AgentChatResponse>('/api/agent-chat', {
     method: 'POST',
-    body: JSON.stringify({ message, conversation_uuid: conversationUuid }),
+    body: JSON.stringify({ message, conversation_uuid: conversationUuid, scope }),
   });
 }
 
 export async function streamChatSearch(
   message: string,
   conversationUuid: string | undefined,
+  scope: SearchScope,
   onEvent: (event: AgentStreamEvent) => void,
   signal?: AbortSignal,
 ): Promise<void> {
@@ -121,7 +127,7 @@ export async function streamChatSearch(
   const response = await fetch(`${API_BASE}/api/agent-chat/stream`, {
     method: 'POST',
     headers: await requestHeaders(),
-    body: JSON.stringify({ message, conversation_uuid: conversationUuid }),
+    body: JSON.stringify({ message, conversation_uuid: conversationUuid, scope }),
     signal,
   });
   if (!response.ok || !response.body) {

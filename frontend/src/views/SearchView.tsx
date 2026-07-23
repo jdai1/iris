@@ -3,7 +3,7 @@ import { Box } from '@chakra-ui/react';
 import { ArrowUpRight, Search } from 'lucide-react';
 import { getAgentConversation, getAgentConversations, streamChatSearch } from '../api';
 import { CorpusSearchForm } from '../CorpusSearchForm';
-import type { AgentConversation, AgentConversationSummary, AgentStep, SearchResult } from '../types';
+import type { AgentConversation, AgentConversationSummary, AgentStep, SearchResult, SearchScope } from '../types';
 
 type ChatMessage = {
   id: string;
@@ -16,6 +16,7 @@ type ChatMessage = {
 
 const ACTIVE_CHAT_STORAGE_KEY = 'iris.activeChatUuid';
 const SEARCH_RELOAD_STORAGE_KEY = 'iris.searchReloading';
+const SEARCH_SCOPE_STORAGE_KEY = 'iris.searchScope';
 const HISTORY_PAGE_SIZE = 15;
 
 export function SearchView({
@@ -26,6 +27,7 @@ export function SearchView({
   onOpenDocument: (documentUuid: string, reason: string) => void;
 }) {
   const [query, setQuery] = useState('');
+  const [searchScope, setSearchScope] = useState<SearchScope>(initialSearchScope);
   const [conversationId, setConversationId] = useState<string | undefined>();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [history, setHistory] = useState<AgentConversationSummary[]>([]);
@@ -70,6 +72,10 @@ export function SearchView({
       window.sessionStorage.removeItem(ACTIVE_CHAT_STORAGE_KEY);
     }
   }, [conversationId]);
+
+  useEffect(() => {
+    window.localStorage.setItem(SEARCH_SCOPE_STORAGE_KEY, searchScope);
+  }, [searchScope]);
 
   useEffect(() => {
     transcriptRef.current?.scrollTo({ top: transcriptRef.current.scrollHeight, behavior: 'smooth' });
@@ -176,7 +182,7 @@ export function SearchView({
     setLoading(true);
     setError(null);
     try {
-      await streamChatSearch(message, conversationId, (event) => {
+      await streamChatSearch(message, conversationId, searchScope, (event) => {
         if (event.event === 'conversation') {
           setConversationId(event.data.conversation_uuid);
           return;
@@ -286,6 +292,7 @@ export function SearchView({
 
       {messages.length === 0 && (
         <div className="chat-composer chat-composer-start">
+          <SearchScopeControl value={searchScope} onChange={setSearchScope} disabled={loading} />
           <CorpusSearchForm
             className="search-box chat-input"
             value={query}
@@ -341,6 +348,7 @@ export function SearchView({
         </Box>
         {messages.length > 0 && (
           <div className="chat-composer chat-composer-bottom">
+            <SearchScopeControl value={searchScope} onChange={setSearchScope} disabled={loading} />
             <CorpusSearchForm
               className="search-box chat-input"
               value={query}
@@ -376,6 +384,44 @@ function ThinkingState() {
         <span className="skeleton-line" />
         <span className="skeleton-line" />
       </div>
+    </div>
+  );
+}
+
+function initialSearchScope(): SearchScope {
+  if (typeof window === 'undefined') return 'all';
+  const stored = window.localStorage.getItem(SEARCH_SCOPE_STORAGE_KEY);
+  return stored === 'mine' || stored === 'friends' || stored === 'all' ? stored : 'all';
+}
+
+function SearchScopeControl({
+  value,
+  onChange,
+  disabled,
+}: {
+  value: SearchScope;
+  onChange: (scope: SearchScope) => void;
+  disabled: boolean;
+}) {
+  const options: Array<{ value: SearchScope; label: string }> = [
+    { value: 'mine', label: 'Mine' },
+    { value: 'friends', label: 'Friends' },
+    { value: 'all', label: 'All Iris' },
+  ];
+  return (
+    <div className="chat-scope-control" role="group" aria-label="Search corpus">
+      {options.map((option) => (
+        <button
+          key={option.value}
+          type="button"
+          className={option.value === value ? 'chat-scope-option chat-scope-option-active' : 'chat-scope-option'}
+          aria-pressed={option.value === value}
+          disabled={disabled}
+          onClick={() => onChange(option.value)}
+        >
+          {option.label}
+        </button>
+      ))}
     </div>
   );
 }

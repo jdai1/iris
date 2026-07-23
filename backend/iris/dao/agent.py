@@ -5,6 +5,7 @@ from sqlalchemy import desc, exists, or_, select, text
 from iris.dao import db
 from iris.dao.user_state import get_or_create_local_user
 from iris.models import AgentConversation, AgentMessage, AgentMessageRole, AgentSearchResult, User
+from iris.schemas.enums import SearchScope
 from iris.schemas.retrieval import AgentChatResult
 from iris.services.common.langfuse_tracing import agent_conversation_session_id, agent_trace_metadata, agent_user_id
 from iris.services.retrieval.search import agentic_chat
@@ -17,6 +18,7 @@ def create_agent_chat(
     limit: int | None = None,
     conversation_id: int | None = None,
     conversation_uuid: str | None = None,
+    scope: SearchScope = SearchScope.ALL,
 ) -> tuple[AgentConversation, AgentMessage, AgentMessage, AgentChatResult]:
     """Persist one user turn, one assistant turn, and the assistant's citations."""
     conversation, user_message = start_agent_chat(
@@ -29,6 +31,8 @@ def create_agent_chat(
     result = agentic_chat(
         message,
         limit=limit,
+        user=trace_user,
+        scope=scope,
         session_id=agent_conversation_session_id(conversation.uuid),
         user_id=agent_user_id(trace_user.id),
         trace_metadata=agent_trace_metadata(

@@ -1,10 +1,10 @@
 import json
 from datetime import datetime, timezone
 
-from iris.dao import bookshelf
+from iris.dao import bookshelf, search as search_dao, social
 from iris.dao.user_state import get_or_create_local_user, get_or_create_user_document_mapping
 from iris.services.ingestion.embedding import dumps_embedding, embed_text
-from iris.models import BookshelfStatus, Document
+from iris.models import BookshelfStatus, Document, User
 from iris.dao.sources import get_or_create_source
 from iris.dao.documents import upsert_document
 from iris.services.common.langfuse_tracing import (
@@ -12,7 +12,7 @@ from iris.services.common.langfuse_tracing import (
     finish_agent_search_observation,
     instrument_openai_agents,
 )
-from iris.schemas.enums import AgentToolName
+from iris.schemas.enums import AgentToolName, SearchScope
 from iris.schemas.retrieval import AgentToolRun, RankedDocument
 from iris.services.retrieval.search import (
     AGENT_INSTRUCTIONS,
@@ -51,6 +51,37 @@ def test_search_ranks_relevant_documents(session):
     _search, results = search_documents("why are small teams effective", limit=2)
     assert results
     assert results[0].document.title == "Small teams"
+
+
+def test_ai_search_scopes_filter_before_retrieval(session):
+    source = get_or_create_source("https://scopes.test", status="indexed")
+    mine = add_doc(session, source, "Mine", "personal saved systems")
+    friend_doc = add_doc(session, source, "Friend", "friend saved systems")
+    stranger_doc = add_doc(session, source, "Stranger", "stranger saved systems")
+    user = User(email="scope-owner@example.com", display_name="Scope Owner")
+    friend = User(email="scope-friend@example.com", display_name="Scope Friend")
+    stranger = User(email="scope-stranger@example.com", display_name="Scope Stranger")
+    session.add_all([user, friend, stranger])
+    session.flush()
+
+    bookshelf.save_document(user, mine)
+    bookshelf.save_document(friend, friend_doc)
+    bookshelf.save_document(stranger, stranger_doc)
+    friendship = social.request_friendship(friend, user)
+    social.accept_friendship(user, friendship.id)
+    social.request_friendship(stranger, user)
+
+    mine_rows = search_dao.get_searchable_documents(user=user, scope=SearchScope.MINE)
+    friend_rows = search_dao.get_searchable_documents(user=user, scope=SearchScope.FRIENDS)
+    all_rows = search_dao.get_searchable_documents(user=user, scope=SearchScope.ALL)
+
+    assert {document.id for document in mine_rows} == {mine.id}
+    assert {document.id for document in friend_rows} == {friend_doc.id}
+    assert {document.id for document in all_rows} == {
+        mine.id,
+        friend_doc.id,
+        stranger_doc.id,
+    }
 
 
 def test_agent_document_payload_includes_structured_summary_fields(session):

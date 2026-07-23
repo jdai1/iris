@@ -11,6 +11,7 @@ from iris.schemas.enums import (
     BookshelfCollectionVisibility,
     BookshelfStatus,
     FriendshipStatus,
+    SearchScope,
     SourceProfileAnalysisStatus,
     SourceProfileLinkKind,
 )
@@ -192,6 +193,7 @@ class AgentChatRequestSchema(BaseModel):
     limit: int | None = None
     conversation_id: int | None = None
     conversation_uuid: str | None = None
+    scope: SearchScope = SearchScope.ALL
 
 
 class AgentStepSchema(BaseModel):

@@ -690,7 +690,7 @@ def search(
     _bound_session=Depends(get_session),
     user: User | None = Depends(get_optional_user),
 ) -> SearchSchema:
-    _search_row, ranked = search_documents(q, limit=limit, persist=False)
+    _search_row, ranked = search_documents(q, limit=limit, persist=False, user=user)
     answer = synthesize_answer(q, ranked)
     return SearchSchema(
         query=q,
@@ -711,6 +711,7 @@ def agent_chat(
         limit=payload.limit,
         conversation_id=payload.conversation_id,
         conversation_uuid=payload.conversation_uuid,
+        scope=payload.scope,
     )
     return AgentChatSchema(
         conversation_id=conversation.id,
@@ -784,6 +785,8 @@ async def _agent_chat_stream_events(payload: AgentChatRequestSchema, authorizati
                 payload.message,
                 limit=payload.limit,
                 conversation_context=conversation_context,
+                user=user,
+                scope=payload.scope,
                 session_id=agent_conversation_session_id(conversation.uuid),
                 user_id=agent_user_id(user.id),
                 trace_metadata=agent_trace_metadata(

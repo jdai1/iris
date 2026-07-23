@@ -102,6 +102,12 @@ class FriendshipStatus(StringEnum):
     CONNECTED = "connected"
 
 
+class SearchScope(StringEnum):
+    MINE = "mine"
+    FRIENDS = "friends"
+    ALL = "all"
+
+
 class CategoryStatus(StringEnum):
     ACTIVE = "active"
     ARCHIVED = "archived"

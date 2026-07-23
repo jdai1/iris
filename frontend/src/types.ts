@@ -71,6 +71,8 @@ export interface SearchResponse {
   results: SearchResult[];
 }
 
+export type SearchScope = 'mine' | 'friends' | 'all';
+
 export interface AgentStep {
   kind: string;
   title: string;
