@@ -9,6 +9,8 @@ const firebaseConfig = {
   messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
 };
 
+export const firebaseApiKey = firebaseConfig.apiKey || '';
+
 export const firebaseEnabled = Boolean(
   firebaseConfig.apiKey &&
     firebaseConfig.authDomain &&

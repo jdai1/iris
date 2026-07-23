@@ -15,6 +15,63 @@ from iris.services.common.config import SOURCE_PROFILE_MODEL, SOURCE_PROFILE_PRO
 from iris.services.llm.client import generate_json
 
 
+SOURCE_PROFILE_AUDIENCES = [
+    "Software engineers",
+    "Engineering leaders",
+    "Founders and operators",
+    "AI/ML practitioners",
+    "AI policy and safety readers",
+    "Mathematics readers",
+    "Academics and researchers",
+    "Rationalist and EA readers",
+    "Policy and economics readers",
+    "Writers and bloggers",
+    "Productivity and learning readers",
+    "General curious readers",
+]
+
+SOURCE_PROFILE_THEMES = [
+    "Software engineering",
+    "Engineering leadership",
+    "Startups and company building",
+    "AI and machine learning",
+    "AI policy and safety",
+    "Mathematics",
+    "Statistics and probability",
+    "Economics",
+    "Effective altruism",
+    "Rationality",
+    "Philosophy",
+    "Social theory",
+    "Politics and policy",
+    "Culture and media",
+    "Writing and communication",
+    "Productivity and learning",
+    "Personal essays",
+    "Career",
+    "Science and research",
+    "Internet and platforms",
+    "Games and puzzles",
+]
+
+SOURCE_PROFILE_STYLES = [
+    "Technical",
+    "Analytical",
+    "Practical",
+    "Narrative",
+    "Personal",
+    "Opinionated",
+    "Exploratory",
+    "Research-heavy",
+    "Conversational",
+    "Dense",
+    "Clear",
+    "Playful",
+    "Polemic",
+    "Reflective",
+]
+
+
 def generate_source_profile(source: Source, *, force: bool = False) -> SourceProfileAnalysis:
     """Generate and persist a profile analysis for one source."""
     documents = profile_dao.get_documents_for_profile(source.id)
@@ -31,9 +88,10 @@ def generate_source_profile(source: Source, *, force: bool = False) -> SourcePro
             status=SourceProfileAnalysisStatus.SUCCEEDED,
             display_name=payload.get("display_name"),
             bio=payload.get("bio"),
+            audiences=payload.get("audiences"),
             themes=payload.get("themes"),
             writing_style=payload.get("writing_style"),
-            strong_takes=payload.get("strong_takes"),
+            strong_takes=payload.get("opinions") or payload.get("strong_takes"),
             public_links=payload.get("public_links"),
             public_contact=payload.get("public_contact"),
             caveats=payload.get("caveats"),
@@ -48,6 +106,7 @@ def generate_source_profile(source: Source, *, force: bool = False) -> SourcePro
             status=SourceProfileAnalysisStatus.FAILED,
             display_name=None,
             bio=None,
+            audiences=None,
             themes=None,
             writing_style=None,
             strong_takes=None,
@@ -194,6 +253,9 @@ def document_profile_payload(document: Document, *, include_excerpt: bool, excer
         "document_type": document.document_type,
         "category": document.category,
         "summary": document.summary,
+        "one_liner": document.one_liner,
+        "audience": document.audience,
+        "takeaways": document.takeaways or [],
         "topics": document.topics or [],
     }
     if include_excerpt:
@@ -234,13 +296,26 @@ def source_profile_model_label() -> str:
 def profile_prompt_instructions() -> str:
     return (
         "Create a profile analysis for an indexed personal writing source. "
-        "Be playful but precise. Capture the writer's online presence, recurring interests, style, and strong takes. "
-        "The bio should foreground concrete identity anchors supported by the input, including employers, schools, roles, locations, and major projects. "
-        "Do not bury repeated school or employer evidence in themes or caveats when it is useful for identifying the person. "
+        "Write for a reader deciding whether to click into this source, follow the writer, or use the source in search results. "
+        "Optimize for useful orientation: what this source is good for, what questions or problems it keeps returning to, "
+        "what kind of reader would benefit, and what makes the writing distinctive. "
+        "Do not waste space on generic website facts like having a homepage, a GitHub link, a blog title, or no known contact info unless that fact materially helps the reader. "
+        "Prefer durable patterns across multiple documents over one-off curiosities, jokes, tags, or clever phrasing. "
+        "The bio should be 2-4 plainspoken sentences with concrete identity anchors only when strongly supported, "
+        "including employers, schools, roles, locations, and major projects when they matter for reader orientation. "
+        "Do not make the bio a list of disconnected topics; explain the throughline. "
+        "Audiences must be selected from the provided audience list; choose at most 4 primary reader groups. "
+        "Themes must be selected from the provided writes-about list; choose 3-6 broad labels that explain the source without sprawling. "
+        "Writing style must be selected from the provided style list; choose 2-4 compact labels. "
+        "Opinions should be recurring author beliefs or foundational claims that appear across the source, not one-off article takeaways. "
+        "Phrase each opinion as a concise belief the author seems to hold, ideally useful for predicting what they will argue elsewhere. "
+        "Each opinion should be one short sentence, ideally under 18 words and never more than 24 words. "
+        "Avoid generic intellectual virtues like precision, clarity, nuance, curiosity, or rigor unless the claim says something specific about a domain, tradeoff, or consequence. "
+        "Caveats should only mention uncertainty that prevents a misleading profile; omit caveats about missing employer, school, location, or contact info unless the missing information directly affects the profile. "
         "Do not invent identity, credentials, contact info, or claims not supported by the provided documents. "
         "If the person/name is unclear, set display_name to null. "
         "Set missing fields to null instead of inventing information. "
-        "Strong takes should be concise claims supported by the input documents. Return JSON matching the schema."
+        "Return JSON matching the schema."
     )
 
 
@@ -250,6 +325,9 @@ def profile_input_payload(profile_input: ProfileInput) -> dict:
     collection_documents = [doc for doc in profile_input.documents if doc.get("document_type") == DocumentType.COLLECTION.value]
     return {
         "source": {"id": profile_input.source_id, "domain": profile_input.domain, "url": profile_input.url},
+        "allowed_audiences": SOURCE_PROFILE_AUDIENCES,
+        "allowed_writes_about": SOURCE_PROFILE_THEMES,
+        "allowed_styles": SOURCE_PROFILE_STYLES,
         "scraped_facts": profile_input.scraped_facts,
         "profile_documents": profile_documents,
         "essay_documents": essay_documents,
@@ -269,9 +347,10 @@ def profile_response_format() -> dict[str, object]:
             "properties": {
                 "display_name": nullable_schema({"type": "string"}),
                 "bio": nullable_schema({"type": "string"}),
-                "themes": nullable_schema({"type": "array", "items": {"type": "string"}}),
-                "writing_style": nullable_schema({"type": "array", "items": {"type": "string"}}),
-                "strong_takes": {
+                "audiences": nullable_schema({"type": "array", "items": {"type": "string", "enum": SOURCE_PROFILE_AUDIENCES}, "maxItems": 4}),
+                "themes": nullable_schema({"type": "array", "items": {"type": "string", "enum": SOURCE_PROFILE_THEMES}, "minItems": 3, "maxItems": 6}),
+                "writing_style": nullable_schema({"type": "array", "items": {"type": "string", "enum": SOURCE_PROFILE_STYLES}, "minItems": 2, "maxItems": 4}),
+                "opinions": {
                     "anyOf": [
                         {
                             "type": "array",
@@ -279,9 +358,9 @@ def profile_response_format() -> dict[str, object]:
                                 "type": "object",
                                 "additionalProperties": False,
                                 "properties": {
-                                    "take": {"type": "string"},
+                                    "opinion": {"type": "string", "maxLength": 180},
                                 },
-                                "required": ["take"],
+                                "required": ["opinion"],
                             },
                         },
                         {"type": "null"},
@@ -291,7 +370,7 @@ def profile_response_format() -> dict[str, object]:
                 "public_contact": nullable_schema({"type": "array", "items": link_schema()}),
                 "caveats": nullable_schema({"type": "array", "items": {"type": "string"}}),
             },
-            "required": ["display_name", "bio", "themes", "writing_style", "strong_takes", "public_links", "public_contact", "caveats"],
+            "required": ["display_name", "bio", "audiences", "themes", "writing_style", "opinions", "public_links", "public_contact", "caveats"],
         },
     }
 
@@ -313,11 +392,47 @@ def link_schema() -> dict[str, object]:
 def normalize_profile_payload(payload: dict, profile_input: ProfileInput) -> dict:
     """Normalize model output and merge deterministic public facts."""
     normalized = dict(payload)
+    normalized["audiences"] = _normalize_controlled_list(normalized.get("audiences"), SOURCE_PROFILE_AUDIENCES, limit=4)
+    normalized["themes"] = _normalize_controlled_list(normalized.get("themes"), SOURCE_PROFILE_THEMES, limit=6)
+    normalized["writing_style"] = _normalize_controlled_list(normalized.get("writing_style"), SOURCE_PROFILE_STYLES, limit=4)
+    normalized["opinions"] = _normalize_opinions(normalized.get("opinions") or normalized.get("strong_takes"))
     if profile_input.scraped_facts.get("public_links"):
         normalized["public_links"] = profile_input.scraped_facts["public_links"]
     if profile_input.scraped_facts.get("public_contact"):
         normalized["public_contact"] = profile_input.scraped_facts["public_contact"]
     return normalized
+
+
+def _normalize_opinions(value: object) -> list[dict] | None:
+    if not isinstance(value, list):
+        return None
+    opinions: list[dict] = []
+    for item in value:
+        if isinstance(item, dict):
+            text = item.get("opinion") or item.get("take")
+        else:
+            text = item
+        opinion = str(text or "").strip()
+        if not opinion:
+            continue
+        opinions.append({"take": opinion[:180]})
+        if len(opinions) >= 4:
+            break
+    return opinions or None
+
+
+def _normalize_controlled_list(value: object, allowed: list[str], *, limit: int) -> list[str] | None:
+    if not isinstance(value, list):
+        return None
+    allowed_set = set(allowed)
+    normalized: list[str] = []
+    for item in value:
+        if not isinstance(item, str) or item not in allowed_set or item in normalized:
+            continue
+        normalized.append(item)
+        if len(normalized) >= limit:
+            break
+    return normalized or None
 
 
 def enum_schema(enum_class: type[SourceProfileLinkKind]) -> dict[str, object]:

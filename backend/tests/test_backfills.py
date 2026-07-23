@@ -13,6 +13,7 @@ from iris.dao.documents import upsert_document
 from iris.dao.sources import get_or_create_source
 from iris.models import CrawlJob
 from iris.schemas.ingestion import DocumentAnalysis
+from iris.services.retrieval import source_profiles
 
 
 def test_metadata_backfill_respects_active_documents(monkeypatch):
@@ -121,6 +122,42 @@ def test_summary_backfill_respects_active_documents(monkeypatch):
     assert len(outputs) == 5
     assert max_active == 2
     assert not any(output.failed for output in outputs)
+
+
+def test_source_profile_normalization_filters_controlled_lists():
+    payload = {
+        "audiences": ["Software engineers", "made up audience", "Software engineers", "Mathematics readers", "General curious readers", "Writers and bloggers"],
+        "themes": ["Mathematics", "tiny bespoke label", "AI and machine learning", "Rationality", "Social theory", "Writing and communication", "Software engineering"],
+        "writing_style": ["Technical", "long bespoke style label", "Analytical", "Technical", "Dense", "Conversational", "Playful"],
+        "opinions": [{"opinion": "Bloggers reveal their real worldview through recurring claims."}, {"take": "Legacy take shape is still accepted."}],
+    }
+
+    normalized = source_profiles.normalize_profile_payload(
+        payload,
+        source_profiles.ProfileInput(
+            source_id=1,
+            domain="example.com",
+            url="https://example.com",
+            fingerprint="test",
+            scraped_facts={},
+            documents=[],
+        ),
+    )
+
+    assert normalized["audiences"] == ["Software engineers", "Mathematics readers", "General curious readers", "Writers and bloggers"]
+    assert normalized["themes"] == [
+        "Mathematics",
+        "AI and machine learning",
+        "Rationality",
+        "Social theory",
+        "Writing and communication",
+        "Software engineering",
+    ]
+    assert normalized["writing_style"] == ["Technical", "Analytical", "Dense", "Conversational"]
+    assert normalized["opinions"] == [
+        {"take": "Bloggers reveal their real worldview through recurring claims."},
+        {"take": "Legacy take shape is still accepted."},
+    ]
 
 
 def test_summary_backfill_updates_only_summary(session, monkeypatch):

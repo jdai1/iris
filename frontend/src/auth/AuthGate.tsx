@@ -2,7 +2,7 @@ import { ReactNode, useEffect, useState } from 'react';
 import type { User as FirebaseUser } from 'firebase/auth';
 import { getRedirectResult, onAuthStateChanged, signInWithPopup, signInWithRedirect, signOut } from 'firebase/auth';
 import { getMe, setAuthTokenProvider } from '../api';
-import { auth, firebaseEnabled, googleProvider } from '../firebase';
+import { auth, firebaseApiKey, firebaseEnabled, googleProvider } from '../firebase';
 import type { User as IrisUser } from '../types';
 import { AuthScreen } from './AuthScreen';
 
@@ -25,6 +25,54 @@ export function AuthGate({ children }: AuthGateProps) {
   const [authReady, setAuthReady] = useState(!firebaseEnabled);
   const [authError, setAuthError] = useState<string | null>(null);
   const [signingIn, setSigningIn] = useState(false);
+
+  useEffect(() => {
+    if (!firebaseUser) return;
+    const extensionId = new URLSearchParams(window.location.search).get('iris_extension_auth');
+    if (!extensionId || !/^[a-p]{32}$/.test(extensionId)) return;
+
+    Promise.all([firebaseUser.getIdToken(true), firebaseUser.getIdTokenResult()])
+      .then(([token, result]) => {
+        const runtime = (window as unknown as {
+          chrome?: {
+            runtime?: {
+              sendMessage?: (
+                id: string,
+                message: unknown,
+                callback?: (response: unknown) => void,
+              ) => void;
+              lastError?: { message?: string };
+            };
+          };
+        }).chrome?.runtime;
+        if (!runtime?.sendMessage) throw new Error('Extension messaging is unavailable');
+        runtime.sendMessage(
+          extensionId,
+          {
+            type: 'iris-auth',
+            token,
+            refreshToken: firebaseUser.refreshToken,
+            expiresAt: new Date(result.expirationTime).getTime(),
+            apiKey: firebaseApiKey,
+          },
+          (response: unknown) => {
+            if (runtime.lastError) {
+              setAuthError(runtime.lastError.message || 'Could not connect the browser extension');
+              return;
+            }
+            if (!response || typeof response !== 'object' || !('ok' in response) || !(response as { ok: boolean }).ok) {
+              const message = response && typeof response === 'object' && 'error' in response
+                ? String((response as { error: unknown }).error)
+                : 'The extension did not accept this login';
+              setAuthError(message);
+              return;
+            }
+            window.history.replaceState(null, '', window.location.pathname);
+          },
+        );
+      })
+      .catch((error) => setAuthError(readAuthError(error, 'Could not connect the browser extension')));
+  }, [firebaseUser]);
 
   useEffect(() => {
     if (!auth) {

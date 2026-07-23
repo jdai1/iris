@@ -513,8 +513,14 @@ def _serialize_source_metadata(source: Source) -> str:
             else {
                 "display_name": profile.display_name,
                 "bio": profile.bio,
+                "audiences": profile.audiences or [],
                 "themes": profile.themes or [],
                 "writing_style": profile.writing_style or [],
+                "opinions": [
+                    item.get("take", "")
+                    for item in profile.strong_takes or []
+                    if isinstance(item, dict) and item.get("take")
+                ],
                 "caveats": profile.caveats or [],
             },
             "recent_documents": [

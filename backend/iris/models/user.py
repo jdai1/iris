@@ -45,8 +45,6 @@ class User(Base):
     agent_conversations: Mapped[list["AgentConversation"]] = relationship(
         back_populates="user", cascade="all, delete-orphan"
     )
-
-
 class UserDocumentMapping(Base):
     """Per-user state for one document."""
 
@@ -84,6 +82,41 @@ class UserDocumentMapping(Base):
 
     user: Mapped[User] = relationship(back_populates="document_mappings")
     document: Mapped[Document] = relationship(foreign_keys=[document_id])
+    highlights: Mapped[list["DocumentHighlight"]] = relationship(
+        back_populates="user_document_mapping", cascade="all, delete-orphan"
+    )
+
+
+class DocumentHighlight(Base):
+    """A user-owned text annotation anchored to a document page."""
+
+    __tablename__ = "document_highlights"
+    __table_args__ = (
+        Index(
+            "idx_document_highlights_mapping_created",
+            "user_document_mapping_id",
+            "created_at",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_document_mapping_id: Mapped[int] = mapped_column(
+        ForeignKey("user_document_mappings.id")
+    )
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(default=utcnow, onupdate=utcnow)
+    deleted_at: Mapped[datetime | None] = mapped_column(nullable=True, index=True)
+    quote: Mapped[str] = mapped_column(Text)
+    prefix: Mapped[str | None] = mapped_column(Text, nullable=True)
+    suffix: Mapped[str | None] = mapped_column(Text, nullable=True)
+    start_offset: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    end_offset: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    comment: Mapped[str | None] = mapped_column(Text, nullable=True)
+    color: Mapped[str] = mapped_column(String(32), default="yellow")
+
+    user_document_mapping: Mapped[UserDocumentMapping] = relationship(
+        back_populates="highlights"
+    )
 
 
 class BookshelfCollection(Base):

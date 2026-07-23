@@ -1,0 +1,9 @@
+.popup-page { width: 420px; min-height: 250px; }
+button, input, textarea { font: inherit; }
+button { cursor: pointer; }
+.iris-brand { display:flex; align-items:center; gap:8px; color:#767676; font-size:15px; font-weight:680; }
+.iris-brand::before { content:""; width:8px; height:8px; background:currentColor; }
+.hero-link { display:flex; align-items:center; gap:14px; padding:0; border:0; background:none; color:#111; font-size:clamp(30px,3.7vw,54px); font-weight:660; line-height:1.08; }
+.hero-link:hover span:first-child { text-decoration:underline; text-underline-offset:7px; }
+.hero-link:hover span:last-child { transform:translateX(3px); }
+.hero-link span:last-child { transition:transform 140ms ease; }

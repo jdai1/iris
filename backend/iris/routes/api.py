@@ -13,6 +13,7 @@ from sqlalchemy.orm import joinedload
 from iris.dao import admin
 from iris.dao import agent as agent_dao
 from iris.dao import bookshelf as bookshelf_dao
+from iris.dao import highlights as highlights_dao
 from iris.dao import db
 from iris.dao import directory as directory_dao
 from iris.dao import search as search_dao
@@ -40,6 +41,8 @@ from iris.schemas.api import (
     BookshelfCollectionUpdateSchema,
     BookshelfEntrySchema,
     BookshelfLinkCreateSchema,
+    BrowserCaptureSchema,
+    BrowserPageSchema,
     BookshelfUpdateSchema,
     CrawlSchema,
     DocumentDetailSchema,
@@ -53,6 +56,9 @@ from iris.schemas.api import (
     GraphNodeSchema,
     GraphSchema,
     HealthSchema,
+    HighlightCreateSchema,
+    HighlightSchema,
+    HighlightUpdateSchema,
     PageSchema,
     SearchResultSchema,
     SearchSchema,
@@ -66,15 +72,21 @@ from iris.services.common.config import ADMIN_EMAILS, firebase_auth_enabled, ope
 from iris.services.common.langfuse_tracing import agent_conversation_session_id, agent_trace_metadata, agent_user_id
 from iris.services.retrieval.search import search_documents, stream_openai_agentic_chat, synthesize_answer
 from iris.services.retrieval.source_profiles import generate_source_profile
-from iris.routes.dumps import dump_bookshelf_collection, dump_bookshelf_entry, dump_crawl_job, dump_document, dump_source, dump_source_profile_analysis
+from iris.routes.dumps import dump_bookshelf_collection, dump_bookshelf_entry, dump_crawl_job, dump_document, dump_highlight, dump_source, dump_source_profile_analysis
 from iris.services.ingestion.source_classifier import classify_source_url
+from iris.services.common.url_utils import normalize_url
 
 
 app = FastAPI(title="Iris", version="0.1.0")
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_origins=[
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://localhost:5175",
+        "http://localhost:5180",
+    ],
     allow_origin_regex=r"http://(localhost|127\.0\.0\.1):517\d",
     allow_credentials=True,
     allow_methods=["*"],
@@ -802,6 +814,90 @@ def create_bookshelf_link(
             pass
     tags = bookshelf_dao.user_tags_for_documents(user, [mapping.document_id]).get(mapping.document_id, [])
     return dump_bookshelf_entry(mapping, tags)
+
+
+def _browser_page(user: User, mapping: UserDocumentMapping | None) -> BrowserPageSchema:
+    if mapping is None:
+        return BrowserPageSchema(saved=False)
+    tags = bookshelf_dao.user_tags_for_documents(user, [mapping.document_id]).get(mapping.document_id, [])
+    return BrowserPageSchema(
+        saved=True,
+        entry=dump_bookshelf_entry(mapping, tags),
+        highlights=[dump_highlight(item) for item in highlights_dao.list_for_mapping(mapping)],
+    )
+
+
+@app.post("/api/browser/pages/capture", response_model=BrowserPageSchema)
+def capture_browser_page(payload: BrowserCaptureSchema, _bound_session=Depends(get_session), user: User = Depends(get_current_user)) -> BrowserPageSchema:
+    try:
+        mapping = bookshelf_dao.create_entry_for_url(
+            user, url=payload.url, title=payload.title, note=payload.note,
+            intent_note=payload.intent_note, tags=payload.tags,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _browser_page(user, mapping)
+
+
+@app.get("/api/browser/pages/resolve", response_model=BrowserPageSchema)
+def resolve_browser_page(url: str, _bound_session=Depends(get_session), user: User = Depends(get_current_user)) -> BrowserPageSchema:
+    normalized = normalize_url(url)
+    document = db.current_session().scalar(select(Document).where(Document.url == normalized))
+    if not document:
+        return BrowserPageSchema(saved=False)
+    mapping = db.current_session().scalar(
+        select(UserDocumentMapping)
+        .options(joinedload(UserDocumentMapping.document).joinedload(Document.source))
+        .where(UserDocumentMapping.user_id == user.id, UserDocumentMapping.document_id == document.id)
+    )
+    return _browser_page(user, mapping)
+
+
+@app.get("/api/documents/{document_id}/highlights", response_model=list[HighlightSchema])
+def list_highlights(document_id: int, _bound_session=Depends(get_session), user: User = Depends(get_current_user)) -> list[HighlightSchema]:
+    mapping = db.current_session().scalar(
+        select(UserDocumentMapping).where(
+            UserDocumentMapping.user_id == user.id,
+            UserDocumentMapping.document_id == document_id,
+        )
+    )
+    if not mapping:
+        return []
+    return [dump_highlight(item) for item in highlights_dao.list_for_mapping(mapping)]
+
+
+@app.post("/api/documents/{document_id}/highlights", response_model=HighlightSchema)
+def create_highlight(document_id: int, payload: HighlightCreateSchema, _bound_session=Depends(get_session), user: User = Depends(get_current_user)) -> HighlightSchema:
+    mapping = db.current_session().scalar(
+        select(UserDocumentMapping).where(
+            UserDocumentMapping.user_id == user.id,
+            UserDocumentMapping.document_id == document_id,
+        )
+    )
+    if not mapping:
+        raise HTTPException(status_code=404, detail="Document not found")
+    try:
+        highlight = highlights_dao.create(mapping, **payload.model_dump())
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return dump_highlight(highlight)
+
+
+@app.patch("/api/highlights/{highlight_id}", response_model=HighlightSchema)
+def update_highlight(highlight_id: int, payload: HighlightUpdateSchema, _bound_session=Depends(get_session), user: User = Depends(get_current_user)) -> HighlightSchema:
+    highlight = highlights_dao.get_owned(user, highlight_id)
+    if not highlight:
+        raise HTTPException(status_code=404, detail="Highlight not found")
+    return dump_highlight(highlights_dao.update(highlight, fields=payload.model_fields_set, comment=payload.comment, color=payload.color))
+
+
+@app.delete("/api/highlights/{highlight_id}", status_code=204)
+def delete_highlight(highlight_id: int, _bound_session=Depends(get_session), user: User = Depends(get_current_user)) -> Response:
+    highlight = highlights_dao.get_owned(user, highlight_id)
+    if not highlight:
+        raise HTTPException(status_code=404, detail="Highlight not found")
+    highlights_dao.soft_delete(highlight)
+    return Response(status_code=204)
 
 
 @app.get("/api/bookshelf/collections", response_model=list[BookshelfCollectionSchema])

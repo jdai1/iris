@@ -215,9 +215,48 @@ class BookshelfLinkCreateSchema(BaseModel):
     title: str | None = None
     note: str | None = None
     intent_note: str | None = None
-    tags: list[str] = []
+    tags: list[str] | None = None
     collection_id: int | None = None
     crawl_now: bool = False
+
+
+class HighlightCreateSchema(BaseModel):
+    quote: str = Field(min_length=1, max_length=20000)
+    prefix: str | None = Field(default=None, max_length=500)
+    suffix: str | None = Field(default=None, max_length=500)
+    start_offset: int | None = Field(default=None, ge=0)
+    end_offset: int | None = Field(default=None, ge=0)
+    comment: str | None = Field(default=None, max_length=20000)
+    color: str = Field(default="yellow", max_length=32)
+
+
+class HighlightUpdateSchema(BaseModel):
+    comment: str | None = Field(default=None, max_length=20000)
+    color: str | None = Field(default=None, max_length=32)
+
+
+class HighlightSchema(BaseModel):
+    id: int
+    document_id: int
+    quote: str
+    prefix: str | None
+    suffix: str | None
+    start_offset: int | None
+    end_offset: int | None
+    comment: str | None
+    color: str
+    created_at: datetime
+    updated_at: datetime
+
+
+class BrowserCaptureSchema(BookshelfLinkCreateSchema):
+    pass
+
+
+class BrowserPageSchema(BaseModel):
+    saved: bool
+    entry: BookshelfEntrySchema | None = None
+    highlights: list[HighlightSchema] = Field(default_factory=list)
 
 
 class BookshelfCollectionCreateSchema(BaseModel):
@@ -338,6 +377,10 @@ class SourceProfileTakeSchema(BaseModel):
     take: str
 
 
+class SourceProfileOpinionSchema(BaseModel):
+    opinion: str
+
+
 class SourceProfileTopicSchema(BaseModel):
     topic: str
     count: int
@@ -373,9 +416,11 @@ class SourceProfileAnalysisSchema(BaseModel):
     model: str | None
     input_fingerprint: str | None
     bio: str | None
+    audiences: list[str] | None
     themes: list[str] | None
     writing_style: list[str] | None
     strong_takes: list[SourceProfileTakeSchema] | None
+    opinions: list[SourceProfileOpinionSchema] | None = None
     public_links: list[SourceProfileLinkSchema] | None
     public_contact: list[SourceProfileLinkSchema] | None
     caveats: list[str] | None

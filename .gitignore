@@ -19,5 +19,9 @@ frontend/*.tsbuildinfo
 frontend/vite.config.js
 frontend/vite.config.d.ts
 
+# Browser extension UI
+extension/ui/node_modules/
+extension/ui/*.tsbuildinfo
+
 # Editor
 .vscode/

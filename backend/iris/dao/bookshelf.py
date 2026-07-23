@@ -191,8 +191,8 @@ def create_entry_for_url(
         note=note,
         intent_note=intent_note,
         tags=tags,
-        update_note=True,
-        update_intent_note=True,
+        update_note=note is not None,
+        update_intent_note=intent_note is not None,
     )
 
 

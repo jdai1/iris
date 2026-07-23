@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 from iris.dao.bookshelf import effective_status
-from iris.models import BookshelfCollection, CrawlJob, Document, Source, SourceProfileAnalysis, UserDocumentMapping
-from iris.schemas.api import BookshelfCollectionSchema, BookshelfEntrySchema, CrawlSchema, DocumentSchema, SourceProfileAnalysisSchema, SourceSchema
+from iris.models import BookshelfCollection, CrawlJob, Document, DocumentHighlight, Source, SourceProfileAnalysis, UserDocumentMapping
+from iris.schemas.api import BookshelfCollectionSchema, BookshelfEntrySchema, CrawlSchema, DocumentSchema, HighlightSchema, SourceProfileAnalysisSchema, SourceSchema
 
 
 def dump_source(source: Source) -> SourceSchema:
@@ -49,9 +49,11 @@ def dump_source_profile_analysis(analysis: SourceProfileAnalysis) -> SourceProfi
         model=analysis.model,
         input_fingerprint=analysis.input_fingerprint,
         bio=analysis.bio,
+        audiences=analysis.audiences,
         themes=analysis.themes,
         writing_style=analysis.writing_style,
         strong_takes=analysis.strong_takes,
+        opinions=[{"opinion": item.get("take", "")} for item in analysis.strong_takes or [] if isinstance(item, dict) and item.get("take")],
         public_links=analysis.public_links,
         public_contact=analysis.public_contact,
         caveats=analysis.caveats,
@@ -85,6 +87,18 @@ def dump_bookshelf_collection(collection: BookshelfCollection, entries: list[Boo
         created_at=collection.created_at,
         updated_at=collection.updated_at,
         items=entries,
+    )
+
+
+def dump_highlight(highlight: DocumentHighlight) -> HighlightSchema:
+    return HighlightSchema(
+        id=highlight.id,
+        document_id=highlight.user_document_mapping.document_id,
+        quote=highlight.quote,
+        prefix=highlight.prefix, suffix=highlight.suffix,
+        start_offset=highlight.start_offset, end_offset=highlight.end_offset,
+        comment=highlight.comment, color=highlight.color,
+        created_at=highlight.created_at, updated_at=highlight.updated_at,
     )
 
 

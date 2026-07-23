@@ -44,6 +44,7 @@ def upsert_analysis(
     status: SourceProfileAnalysisStatus,
     display_name: str | None,
     bio: str | None,
+    audiences: list[str] | None,
     themes: list[str] | None,
     writing_style: list[str] | None,
     strong_takes: list[dict] | None,
@@ -60,6 +61,7 @@ def upsert_analysis(
     analysis.status = status
     analysis.display_name = display_name
     analysis.bio = bio
+    analysis.audiences = audiences
     analysis.themes = themes
     analysis.writing_style = writing_style
     analysis.strong_takes = strong_takes

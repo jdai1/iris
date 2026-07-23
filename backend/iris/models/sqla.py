@@ -90,6 +90,7 @@ class SourceProfileAnalysis(Base):
 
     display_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     bio: Mapped[str | None] = mapped_column(Text, nullable=True)
+    audiences: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
     themes: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
     writing_style: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
     strong_takes: Mapped[list[dict] | None] = mapped_column(JSON, nullable=True)

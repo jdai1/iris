@@ -1,0 +1,20 @@
+.iris-highlight { background: rgba(255, 220, 92, .48) !important; color: inherit !important; cursor: pointer; border-bottom: 1px solid rgba(120, 90, 0, .35); }
+.iris-highlight[data-iris-comment="true"] { border-bottom: 2px solid #111; }
+.iris-selection-toolbar, .iris-comment-popover {
+  position: fixed; z-index: 2147483647; box-sizing: border-box; border: 1px solid #d8d8d4;
+  background: #fff; color: #111; box-shadow: 0 12px 30px rgba(0,0,0,.14);
+  font: 12px/1.4 Inter, ui-sans-serif, system-ui, -apple-system, sans-serif;
+}
+.iris-selection-toolbar { display: flex; align-items: center; gap: 0; padding: 4px; }
+.iris-toolbar-brand { display: inline-flex; align-items: center; gap: 6px; padding: 0 9px 0 5px; color: #767676; font-weight: 650; }
+.iris-toolbar-brand::before { content: ""; width: 6px; height: 6px; background: currentColor; }
+.iris-selection-toolbar button, .iris-comment-popover button {
+  min-height: 30px; padding: 0 10px; border: 0; background: #fff; color: #111; font: inherit; cursor: pointer;
+}
+.iris-selection-toolbar button:hover { background: #f5f5f3; }
+.iris-comment-popover { width: 280px; padding: 12px; }
+.iris-comment-popover strong { display: block; overflow: hidden; margin-bottom: 8px; text-overflow: ellipsis; white-space: nowrap; }
+.iris-comment-popover textarea { box-sizing: border-box; width: 100%; min-height: 76px; padding: 8px; resize: vertical; border: 1px solid #ddd; border-radius: 0; font: inherit; }
+.iris-comment-actions { display: flex; justify-content: space-between; margin-top: 8px; }
+.iris-comment-actions .iris-delete { color: #a12d24; }
+.iris-toast { position: fixed; right: 18px; bottom: 18px; z-index: 2147483647; padding: 9px 12px; border: 1px solid #ddd; background: #fff; color: #111; font: 12px Inter, system-ui, sans-serif; box-shadow: 0 10px 24px rgba(0,0,0,.1); }

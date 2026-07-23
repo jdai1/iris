@@ -19,6 +19,7 @@ export function ProfileAnalysisCard({ analysis }: { analysis: SourceProfileAnaly
   return (
     <Box className="profile-analysis-card" display="grid" gap="4">
       {analysis.bio && <Text className="profile-bio" color="fg.default" lineHeight="1.6">{analysis.bio}</Text>}
+      <ProfileChipSection title="Audience" items={analysis.audiences ?? []} />
       <ProfileChipSection title="Writes about" items={themes} />
       <ProfileTakeSection takes={analysis.strong_takes ?? []} />
       <ProfileLinkSection title="Links" links={links} />

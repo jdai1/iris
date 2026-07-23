@@ -268,6 +268,7 @@ export interface SourceProfileAnalysis {
   model: string | null;
   input_fingerprint: string | null;
   bio: string | null;
+  audiences: string[] | null;
   themes: string[] | null;
   writing_style: string[] | null;
   strong_takes: Array<{ take: string }> | null;

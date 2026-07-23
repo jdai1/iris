@@ -1,0 +1,40 @@
+{
+  "manifest_version": 3,
+  "name": "Save to Iris",
+  "version": "0.5.0",
+  "description": "Save the current page and selected text to your Iris bookshelf.",
+  "permissions": ["activeTab", "scripting", "storage"],
+  "host_permissions": [
+    "http://localhost/*",
+    "http://127.0.0.1/*",
+    "https://securetoken.googleapis.com/*"
+  ],
+  "externally_connectable": {
+    "matches": ["http://localhost/*"]
+  },
+  "action": {
+    "default_title": "Save to Iris",
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/iris-16.png",
+      "32": "icons/iris-32.png",
+      "48": "icons/iris-48.png"
+    }
+  },
+  "icons": {
+    "16": "icons/iris-16.png",
+    "32": "icons/iris-32.png",
+    "48": "icons/iris-48.png",
+    "128": "icons/iris-128.png"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [{
+    "matches": ["http://*/*", "https://*/*"],
+    "js": ["anchoring.js", "content.js"],
+    "css": ["content.css"],
+    "run_at": "document_idle"
+  }],
+  "options_page": "settings.html"
+}

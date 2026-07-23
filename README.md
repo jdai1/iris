@@ -52,6 +52,10 @@ npm run dev
 
 The frontend expects the API at `http://127.0.0.1:8000` unless `VITE_API_BASE` is set.
 
+## Browser extension
+
+Load `extension/` as an unpacked Chrome/Arc extension to capture pages, edit bookshelf state, and persist in-page highlights and comments. See `docs/browser-extension.md` for architecture, privacy boundaries, setup, and validation.
+
 To enable Google OAuth, create a Firebase web app in the same Firebase project where
 Google is enabled under Authentication > Sign-in method, then set these frontend
 environment variables:
