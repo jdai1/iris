@@ -313,11 +313,6 @@ class EmbeddingMapSchema(BaseModel):
     projection_method: str
 
 
-class EmbeddingNeighborSchema(BaseModel):
-    document: DocumentSchema
-    similarity: float
-
-
 class CrawlSchema(BaseModel):
     id: int
     source_id: int

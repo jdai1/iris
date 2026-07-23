@@ -50,7 +50,6 @@ from iris.schemas.api import (
     DocumentOutgoingLinkSchema,
     DocumentSchema,
     DirectorySourceSchema,
-    EmbeddingNeighborSchema,
     EmbeddingMapSchema,
     GraphEdgeSchema,
     GraphNodeSchema,
@@ -1018,21 +1017,6 @@ def embedding_map(
     _bound_session=Depends(get_session),
 ) -> EmbeddingMapSchema:
     return admin.get_embedding_map(limit=limit)
-
-
-@app.get("/api/documents/{document_uuid}/embedding-neighbors", response_model=list[EmbeddingNeighborSchema])
-def embedding_neighbors(
-    document_uuid: str,
-    limit: int = 5,
-    _bound_session=Depends(get_session),
-) -> list[EmbeddingNeighborSchema]:
-    document = _resolve_document_uuid(document_uuid)
-    if document is None:
-        raise HTTPException(status_code=404, detail="Document not found")
-    neighbors = admin.get_embedding_neighbors(document.id, limit=limit)
-    if neighbors is None:
-        raise HTTPException(status_code=404, detail="Document embedding not found")
-    return neighbors
 
 
 @app.get("/api/graph", response_model=GraphSchema)

@@ -37,7 +37,7 @@
   background: transparent;
   color: var(--text-subtle);
   padding: 0 2px;
-  font-size: 14px;
+  font-size: 12px;
 }
 
 .graph-toolbar .segmented button.active {
@@ -232,6 +232,7 @@
   background: var(--glass-bg);
   color: var(--text-muted);
   padding: 0 8px;
+  font-size: 12px;
 }
 
 .graph-panel-tab {
@@ -246,7 +247,7 @@
 
 .graph-panel h3 {
   margin: 0;
-  font-size: 18px;
+  font-size: 16px;
   font-weight: 500;
   line-height: 1.2;
 }
@@ -292,7 +293,7 @@
 .graph-panel p {
   margin: 0;
   color: var(--text-muted);
-  font-size: 13px;
+  font-size: 12px;
   line-height: 1.55;
 }
 
@@ -315,6 +316,7 @@
   border: 1px solid var(--border-subtle);
   color: var(--text-muted);
   padding: 4px 7px;
+  font-size: 11px;
 }
 
 .graph-reference-section {
@@ -374,15 +376,15 @@
 
 .graph-reference-copy strong {
   color: var(--text);
-  font-size: 13px;
-  font-weight: 600;
+  font-size: 12px;
+  font-weight: 500;
   line-height: 1.2;
 }
 
 .graph-reference-copy small,
 .graph-reference-empty {
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: 11px;
   line-height: 1.35;
 }
 
@@ -420,6 +422,7 @@
   color: var(--text);
   text-align: left;
   padding: 6px 8px;
+  font-size: 12px;
 }
 
 .graph-matches span,
@@ -431,4 +434,5 @@
 
 .graph-matches small {
   color: var(--text-muted);
+  font-size: 11px;
 }

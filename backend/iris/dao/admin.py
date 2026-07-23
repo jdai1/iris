@@ -10,7 +10,6 @@ from sqlalchemy import desc, func, select
 from sqlalchemy.orm import joinedload, load_only
 
 from iris.dao import db
-from iris.dao import search as search_dao
 from iris.models import CrawlJob, Document, IndexEvent, IndexRun, Link, Source
 from iris.schemas.api import (
     AdminCrawlJobSchema,
@@ -18,9 +17,7 @@ from iris.schemas.api import (
     AdminLatestJobSchema,
     AdminOverviewSchema,
     AdminSourceSchema,
-    DocumentSchema,
     EmbeddingMapDocumentSchema,
-    EmbeddingNeighborSchema,
     EmbeddingMapPointSchema,
     EmbeddingMapSchema,
     HealthCountsSchema,
@@ -28,7 +25,7 @@ from iris.schemas.api import (
 from iris.schemas.enums import CrawlJobStatus, DocumentType, IndexEventType
 from iris.schemas.enums import SourceStatus
 from iris.schemas.indexing import SourceFinishedEventPayload
-from iris.services.ingestion.embedding import cosine, loads_embedding
+from iris.services.ingestion.embedding import loads_embedding
 from iris.services.retrieval.embedding_map import EmbeddingProjection, project_embeddings
 
 
@@ -174,51 +171,6 @@ def get_embedding_map(*, limit: int) -> EmbeddingMapSchema:
         dimensions=dimensions,
         projection_method=projection.method,
     )
-
-
-def get_embedding_neighbors(document_id: int, *, limit: int = 5) -> list[EmbeddingNeighborSchema] | None:
-    """Return nearest essay documents by full-dimensional embedding cosine similarity."""
-    session = db.current_session()
-    selected = session.get(Document, document_id)
-    if not selected or selected.embedding_vector is None:
-        return None
-    try:
-        selected_vector = loads_embedding(selected.embedding_vector)
-    except (TypeError, ValueError, json.JSONDecodeError):
-        return None
-    vector_rows = search_dao.vector_search_documents(selected_vector, limit=limit, exclude_document_id=document_id)
-    if vector_rows:
-        return [
-            EmbeddingNeighborSchema(
-                document=_embedding_neighbor_document(document),
-                similarity=round(score, 4),
-            )
-            for document, score in vector_rows[: max(1, min(limit, 20))]
-        ]
-
-    statement = (
-        select(Document)
-        .options(joinedload(Document.source))
-        .where(Document.id != document_id)
-        .where(Document.embedding_vector.is_not(None))
-        .where(Document.document_type == DocumentType.ESSAY.value)
-    )
-    documents = session.execute(statement.limit(2000)).scalars().all()
-    neighbors: list[EmbeddingNeighborSchema] = []
-    for document in documents:
-        try:
-            vector = loads_embedding(document.embedding_vector)
-        except (TypeError, ValueError, json.JSONDecodeError):
-            continue
-        score = cosine(selected_vector, vector)
-        neighbors.append(
-            EmbeddingNeighborSchema(
-                document=_embedding_neighbor_document(document),
-                similarity=round(score, 4),
-            )
-        )
-    neighbors.sort(key=lambda item: item.similarity, reverse=True)
-    return neighbors[: max(1, min(limit, 20))]
 
 
 def get_admin_sources_page(*, status: str | None, q: str | None, limit: int, offset: int) -> tuple[list[AdminSourceSchema], int]:
@@ -597,26 +549,6 @@ def _embedding_map_document(document: Document) -> EmbeddingMapDocumentSchema:
         document_type=document.document_type,
         title=document.title,
         summary=document.summary,
-        topics=document.topics or [],
-    )
-
-
-def _embedding_neighbor_document(document: Document) -> DocumentSchema:
-    return DocumentSchema(
-        id=document.id,
-        uuid=document.uuid,
-        source_id=document.source_id,
-        source_domain=document.source.canonical_domain,
-        url=document.url,
-        document_type=document.document_type,
-        category=document.category,
-        title=document.title,
-        author=document.author,
-        published_at=document.published_at,
-        summary=document.summary,
-        one_liner=document.one_liner,
-        audience=document.audience,
-        takeaways=document.takeaways or [],
         topics=document.topics or [],
     )
 

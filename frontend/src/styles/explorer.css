@@ -39,7 +39,6 @@
 
 .explorer-controls,
 .explorer-help-card,
-.explorer-panel,
 .explorer-start,
 .explorer-empty {
   position: absolute;
@@ -114,10 +113,12 @@
 .explorer-search-results span {
   min-width: 0;
   color: var(--text);
+  font-size: 13px;
 }
 
 .explorer-search-results small {
   color: var(--text-subtle);
+  font-size: 11px;
 }
 
 .explorer-crosshair {
@@ -210,8 +211,8 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  min-height: 52px;
-  padding: 9px 18px;
+  min-height: 46px;
+  padding: 7px 14px;
   border: 0;
   background: var(--bg-raised);
   box-shadow: none;
@@ -223,18 +224,23 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 10px;
+  gap: 2px;
+  min-height: 32px;
+  padding: 3px 5px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: var(--bg-soft);
   color: var(--text-subtle);
-  font-size: 13px;
+  font-size: 11px;
   font-weight: 400;
 }
 
 .explorer-controls span {
   display: inline-flex;
   align-items: center;
-  gap: 7px;
-  min-height: 28px;
-  padding: 0 8px;
+  gap: 5px;
+  min-height: 24px;
+  padding: 0 6px;
   border: 1px solid transparent;
   background: transparent;
   color: var(--text-subtle);
@@ -251,14 +257,16 @@ kbd {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 19px;
-  min-height: 19px;
-  padding: 0 5px;
+  min-width: 18px;
+  min-height: 18px;
+  padding: 0 4px;
   border: 1px solid var(--border);
+  border-radius: 4px;
   background: var(--bg-raised);
   color: var(--text-subtle);
   font: inherit;
-  font-size: 12px;
+  font-size: 10px;
+  line-height: 1;
 }
 
 .explorer-help {
@@ -268,7 +276,7 @@ kbd {
   border-color: transparent;
   background: transparent;
   color: var(--text-subtle);
-  font-size: 13px;
+  font-size: 11px;
   font-weight: 400;
 }
 
@@ -288,136 +296,6 @@ kbd {
 
 .explorer-tooltip span {
   color: var(--text-subtle);
-}
-
-.explorer-panel {
-  top: 18px;
-  right: 18px;
-  z-index: 4;
-  width: clamp(340px, 31vw, 560px);
-  max-height: calc(100% - 36px);
-  resize: horizontal;
-  overflow: auto;
-  padding: 18px 18px 16px;
-  border: 1px solid var(--glass-border);
-  background: var(--glass-bg);
-  box-shadow: var(--shadow-panel);
-  backdrop-filter: blur(10px);
-}
-
-.explorer-panel-title {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 28px;
-  gap: 10px;
-  align-items: start;
-  margin: 10px 0;
-}
-
-.explorer-panel-title h2 {
-  margin: 0;
-  font-size: 18px;
-  line-height: 1.25;
-  font-weight: 500;
-}
-
-.explorer-panel-title a {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  color: var(--accent);
-  text-decoration: none;
-}
-
-.explorer-panel-title a:hover {
-  background: var(--bg-hover);
-  color: var(--accent-hover);
-}
-
-.explorer-panel p {
-  margin: 0 0 12px;
-  color: var(--text-muted);
-  font-size: 13px;
-  line-height: 1.65;
-}
-
-.explorer-panel .document-meta,
-.explorer-panel .topics {
-  color: var(--text-subtle);
-}
-
-.explorer-panel .topics {
-  display: flex;
-  flex-wrap: nowrap;
-  gap: 6px;
-  overflow-x: auto;
-  overflow-y: hidden;
-  padding-bottom: 6px;
-  scrollbar-width: none;
-  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 26px), transparent);
-  mask-image: linear-gradient(to right, #000 calc(100% - 26px), transparent);
-}
-
-.explorer-panel .topics::-webkit-scrollbar {
-  display: none;
-}
-
-.explorer-panel .topics span {
-  flex: 0 0 auto;
-  border-color: var(--border);
-  background: var(--bg-raised);
-  color: var(--text-muted);
-}
-
-.embedding-neighborhood {
-  display: grid;
-  gap: 7px;
-  margin: 14px 0;
-  padding-top: 12px;
-  border-top: 1px solid var(--border-subtle);
-}
-
-.embedding-neighborhood > div {
-  display: grid;
-  gap: 3px;
-}
-
-.embedding-neighborhood strong {
-  color: var(--text);
-  font-size: 13px;
-}
-
-.embedding-neighborhood > div span {
-  color: var(--text-subtle);
-  font-size: 12px;
-  line-height: 1.35;
-}
-
-.embedding-neighborhood button {
-  display: grid;
-  gap: 3px;
-  width: 100%;
-  min-height: 46px;
-  padding: 7px 8px;
-  border: 0;
-  border-bottom: 1px solid var(--border-subtle);
-  background: var(--bg-raised);
-  color: var(--text);
-  text-align: left;
-}
-
-.embedding-neighborhood button span,
-.embedding-neighborhood button small {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.embedding-neighborhood button small {
-  color: var(--text-subtle);
-  font-size: 12px;
 }
 
 .explorer-help-card {
