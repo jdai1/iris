@@ -149,11 +149,17 @@ export function DocumentDetailDrawer({
           <Users size={12} />
           Directory
         </a>
-        <a href={`/graph?document=${document.uuid}`} onClick={(event) => followInternalLink(event, `/graph?document=${document.uuid}`)}>
+        <a
+          href={`/directory?mode=graph&document=${document.uuid}`}
+          onClick={(event) => followInternalLink(event, `/directory?mode=graph&document=${document.uuid}`)}
+        >
           <GitFork size={12} />
           Graph
         </a>
-        <a href={`/explore?document=${document.uuid}`} onClick={(event) => followInternalLink(event, `/explore?document=${document.uuid}`)}>
+        <a
+          href={`/directory?mode=explore&document=${document.uuid}`}
+          onClick={(event) => followInternalLink(event, `/directory?mode=explore&document=${document.uuid}`)}
+        >
           <Orbit size={12} />
           Explore
         </a>

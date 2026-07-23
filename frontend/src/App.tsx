@@ -32,7 +32,9 @@ function IrisApp({ currentUser, onSignOut }: { currentUser: IrisUser | null; onS
       : directoryModeFromLocation(window.location.pathname, window.location.search),
   );
   const [profileTarget, setProfileTarget] = useState<ProfileTarget>(() =>
-    typeof window === 'undefined' ? null : profileTargetFromPath(window.location.pathname),
+    typeof window === 'undefined'
+      ? null
+      : profileTargetFromPath(window.location.pathname, window.location.search),
   );
   const [documentUuid, setDocumentUuid] = useState<string | null>(() =>
     typeof window === 'undefined' ? null : documentUuidFromPath(window.location.pathname),
@@ -48,13 +50,20 @@ function IrisApp({ currentUser, onSignOut }: { currentUser: IrisUser | null; onS
   useEffect(() => {
     if (documentUuid !== null) return;
     window.localStorage.setItem(VIEW_STORAGE_KEY, view);
-    const nextPath = view === 'directory'
-      ? directoryMode === 'sources' && profileTarget?.domain
-        ? `/directory/${encodeURIComponent(profileTarget.domain)}`
-        : directoryMode === 'sources'
-          ? '/directory'
-          : `/directory?mode=${directoryMode}`
-      : viewPaths[view];
+    let nextPath = viewPaths[view];
+    if (view === 'directory') {
+      if (directoryMode === 'sources') {
+        nextPath = profileTarget?.domain
+          ? `/directory/${encodeURIComponent(profileTarget.domain)}`
+          : '/directory';
+      } else {
+        const params = new URLSearchParams({ mode: directoryMode });
+        const focusedDocument = new URLSearchParams(window.location.search).get('document');
+        if (focusedDocument) params.set('document', focusedDocument);
+        if (profileTarget?.domain) params.set('domain', profileTarget.domain);
+        nextPath = `/directory?${params.toString()}`;
+      }
+    }
     const currentPath = view === 'directory'
       ? `${window.location.pathname}${window.location.search}`
       : window.location.pathname;
@@ -75,7 +84,7 @@ function IrisApp({ currentUser, onSignOut }: { currentUser: IrisUser | null; onS
       setDocumentReason(nextDocumentUuid === null ? null : readDocumentReason(window.history.state));
       const nextView = viewFromPath(window.location.pathname) ?? 'search';
       setDirectoryMode(directoryModeFromLocation(window.location.pathname, window.location.search));
-      setProfileTarget(profileTargetFromPath(window.location.pathname));
+      setProfileTarget(profileTargetFromPath(window.location.pathname, window.location.search));
       applyingPopState.current = true;
       setView(nextView);
     }

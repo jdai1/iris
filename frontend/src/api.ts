@@ -74,11 +74,24 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
     }
   }
   if (!response.ok) {
-    const detail = await response.text();
-    throw new Error(detail || `Request failed: ${response.status}: ${url}`);
+    throw new Error(await responseErrorMessage(response, `Request failed: ${response.status}: ${url}`));
   }
   if (response.status === 204) return undefined as T;
   return response.json() as Promise<T>;
+}
+
+async function responseErrorMessage(response: Response, fallback: string): Promise<string> {
+  const raw = await response.text();
+  if (!raw) return fallback;
+  try {
+    const payload = JSON.parse(raw) as { detail?: unknown };
+    if (typeof payload.detail === 'string' && payload.detail.trim()) {
+      return payload.detail;
+    }
+  } catch {
+    // Preserve non-JSON error bodies as-is.
+  }
+  return raw;
 }
 
 export function getMe(): Promise<User> {
@@ -214,8 +227,7 @@ export async function streamChatSearch(
     signal,
   });
   if (!response.ok || !response.body) {
-    const detail = await response.text();
-    throw new Error(detail || `Request failed: ${response.status}`);
+    throw new Error(await responseErrorMessage(response, `Request failed: ${response.status}`));
   }
 
   const reader = response.body.getReader();
