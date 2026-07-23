@@ -15,7 +15,51 @@ export interface User {
   email: string;
   display_name: string | null;
   photo_url: string | null;
+  username?: string | null;
   is_admin: boolean;
+}
+
+export interface UserWebsite {
+  id: number;
+  source_id: number;
+  url: string;
+  canonical_domain: string;
+  label: string | null;
+  source_status: string;
+  created_at: string;
+}
+
+export type RelationshipState =
+  | 'self'
+  | 'none'
+  | 'requested_outgoing'
+  | 'requested_incoming'
+  | 'connected';
+
+export interface Person {
+  user_id: number;
+  username: string;
+  display_name: string | null;
+  photo_url: string | null;
+  relationship: RelationshipState;
+}
+
+export interface UserProfile extends Person {
+  bio: string | null;
+  websites: UserWebsite[];
+}
+
+export interface Friendship {
+  id: number;
+  status: 'requested' | 'connected';
+  created_at: string;
+  updated_at: string;
+  person: Person;
+}
+
+export interface FriendRequests {
+  incoming: Friendship[];
+  outgoing: Friendship[];
 }
 
 export interface Document {
@@ -180,6 +224,14 @@ export interface BookshelfEntry {
   read_at: string | null;
   archived_at: string | null;
   favorited_at: string | null;
+}
+
+export interface FriendFeedItem {
+  person: Person;
+  document: Document;
+  status: BookshelfStatus;
+  favorited: boolean;
+  activity_at: string;
 }
 
 export interface BookshelfCollection {

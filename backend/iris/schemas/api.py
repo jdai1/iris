@@ -161,6 +161,14 @@ class DocumentSchema(BaseModel):
     bookshelf_favorited: bool = False
 
 
+class FriendFeedItemSchema(BaseModel):
+    person: PersonSchema
+    document: DocumentSchema
+    status: BookshelfStatus
+    favorited: bool
+    activity_at: datetime
+
+
 class DocumentOutgoingLinkSchema(BaseModel):
     target_url: str
     target_domain: str | None

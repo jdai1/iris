@@ -8,6 +8,7 @@ import { AuthGate } from './auth';
 import { AdminView } from './views/AdminView';
 import { BookshelfView } from './views/BookshelfView';
 import { DirectoryView } from './views/DirectoryView';
+import { PeopleView } from './views/PeopleView';
 import { SearchView } from './views/SearchView';
 import { documentParentPath, documentPath, documentUuidFromPath, initialView, navigateTo, profileTargetFromPath, VIEW_STORAGE_KEY, viewFromPath, viewPaths, type ProfileTarget, type View } from './app/navigation';
 import { DocumentRouteDrawer } from './components/DocumentRouteDrawer';
@@ -118,9 +119,10 @@ function IrisApp({ currentUser, onSignOut }: { currentUser: IrisUser | null; onS
   const navItems: Array<{ view: View; label: string; icon: ReactNode; adminOnly?: boolean }> = [
     { view: 'search', label: 'Search', icon: <Search size={15} /> },
     { view: 'bookshelf', label: 'Bookshelf', icon: <BookOpen size={15} /> },
+    { view: 'people', label: 'People', icon: <Users size={15} /> },
     { view: 'explore', label: 'Explore', icon: <Orbit size={15} /> },
     { view: 'graph', label: 'Graph', icon: <GitFork size={15} /> },
-    { view: 'directory', label: 'Directory', icon: <Users size={15} /> },
+    { view: 'directory', label: 'Directory', icon: <Orbit size={15} /> },
     { view: 'admin', label: 'Admin', icon: <LayoutDashboard size={15} />, adminOnly: true },
   ];
   const visibleNavItems = navItems.filter((item) => !item.adminOnly || currentUser?.is_admin);
@@ -207,6 +209,7 @@ function IrisApp({ currentUser, onSignOut }: { currentUser: IrisUser | null; onS
           setDocumentUuid(null);
           setView('search');
         }} />}
+        {view === 'people' && <PeopleView />}
         {view === 'directory' && <DirectoryView target={profileTarget} onOpenProfile={openProfile} onDirectoryRoot={openDirectoryRoot} />}
         {view === 'explore' && (
           <Suspense fallback={null}>
