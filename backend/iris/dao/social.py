@@ -4,12 +4,21 @@ from __future__ import annotations
 
 import re
 
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import joinedload
 
 from iris.dao import db
 from iris.dao.sources import get_or_create_source
-from iris.models import Friendship, FriendshipStatus, User, UserProfile, UserWebsite
+from iris.models import (
+    BookshelfStatus,
+    Document,
+    Friendship,
+    FriendshipStatus,
+    User,
+    UserDocumentMapping,
+    UserProfile,
+    UserWebsite,
+)
 from iris.services.common.url_utils import is_valid_http_url, normalize_url
 
 
@@ -271,3 +280,59 @@ def get_visible_profile(viewer: User, username: str) -> UserProfile | None:
     if profile.user_id == viewer.id or are_connected(viewer.id, profile.user_id):
         return profile
     return None
+
+
+def friend_feed(
+    user: User,
+    *,
+    limit: int = 50,
+    offset: int = 0,
+) -> tuple[list[tuple[UserDocumentMapping, User]], int]:
+    """Return accepted friends' saved/read activity without private annotations."""
+    session = db.current_session()
+    friend_ids = _connected_user_ids(user)
+    if not friend_ids:
+        return [], 0
+    filters = (
+        UserDocumentMapping.user_id.in_(friend_ids),
+        UserDocumentMapping.bookshelf_status.in_(
+            [BookshelfStatus.SAVED.value, BookshelfStatus.READ.value]
+        ),
+        UserDocumentMapping.dismissed_at.is_(None),
+    )
+    total = int(
+        session.scalar(
+            select(func.count(UserDocumentMapping.id)).where(*filters)
+        )
+        or 0
+    )
+    rows = session.execute(
+        select(UserDocumentMapping, User)
+        .join(User, User.id == UserDocumentMapping.user_id)
+        .options(
+            joinedload(UserDocumentMapping.document).joinedload(Document.source)
+        )
+        .where(*filters)
+        .order_by(
+            func.coalesce(
+                UserDocumentMapping.read_at,
+                UserDocumentMapping.first_seen_at,
+                UserDocumentMapping.updated_at,
+            ).desc(),
+            UserDocumentMapping.id.desc(),
+        )
+        .limit(max(1, min(limit, 100)))
+        .offset(max(offset, 0))
+    ).all()
+    return [(mapping, friend) for mapping, friend in rows], total
+
+
+def _connected_user_ids(user: User) -> list[int]:
+    return [
+        (
+            friendship.recipient_id
+            if friendship.requester_id == user.id
+            else friendship.requester_id
+        )
+        for friendship in connected_friendships(user)
+    ]

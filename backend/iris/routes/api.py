@@ -63,6 +63,7 @@ from iris.schemas.api import (
     DirectorySourceSchema,
     EmbeddingMapSchema,
     FriendRequestCreateSchema,
+    FriendFeedItemSchema,
     FriendRequestsSchema,
     FriendshipSchema,
     GraphEdgeSchema,
@@ -325,6 +326,31 @@ def list_friends(
         _dump_friendship(user, friendship)
         for friendship in social_dao.connected_friendships(user)
     ]
+
+
+@app.get("/api/friends/feed", response_model=PageSchema[FriendFeedItemSchema])
+def friends_feed(
+    limit: int = 50,
+    offset: int = 0,
+    _bound_session=Depends(get_session),
+    user: User = Depends(get_current_user),
+) -> PageSchema[FriendFeedItemSchema]:
+    rows, total = social_dao.friend_feed(user, limit=limit, offset=offset)
+    items = [
+        FriendFeedItemSchema(
+            person=_dump_person(user, friend),
+            document=_dump_document_for_user(mapping.document, user),
+            status=mapping.bookshelf_status,
+            favorited=mapping.favorited_at is not None,
+            activity_at=(
+                mapping.read_at
+                or mapping.first_seen_at
+                or mapping.updated_at
+            ),
+        )
+        for mapping, friend in rows
+    ]
+    return _page_response(items, total, limit, offset)
 
 
 @app.get("/api/friends/requests", response_model=FriendRequestsSchema)
