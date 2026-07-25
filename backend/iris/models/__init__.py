@@ -7,6 +7,7 @@ from iris.schemas.enums import (
     BookshelfStatus,
     CategoryAssignmentSource,
     CategoryStatus,
+    FriendshipStatus,
     DocumentCategory,
     DocumentType,
     IndexEventType,
@@ -35,9 +36,12 @@ from iris.models.user import (
     DocumentCategoryAssignment,
     DocumentHighlight,
     DocumentTag,
+    Friendship,
     Tag,
     User,
     UserDocumentMapping,
+    UserProfile,
+    UserWebsite,
 )
 
 __all__ = [
@@ -62,6 +66,8 @@ __all__ = [
     "DocumentHighlight",
     "DocumentTag",
     "DocumentType",
+    "Friendship",
+    "FriendshipStatus",
     "IndexEvent",
     "IndexEventType",
     "IndexMode",
@@ -76,4 +82,6 @@ __all__ = [
     "TagScope",
     "User",
     "UserDocumentMapping",
+    "UserProfile",
+    "UserWebsite",
 ]

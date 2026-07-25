@@ -14,6 +14,7 @@ from iris.schemas.enums import (
     BookshelfStatus,
     CategoryAssignmentSource,
     CategoryStatus,
+    FriendshipStatus,
     TagScope,
 )
 
@@ -45,6 +46,82 @@ class User(Base):
     agent_conversations: Mapped[list["AgentConversation"]] = relationship(
         back_populates="user", cascade="all, delete-orphan"
     )
+    profile: Mapped["UserProfile | None"] = relationship(
+        back_populates="user", cascade="all, delete-orphan", uselist=False
+    )
+
+
+class UserProfile(Base):
+    """A private-by-default profile visible to the owner and connected friends."""
+
+    __tablename__ = "user_profiles"
+    __table_args__ = (
+        UniqueConstraint("user_id", name="uq_user_profiles_user"),
+        UniqueConstraint("username", name="uq_user_profiles_username"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
+
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(default=utcnow, onupdate=utcnow)
+
+    username: Mapped[str] = mapped_column(String(80), nullable=False, unique=True, index=True)
+    bio: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    user: Mapped[User] = relationship(back_populates="profile")
+    websites: Mapped[list["UserWebsite"]] = relationship(
+        back_populates="profile", cascade="all, delete-orphan", order_by="UserWebsite.id"
+    )
+
+
+class UserWebsite(Base):
+    """A personal website attached to a user profile without ownership verification."""
+
+    __tablename__ = "user_websites"
+    __table_args__ = (
+        UniqueConstraint("profile_id", "source_id", name="uq_user_websites_profile_source"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    profile_id: Mapped[int] = mapped_column(ForeignKey("user_profiles.id"), nullable=False, index=True)
+    source_id: Mapped[int] = mapped_column(ForeignKey("sources.id"), nullable=False, index=True)
+
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+    label: Mapped[str | None] = mapped_column(String(120), nullable=True)
+
+    profile: Mapped[UserProfile] = relationship(back_populates="websites")
+    source: Mapped["Source"] = relationship(foreign_keys=[source_id])
+
+
+class Friendship(Base):
+    """A reciprocal user relationship that begins as a directed request."""
+
+    __tablename__ = "friendships"
+    __table_args__ = (
+        UniqueConstraint("pair_key", name="uq_friendships_pair"),
+        Index("idx_friendships_requester_status", "requester_id", "status"),
+        Index("idx_friendships_recipient_status", "recipient_id", "status"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    requester_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
+    recipient_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
+    pair_key: Mapped[str] = mapped_column(String(80), nullable=False, unique=True)
+
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(default=utcnow, onupdate=utcnow)
+    status: Mapped[FriendshipStatus] = mapped_column(
+        enum_type(FriendshipStatus, "friendship_status"),
+        default=FriendshipStatus.REQUESTED,
+        nullable=False,
+        index=True,
+    )
+
+    requester: Mapped[User] = relationship(foreign_keys=[requester_id])
+    recipient: Mapped[User] = relationship(foreign_keys=[recipient_id])
+
+
 class UserDocumentMapping(Base):
     """Per-user state for one document."""
 
