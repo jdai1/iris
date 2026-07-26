@@ -31,19 +31,20 @@ import type {
   UserProfile,
   UserWebsite,
 } from './types';
+import { auth } from './firebase';
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? 'http://127.0.0.1:8000';
 
 const apiCache = new Map<string, Promise<unknown>>();
-let authTokenProvider: (() => Promise<string | null>) | null = null;
 
-export function setAuthTokenProvider(provider: (() => Promise<string | null>) | null) {
-  authTokenProvider = provider;
+export function clearApiCache() {
   apiCache.clear();
 }
 
-async function requestHeaders(headers?: HeadersInit): Promise<HeadersInit> {
-  const token = authTokenProvider ? await authTokenProvider() : null;
+async function requestHeaders(headers?: HeadersInit, forceRefresh = false): Promise<HeadersInit> {
+  const token = auth?.currentUser
+    ? await auth.currentUser.getIdToken(forceRefresh)
+    : null;
   return {
     'Content-Type': 'application/json',
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
@@ -71,6 +72,12 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
       const message = retryErr instanceof Error ? retryErr.message : 'request failed';
       throw new Error(`${message}: ${url}`);
     }
+  }
+  if (response.status === 401 && auth?.currentUser) {
+    response = await fetch(url, {
+      ...options,
+      headers: await requestHeaders(options?.headers, true),
+    });
   }
   if (!response.ok) {
     throw new Error(await responseErrorMessage(response, `Request failed: ${response.status}: ${url}`));

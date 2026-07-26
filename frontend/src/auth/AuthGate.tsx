@@ -1,7 +1,7 @@
 import { ReactNode, useEffect, useState } from 'react';
 import type { User as FirebaseUser } from 'firebase/auth';
 import { getRedirectResult, onAuthStateChanged, signInWithPopup, signInWithRedirect, signOut } from 'firebase/auth';
-import { getMe, setAuthTokenProvider } from '../api';
+import { clearApiCache, getMe } from '../api';
 import { auth, firebaseApiKey, firebaseEnabled, googleProvider } from '../firebase';
 import type { User as IrisUser } from '../types';
 import { AuthScreen } from './AuthScreen';
@@ -75,25 +75,21 @@ export function AuthGate({ children }: AuthGateProps) {
   }, [firebaseUser]);
 
   useEffect(() => {
-    if (!auth) {
-      setAuthTokenProvider(null);
-      return;
-    }
+    if (!auth) return;
     getRedirectResult(auth).catch((err) => {
       setAuthError(readAuthError(err, 'Sign-in failed'));
       setSigningIn(false);
     });
     const unsubscribe = onAuthStateChanged(auth, (user) => {
+      clearApiCache();
       setFirebaseUser(user);
       setCurrentUser(null);
       if (user) setAuthError(null);
       setAuthReady(true);
       setSigningIn(false);
-      setAuthTokenProvider(user ? () => user.getIdToken() : null);
     });
     return () => {
       unsubscribe();
-      setAuthTokenProvider(null);
     };
   }, []);
 
