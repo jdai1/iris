@@ -56,7 +56,7 @@ function explorerTheme(mode: ThemeMode) {
     bg: dark ? '#17171a' : '#ffffff',
     gridPrimary: dark ? '#3a3a41' : '#dedede',
     gridSecondary: dark ? '#26262b' : '#eeeeee',
-    highlightOuter: dark ? '#818cf8' : '#4f46e5',
+    highlightOuter: dark ? '#a78bfa' : '#7c3aed',
     highlightInner: dark ? 'rgba(15, 15, 17, 0.82)' : 'rgba(255, 255, 255, 0.82)',
     hoverOuter: dark ? 'rgba(255, 255, 255, 0.42)' : 'rgba(17, 17, 17, 0.42)',
     hoverInner: dark ? 'rgba(15, 15, 17, 0.82)' : 'rgba(255, 255, 255, 0.82)',
