@@ -15,6 +15,7 @@ import {
 import { emptyPage } from '../app/paging';
 import { collectionIdFromSearch, documentPath, navigateTo } from '../app/navigation';
 import { DenseDocumentTable } from '../components/DenseDocumentTable';
+import { OverflowText } from '../components/OverflowText';
 import { Button } from '../components/ui';
 import type { BookshelfCollection, BookshelfEntry, BookshelfStatus, SearchResult } from '../types';
 
@@ -444,7 +445,7 @@ export function BookshelfView({ onDiscover }: { onDiscover: () => void }) {
               type="button"
               onClick={() => setActiveView(`collection:${collection.id}`)}
             >
-              <span>{collection.name}</span>
+              <OverflowText>{collection.name}</OverflowText>
               <small>{collection.items.length}</small>
             </button>
           ))}

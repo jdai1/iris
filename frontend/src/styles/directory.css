@@ -63,6 +63,7 @@
 
 .directory-profile-page {
   grid-template-rows: auto auto minmax(560px, auto);
+  align-content: start;
   gap: 0;
   min-height: min(720px, calc(100vh - 104px));
 }
@@ -242,6 +243,7 @@
   align-items: center;
   gap: 7px;
   flex: 0 0 auto;
+  width: 112px;
   min-height: 41px;
   border: 0;
   border-right: 1px solid var(--border-subtle);
@@ -268,11 +270,15 @@
 }
 
 .source-view-menu-item small {
-  min-width: 18px;
+  min-width: 3ch;
   color: var(--text-faint);
   font-size: 10px;
   font-weight: 600;
   text-align: right;
+}
+
+.source-view-count-placeholder {
+  visibility: hidden;
 }
 
 .source-view-body {
@@ -291,7 +297,6 @@
   grid-template-columns: minmax(0, 1fr) minmax(260px, 340px);
   gap: clamp(28px, 4vw, 56px);
   min-height: 480px;
-  padding-top: 8px;
 }
 
 .source-profile-skeleton-main,
@@ -315,7 +320,7 @@
 }
 
 .source-profile-skeleton-side {
-  padding-top: 4px;
+  padding-top: 0;
 }
 
 .source-visual-panel {

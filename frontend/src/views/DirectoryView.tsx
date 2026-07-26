@@ -76,10 +76,6 @@ export function DirectoryView({
   );
 
   useEffect(() => {
-    if (activeProfileTab === 'collections' && profileCollectionGroups.length === 0) setActiveProfileTab('profile');
-  }, [activeProfileTab, profileCollectionGroups.length]);
-
-  useEffect(() => {
     setActiveProfileTab('profile');
     if (target) {
       setQuery(target.domain);
@@ -337,15 +333,13 @@ export function DirectoryView({
               count={profileLoading ? null : documentsPage.total}
               onClick={() => setActiveProfileTab('essays')}
             />
-            {profileCollectionGroups.length > 0 && (
-              <SourceViewButton
-                active={activeProfileTab === 'collections'}
-                icon={<Folder size={14} />}
-                label="Collections"
-                count={profileCollectionGroups.length}
-                onClick={() => setActiveProfileTab('collections')}
-              />
-            )}
+            <SourceViewButton
+              active={activeProfileTab === 'collections'}
+              icon={<Folder size={14} />}
+              label="Collections"
+              count={profileLoading ? null : profileCollectionGroups.length}
+              onClick={() => setActiveProfileTab('collections')}
+            />
             <SourceViewButton
               active={activeProfileTab === 'explore'}
               icon={<Orbit size={14} />}
@@ -423,7 +417,11 @@ function SourceViewButton({
     >
       {icon}
       <span>{label}</span>
-      {typeof count === 'number' && <small>{count}</small>}
+      {count !== undefined && (
+        <small className={typeof count === 'number' ? undefined : 'source-view-count-placeholder'} aria-hidden={typeof count !== 'number'}>
+          {typeof count === 'number' ? count : '000'}
+        </small>
+      )}
     </button>
   );
 }

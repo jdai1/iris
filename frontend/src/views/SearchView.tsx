@@ -548,45 +548,51 @@ function SearchTrace({
   steps: AgentStep[];
   onOpenDocument: (document: AgentInspectedDocument) => void;
 }) {
+  const [traceOpen, setTraceOpen] = useState(true);
   const inspectedCount = steps.reduce((total, step) => total + (step.documents?.length ?? 0), 0);
   return (
-    <details className="chat-activity" open>
+    <details className="chat-activity" open={traceOpen} onToggle={(event) => setTraceOpen(event.currentTarget.open)}>
       <summary>
         <span>Search process</span>
         <small>{steps.length} {steps.length === 1 ? 'query' : 'queries'} · {inspectedCount} inspected</small>
       </summary>
       <div className="chat-activity-body">
         {steps.map((step, index) => (
-          <section className="search-trace-step" key={`${step.kind}-${step.title}-${step.query}-${index}`}>
-            <div className="search-trace-heading">
+          <details className="search-trace-step" key={`${step.kind}-${step.title}-${step.query}-${index}`}>
+            <summary className="search-trace-heading">
               <span className="search-trace-icon">{traceIcon(step)}</span>
-              <strong>{traceTitle(step)}</strong>
+              <span className="search-trace-summary-copy">
+                <strong>{traceTitle(step)}</strong>
+                {step.query && !isInternalDocumentQuery(step) && <small>{step.query}</small>}
+              </span>
               {typeof step.hits === 'number' && <small>{step.hits} found</small>}
+            </summary>
+            <div className="search-trace-detail">
+              {step.query && !isInternalDocumentQuery(step) && (
+                <code className="search-trace-query">{step.query}</code>
+              )}
+              {step.documents?.length > 0 && (
+                <div className="search-trace-documents">
+                  {step.documents.map((document, documentIndex) => (
+                    <button
+                      key={`${document.uuid}-${documentIndex}`}
+                      type="button"
+                      onClick={() => onOpenDocument(document)}
+                    >
+                      <span>
+                        <strong>{document.title}</strong>
+                        <small>{document.source_domain}</small>
+                      </span>
+                      <em>{document.reason}</em>
+                    </button>
+                  ))}
+                </div>
+              )}
+              {step.documents?.length === 0 && step.detail && (
+                <p className="search-trace-empty">{step.detail}</p>
+              )}
             </div>
-            {step.query && !isInternalDocumentQuery(step) && (
-              <code className="search-trace-query">{step.query}</code>
-            )}
-            {step.documents?.length > 0 && (
-              <div className="search-trace-documents">
-                {step.documents.map((document, documentIndex) => (
-                  <button
-                    key={`${document.uuid}-${documentIndex}`}
-                    type="button"
-                    onClick={() => onOpenDocument(document)}
-                  >
-                    <span>
-                      <strong>{document.title}</strong>
-                      <small>{document.source_domain}</small>
-                    </span>
-                    <em>{document.reason}</em>
-                  </button>
-                ))}
-              </div>
-            )}
-            {step.documents?.length === 0 && step.detail && (
-              <p className="search-trace-empty">{step.detail}</p>
-            )}
-          </section>
+          </details>
         ))}
       </div>
     </details>
