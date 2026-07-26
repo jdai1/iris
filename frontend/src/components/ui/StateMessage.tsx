@@ -11,10 +11,10 @@ export function StateMessage({ className, tone = 'neutral', ...props }: StateMes
   return (
     <div
       className={cn(
-        'border px-4 py-3 text-sm leading-[1.5]',
+        'rounded-lg border px-4 py-3 text-sm leading-[1.5]',
         tone === 'error'
-          ? 'border-[var(--status-red-border)] bg-[var(--status-red-bg)] text-[var(--status-red-text)]'
-          : 'border-[var(--border-subtle)] bg-[var(--bg-raised)] text-[var(--text-muted)]',
+          ? 'border-destructive/30 bg-destructive/10 text-destructive'
+          : 'border-border bg-card text-muted-foreground',
         className,
       )}
       {...props}

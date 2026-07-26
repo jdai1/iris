@@ -108,32 +108,32 @@ export function PeopleView() {
   }
 
   return (
-    <section className="people-view">
-      <header className="people-header">
+    <section className="mx-auto min-h-svh w-full max-w-6xl p-5 sm:p-8">
+      <header className="mb-8">
         <div>
-          <h1>People</h1>
-          <p>Your private network and its reading activity.</p>
+          <h1 className="text-2xl font-semibold tracking-tight">People</h1>
+          <p className="mt-1 text-sm text-muted-foreground">Your private network and its reading activity.</p>
         </div>
       </header>
 
       {error && <StateMessage tone="error">{error}</StateMessage>}
 
-      <div className="people-layout">
-        <main className="people-feed-panel">
-          <div className="people-section-heading">
+      <div className="mt-5 grid gap-5 lg:grid-cols-[minmax(0,1fr)_20rem]">
+        <main className="overflow-hidden rounded-xl border bg-card">
+          <div className="border-b px-5 py-4">
             <div>
-              <span>Feed</span>
-              <h2>Reading activity</h2>
+              <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Feed</span>
+              <h2 className="text-base font-medium">Reading activity</h2>
             </div>
           </div>
           {loading && <PeopleSkeleton />}
           {!loading && (
-            <div className="people-feed">
+            <div className="divide-y">
               {feed.length === 0 && (
-                <div className="people-feed-empty">
-                  <BookOpen size={18} />
-                  <strong>No reading activity yet</strong>
-                  <p>Pages your friends save or finish will appear here.</p>
+                <div className="grid place-items-center gap-3 px-6 py-20 text-center">
+                  <span className="grid size-10 place-items-center rounded-full bg-muted text-muted-foreground"><BookOpen size={18} /></span>
+                  <strong className="font-medium">No reading activity yet</strong>
+                  <p className="max-w-xs text-sm text-muted-foreground">Pages your friends save or finish will appear here.</p>
                   <Button
                     uiVariant="outline"
                     onClick={() => networkRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
@@ -146,17 +146,17 @@ export function PeopleView() {
                 <button
                   key={`${item.person.user_id}-${item.document.uuid}-${item.activity_at}`}
                   type="button"
-                  className="people-feed-row"
+                  className="grid w-full grid-cols-[2.25rem_minmax(0,1fr)] gap-3 px-5 py-4 text-left hover:bg-muted/50"
                   onClick={() => navigateTo(documentPath(item.document.uuid))}
                 >
-                  <span className="people-avatar">{initials(item.person)}</span>
-                  <span className="people-feed-copy">
-                    <span>
+                  <span className="grid size-9 place-items-center rounded-full bg-primary/10 text-xs font-semibold text-primary">{initials(item.person)}</span>
+                  <span className="min-w-0 text-sm">
+                    <span className="block text-muted-foreground">
                       <strong>@{item.person.username}</strong>{' '}
                       {item.status === 'read' ? 'read' : 'saved'}
                     </span>
-                    <strong>{item.document.title || item.document.url}</strong>
-                    <small>{item.document.source_domain} · {formatDate(item.activity_at)}</small>
+                    <strong className="mt-1 block truncate font-medium text-foreground">{item.document.title || item.document.url}</strong>
+                    <small className="mt-0.5 block text-muted-foreground">{item.document.source_domain} · {formatDate(item.activity_at)}</small>
                   </span>
                 </button>
               ))}
@@ -164,20 +164,20 @@ export function PeopleView() {
           )}
         </main>
 
-        <aside className="people-network-panel" ref={networkRef}>
-          <div className="people-network-heading">
-            <div>
+        <aside className="self-start overflow-hidden rounded-xl border bg-card" ref={networkRef}>
+          <div className="flex items-center justify-between border-b px-4 py-3">
+            <div className="flex items-center gap-2">
               <Users size={15} />
-              <h2>Your network</h2>
+              <h2 className="text-sm font-medium">Your network</h2>
             </div>
-            {!loading && <span>{friends.length}</span>}
+            {!loading && <span className="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">{friends.length}</span>}
           </div>
           {loading ? (
             <NetworkSkeleton />
           ) : (
             <>
             <CorpusSearchForm
-              className="people-search"
+              className="m-4 min-h-10"
               value={peopleQuery}
               onChange={setPeopleQuery}
               onSubmit={searchPeople}
@@ -185,13 +185,13 @@ export function PeopleView() {
               disabled={busy || !peopleQuery.trim()}
             />
               {peopleResults.length > 0 && (
-                <div className="people-network-section">
-                  <h3>People</h3>
-                  <div className="people-list">
+                <div className="border-t p-4">
+                  <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">People</h3>
+                  <div className="space-y-1">
                     {peopleResults.map((person) => (
-                      <div className="people-row" key={person.user_id}>
-                        <span className="people-avatar">{initials(person)}</span>
-                        <span>
+                      <div className="grid grid-cols-[2rem_minmax(0,1fr)_auto] items-center gap-2 rounded-md px-2 py-2 hover:bg-muted/50" key={person.user_id}>
+                        <span className="grid size-8 place-items-center rounded-full bg-primary/10 text-xs font-semibold text-primary">{initials(person)}</span>
+                        <span className="min-w-0 truncate text-sm">
                           <strong>@{person.username}</strong>
                         </span>
                         {person.relationship === 'none' && (
@@ -204,7 +204,7 @@ export function PeopleView() {
                           </Button>
                         )}
                         {person.relationship !== 'none' && (
-                          <small className="people-relationship">{relationshipLabel(person.relationship)}</small>
+                          <small className="text-xs text-muted-foreground">{relationshipLabel(person.relationship)}</small>
                         )}
                       </div>
                     ))}
@@ -234,19 +234,19 @@ export function PeopleView() {
                 />
               )}
 
-              <section className="people-network-section">
-                <h3>Friends</h3>
-                {friends.length === 0 && <div className="people-section-empty">No connections yet.</div>}
-                <div className="people-list">
+              <section className="border-t p-4">
+                <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Friends</h3>
+                {friends.length === 0 && <div className="py-4 text-center text-sm text-muted-foreground">No connections yet.</div>}
+                <div className="space-y-1">
                   {friends.map((friendship) => (
-                    <div className="people-row" key={friendship.id}>
+                    <div className="flex items-center justify-between gap-2 rounded-md px-2 py-2 hover:bg-muted/50" key={friendship.id}>
                       <button
                         type="button"
-                        className="people-row-profile"
+                        className="flex min-w-0 flex-1 items-center gap-2 text-left"
                         onClick={() => openFriendProfile(friendship)}
                       >
-                        <span className="people-avatar">{initials(friendship.person)}</span>
-                        <span>
+                        <span className="grid size-8 shrink-0 place-items-center rounded-full bg-primary/10 text-xs font-semibold text-primary">{initials(friendship.person)}</span>
+                        <span className="min-w-0 truncate text-sm">
                           <strong>@{friendship.person.username}</strong>
                         </span>
                       </button>
@@ -290,16 +290,16 @@ function RequestList({
   onSecondary: (id: number) => void;
 }) {
   return (
-    <section className="people-network-section">
-      <h3>{icon}{title}<span>{rows.length}</span></h3>
-      <div className="people-list">
+    <section className="border-t p-4">
+      <h3 className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">{icon}{title}<span className="ml-auto rounded-full bg-muted px-2 py-0.5">{rows.length}</span></h3>
+      <div className="space-y-1">
         {rows.map((friendship) => (
-          <div className="people-row" key={friendship.id}>
-            <span className="people-avatar">{initials(friendship.person)}</span>
-            <span>
+          <div className="grid grid-cols-[2rem_minmax(0,1fr)_auto] items-center gap-2 rounded-md px-2 py-2 hover:bg-muted/50" key={friendship.id}>
+            <span className="grid size-8 place-items-center rounded-full bg-primary/10 text-xs font-semibold text-primary">{initials(friendship.person)}</span>
+            <span className="min-w-0 truncate text-sm">
               <strong>@{friendship.person.username}</strong>
             </span>
-            <span className="people-actions">
+            <span className="flex items-center gap-1">
               {primaryLabel && onPrimary && (
                 <Button uiVariant="solid" disabled={busy} onClick={() => onPrimary(friendship.id)}>
                   {primaryLabel}
@@ -318,11 +318,11 @@ function RequestList({
 
 function ProfileSummary({ profile }: { profile: UserProfile }) {
   return (
-    <div className="people-profile-summary">
-      <h3>@{profile.username}</h3>
-      {profile.bio && <p>{profile.bio}</p>}
+    <div className="mt-4 rounded-lg border bg-muted/20 p-3">
+      <h3 className="text-sm font-medium">@{profile.username}</h3>
+      {profile.bio && <p className="mt-1 text-xs text-muted-foreground">{profile.bio}</p>}
       {profile.websites.map((website) => (
-        <a key={website.id} href={website.url} target="_blank" rel="noreferrer">
+        <a className="mt-2 flex items-center gap-1 text-xs text-primary hover:underline" key={website.id} href={website.url} target="_blank" rel="noreferrer">
           {website.label || website.canonical_domain} <ArrowUpRight size={13} />
         </a>
       ))}
@@ -355,11 +355,11 @@ function formatDate(value: string) {
 
 function PeopleSkeleton() {
   return (
-    <div className="people-loading" aria-label="Loading people">
+    <div className="divide-y" aria-label="Loading people">
       {[0, 1, 2].map((item) => (
-        <div className="people-loading-row" key={item}>
-          <span />
-          <span className="skeleton-line" />
+        <div className="grid grid-cols-[2.25rem_minmax(0,1fr)] gap-3 px-5 py-4" key={item}>
+          <span className="size-9 animate-pulse rounded-full bg-muted" />
+          <span className="h-10 animate-pulse rounded bg-muted" />
         </div>
       ))}
     </div>
@@ -368,10 +368,10 @@ function PeopleSkeleton() {
 
 function NetworkSkeleton() {
   return (
-    <div className="people-network-skeleton skeleton-stack" aria-label="Loading network">
-      <span className="skeleton-line" />
-      <span className="skeleton-line" />
-      <span className="skeleton-line" />
+    <div className="grid gap-2 p-4" aria-label="Loading network">
+      <span className="h-9 animate-pulse rounded bg-muted" />
+      <span className="h-9 animate-pulse rounded bg-muted" />
+      <span className="h-9 animate-pulse rounded bg-muted" />
     </div>
   );
 }

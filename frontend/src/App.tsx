@@ -11,6 +11,14 @@ import { documentParentPath, documentPath, documentUuidFromPath, initialView, na
 import { DocumentRouteDrawer } from './components/DocumentRouteDrawer';
 import { AppShell, Sidebar, Workspace } from './layout';
 import { Button } from './components/ui';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from './components/ui/dropdown-menu';
 import type { User as IrisUser } from './types';
 
 const THEME_STORAGE_KEY = 'iris.theme';
@@ -18,7 +26,9 @@ type ThemeMode = 'light' | 'dark';
 
 function initialTheme(): ThemeMode {
   if (typeof document === 'undefined') return 'light';
-  return document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light';
+  const saved = window.localStorage.getItem(THEME_STORAGE_KEY);
+  if (saved === 'dark' || saved === 'light') return saved;
+  return document.documentElement.classList.contains('dark') ? 'dark' : 'light';
 }
 
 function IrisApp({ currentUser, onSignOut }: { currentUser: IrisUser | null; onSignOut: () => void }) {
@@ -36,8 +46,6 @@ function IrisApp({ currentUser, onSignOut }: { currentUser: IrisUser | null; onS
   );
   const [profileUsername, setProfileUsername] = useState(currentUser?.username ?? null);
   const [themeMode, setThemeMode] = useState<ThemeMode>(initialTheme);
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  const settingsRef = useRef<HTMLDivElement | null>(null);
   const applyingPopState = useRef(false);
 
   useEffect(() => {
@@ -87,21 +95,10 @@ function IrisApp({ currentUser, onSignOut }: { currentUser: IrisUser | null; onS
   }, [currentUser?.username]);
 
   useEffect(() => {
-    document.documentElement.dataset.theme = themeMode;
+    document.documentElement.classList.toggle('dark', themeMode === 'dark');
     window.localStorage.setItem(THEME_STORAGE_KEY, themeMode);
     window.dispatchEvent(new CustomEvent('iris-theme-change', { detail: themeMode }));
   }, [themeMode]);
-
-  useEffect(() => {
-    if (!settingsOpen) return;
-    function closeSettingsOnOutsideClick(event: PointerEvent) {
-      const target = event.target;
-      if (target instanceof Node && settingsRef.current?.contains(target)) return;
-      setSettingsOpen(false);
-    }
-    document.addEventListener('pointerdown', closeSettingsOnOutsideClick);
-    return () => document.removeEventListener('pointerdown', closeSettingsOnOutsideClick);
-  }, [settingsOpen]);
 
   function openProfile(sourceId: number, domain: string) {
     setDocumentUuid(null);
@@ -135,10 +132,10 @@ function IrisApp({ currentUser, onSignOut }: { currentUser: IrisUser | null; onS
   return (
     <AppShell>
       <Sidebar>
-        <div className="sidebar-brand">
-          <span>iris</span>
+        <div className="flex h-14 shrink-0 items-center px-4 text-lg font-semibold tracking-tight md:h-16">
+          iris
         </div>
-        <nav className="sidebar-nav">
+        <nav className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto px-2 pb-2 md:block md:space-y-1 md:overflow-visible">
           {visibleNavItems.map((item) => (
             <Button
               key={item.view}
@@ -152,7 +149,7 @@ function IrisApp({ currentUser, onSignOut }: { currentUser: IrisUser | null; onS
                 }
               }}
               uiVariant="nav"
-              className="hover:bg-transparent"
+              className="w-auto md:w-full"
               data-active={view === item.view ? 'true' : undefined}
             >
               {item.icon}
@@ -161,53 +158,40 @@ function IrisApp({ currentUser, onSignOut }: { currentUser: IrisUser | null; onS
           ))}
         </nav>
         {currentUser && (
-          <div className="sidebar-settings" ref={settingsRef}>
-            {settingsOpen && (
-              <div className="settings-menu">
-                <div className="settings-menu-row settings-menu-muted">
-                  <UserCircle size={16} />
-                  <span>{currentUser.email}</span>
-                </div>
-                <div className="settings-menu-divider" />
-                <button
-                  className="settings-menu-row"
-                  type="button"
-                  onClick={() => {
-                    setDocumentUuid(null);
-                    setSettingsOpen(false);
-                    setView('profile');
-                  }}
-                >
-                  <UserCircle size={16} />
-                  <span>My profile</span>
-                </button>
-                <button
-                  className="settings-menu-row"
-                  type="button"
-                  onClick={() => setThemeMode((mode) => (mode === 'dark' ? 'light' : 'dark'))}
-                >
-                  {themeMode === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
-                  <span>{themeMode === 'dark' ? 'Light mode' : 'Dark mode'}</span>
-                </button>
-                <div className="settings-menu-divider" />
-                <button className="settings-menu-row" type="button" onClick={onSignOut}>
-                  <LogOut size={16} />
-                  <span>Log out</span>
-                </button>
-              </div>
-            )}
-            <button
-              className="sidebar-settings-toggle"
-              type="button"
-              onClick={() => setSettingsOpen((value) => !value)}
-              aria-expanded={settingsOpen}
-            >
-              <Settings size={17} />
-              <span>Settings</span>
-            </button>
-            <div className="sidebar-settings-meta">
-              {profileUsername ? `@${profileUsername}` : currentUser.email}
-            </div>
+          <div className="hidden border-t p-2 md:block">
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button uiVariant="nav" className="h-auto w-full justify-start py-2">
+                  <Settings size={17} />
+                  <span className="min-w-0 flex-1 truncate text-left">
+                    <span className="block">Settings</span>
+                    <span className="block truncate text-xs font-normal text-muted-foreground">
+                      {profileUsername ? `@${profileUsername}` : currentUser.email}
+                    </span>
+                  </span>
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent side="right" align="end" className="w-56">
+                <DropdownMenuLabel className="truncate">{currentUser.email}</DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onSelect={() => {
+                  setDocumentUuid(null);
+                  setView('profile');
+                }}>
+                  <UserCircle />
+                  My profile
+                </DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => setThemeMode((mode) => (mode === 'dark' ? 'light' : 'dark'))}>
+                  {themeMode === 'dark' ? <Sun /> : <Moon />}
+                  {themeMode === 'dark' ? 'Light mode' : 'Dark mode'}
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem variant="destructive" onSelect={onSignOut}>
+                  <LogOut />
+                  Log out
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
         )}
       </Sidebar>

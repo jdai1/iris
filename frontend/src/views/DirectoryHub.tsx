@@ -11,7 +11,7 @@ export function DirectoryHub({
   onDirectoryRoot: () => void;
 }) {
   return (
-    <section className="directory-hub">
+    <section className="min-h-svh min-w-0">
       <DirectoryView
         target={target}
         onOpenProfile={onOpenProfile}

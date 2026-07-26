@@ -93,9 +93,9 @@ export function DocumentCard({
   }
 
   const actionsMenu = (
-    <div className="document-actions-menu">
+    <div className="relative">
       <IconButton
-        className="document-actions-trigger"
+        className="size-8 rounded-md hover:bg-accent"
         type="button"
         uiVariant="plainIcon"
         onClick={() => {
@@ -110,20 +110,20 @@ export function DocumentCard({
         <MoreHorizontal size={17} />
       </IconButton>
       {actionsOpen && (
-        <PopoverMenu className="document-actions-popover">
+        <PopoverMenu className="absolute right-0 top-9 min-w-48">
           <Button uiVariant="rowAction" type="button" onClick={saveToReadNext} disabled={saving}>
             {saved ? 'In read next' : 'Read next'}
           </Button>
           <Button uiVariant="rowAction" type="button" onClick={toggleFavorite} disabled={saving}>
             {favorited ? 'Favorited' : 'Favorite'}
           </Button>
-          <div className="document-actions-submenu" onMouseEnter={loadCollections} onFocus={loadCollections}>
+          <div className="group relative" onMouseEnter={loadCollections} onFocus={loadCollections}>
             <Button uiVariant="rowAction" type="button" disabled={saving}>
               <span>Add to collection</span>
               <ChevronRight size={14} />
             </Button>
-            <div className="document-actions-submenu-list">
-              {collections.length === 0 && <span>No collections yet</span>}
+            <div className="absolute right-full top-0 hidden min-w-44 rounded-lg border bg-popover p-1 shadow-lg group-hover:grid group-focus-within:grid">
+              {collections.length === 0 && <span className="px-2 py-1.5 text-xs text-muted-foreground">No collections yet</span>}
               {collections.map((collection) => {
                 const added = addedCollectionIds.has(collection.id);
                 return (
@@ -140,22 +140,22 @@ export function DocumentCard({
   );
 
   return (
-    <Panel as="article" className={compact ? 'document-card document-card-compact' : 'document-card'}>
+    <Panel as="article" className={compact ? 'p-4' : 'p-5'}>
       {!compact && (
-        <div className="flex flex-wrap items-center gap-2 text-xs uppercase text-[var(--text-subtle)]">
-          <button className="profile-link" type="button" onClick={() => onOpenProfile?.(document.source_id, document.source_domain)}>
+        <div className="flex flex-wrap items-center gap-2 text-xs uppercase text-muted-foreground">
+          <button className="hover:text-primary" type="button" onClick={() => onOpenProfile?.(document.source_id, document.source_domain)}>
             {document.source_domain}
           </button>
           <span>{document.document_type}</span>
         </div>
       )}
-      <div className={compact ? 'document-title-row' : undefined}>
+      <div className={compact ? 'flex items-start justify-between gap-3' : undefined}>
         <h3 className="mb-3 mt-2 text-xl font-semibold leading-tight">
-          <a className="document-detail-link" href={documentPath(document.uuid)} onClick={openDocument}>
+          <a className="hover:text-primary" href={documentPath(document.uuid)} onClick={openDocument}>
             {document.title ?? document.url}
           </a>
           {compact && (
-            <a href={document.url} target="_blank" rel="noreferrer" className="document-open-icon font-semibold text-[var(--text)] no-underline" aria-label="Open document" data-tooltip="Open document">
+            <a href={document.url} target="_blank" rel="noreferrer" className="ml-2 inline-flex font-semibold text-foreground" aria-label="Open document" title="Open document">
               <ArrowUpRight size={16} />
             </a>
           )}
@@ -163,12 +163,12 @@ export function DocumentCard({
         {compact && actionsMenu}
       </div>
       {compact && (
-        <button className="document-compact-domain" type="button" onClick={() => onOpenProfile?.(document.source_id, document.source_domain)}>
+        <button className="mb-2 text-xs text-muted-foreground hover:text-primary" type="button" onClick={() => onOpenProfile?.(document.source_id, document.source_domain)}>
           {document.source_domain}
         </button>
       )}
-      {document.summary && <p className="mb-3 leading-relaxed text-[var(--text-secondary)]">{document.summary}</p>}
-      {!compact && <p className="mb-4 text-sm leading-relaxed text-[var(--text-subtle)]">{reason}</p>}
+      {document.summary && <p className="mb-3 leading-relaxed text-foreground">{document.summary}</p>}
+      {!compact && <p className="mb-4 text-sm leading-relaxed text-muted-foreground">{reason}</p>}
       <ChipList className="topics mb-4">
         {document.topics.map((topic) => (
           <Chip key={topic}>
@@ -178,14 +178,14 @@ export function DocumentCard({
       </ChipList>
       {!compact && (
         <div>
-          <a href={document.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 font-semibold text-[var(--text)] no-underline">
+          <a href={document.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 font-semibold text-foreground hover:text-primary">
             <ArrowUpRight size={16} />
             Open
           </a>
         </div>
       )}
       {(!compact || error) && (
-        <div className="document-bookshelf-actions">
+        <div className="mt-3 flex items-center justify-between gap-3">
           {!compact && actionsMenu}
           {error && <small>{error}</small>}
         </div>

@@ -131,9 +131,9 @@ export function AuthGate({ children }: AuthGateProps) {
   }
 
   if (!firebaseEnabled) return <>{children(localUser, () => {})}</>;
-  if (!authReady) return <div className="auth-shell auth-shell-center">Loading...</div>;
+  if (!authReady) return <div className="grid min-h-svh place-items-center text-sm text-muted-foreground">Loading...</div>;
   if (!firebaseUser) return <AuthScreen error={authError} signingIn={signingIn} onSignIn={signIn} />;
-  if (!currentUser && !authError) return <div className="auth-shell auth-shell-center">Loading...</div>;
+  if (!currentUser && !authError) return <div className="grid min-h-svh place-items-center text-sm text-muted-foreground">Loading...</div>;
   if (authError) return <AuthScreen error={authError} signingIn={signingIn} onSignIn={signIn} />;
   return <>{children(currentUser, handleSignOut)}</>;
 }

@@ -3,9 +3,11 @@ import type { View } from '../app/navigation';
 import { cn } from '@/lib/utils';
 
 export function Workspace({ view, className, ...props }: ComponentProps<'section'> & { view: View }) {
-  const viewClassName = view === 'search'
-    ? 'workspace workspace-search'
-    : 'workspace';
-
-  return <section className={cn(viewClassName, className)} {...props} />;
+  return (
+    <section
+      data-view={view}
+      className={cn('min-h-svh min-w-0 overflow-x-hidden', view === 'search' && 'flex flex-col', className)}
+      {...props}
+    />
+  );
 }

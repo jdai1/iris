@@ -2,6 +2,7 @@ import { KeyboardEvent, MouseEvent, useEffect, useRef, useState } from 'react';
 import { ArrowUpRight, MoreVertical, Trash2 } from 'lucide-react';
 import { OverflowText } from './OverflowText';
 import type { Document } from '../types';
+import { cn } from '../lib/utils';
 
 export type DenseDocumentTableRow = {
   document: Document;
@@ -49,22 +50,27 @@ export function DenseDocumentTable({
   const allSelected = rows.length > 0 && rows.every((row) => row.selected);
   const someSelected = rows.some((row) => row.selected);
   const selectAllRef = useRef<HTMLInputElement | null>(null);
-  const tableClassName = [
-    'bookshelf-table',
-    showFavorite || (showActions && showNote) ? '' : showActions ? 'bookshelf-table-actions-only' : showNote ? 'bookshelf-table-simple' : 'bookshelf-table-minimal',
-    showSource ? '' : 'bookshelf-table-no-source',
-    selectionEnabled ? 'bookshelf-table-selectable' : '',
-  ].filter(Boolean).join(' ');
+  const columnClassName = selectionEnabled
+    ? showActions
+      ? 'grid-cols-[2rem_minmax(14rem,2fr)_minmax(8rem,1fr)_7rem_2.5rem]'
+      : showNote && showFavorite
+        ? 'grid-cols-[2rem_minmax(14rem,2fr)_minmax(8rem,1fr)_minmax(10rem,1.25fr)_7rem_2.5rem]'
+        : showNote
+          ? 'grid-cols-[2rem_minmax(14rem,2fr)_minmax(8rem,1fr)_minmax(10rem,1.25fr)_7rem]'
+          : 'grid-cols-[2rem_minmax(14rem,2fr)_minmax(8rem,1fr)_7rem]'
+    : showNote
+      ? 'grid-cols-[minmax(14rem,2fr)_minmax(8rem,1fr)_minmax(10rem,1.25fr)_7rem]'
+      : 'grid-cols-[minmax(14rem,2fr)_minmax(8rem,1fr)_7rem]';
 
   useEffect(() => {
     if (selectAllRef.current) selectAllRef.current.indeterminate = someSelected && !allSelected;
   }, [allSelected, someSelected]);
 
   return (
-    <div className={tableClassName} role="table" aria-label={ariaLabel}>
-      <div className="bookshelf-table-row bookshelf-table-head" role="row">
+    <div className="w-full min-w-[760px]" role="table" aria-label={ariaLabel}>
+      <div className={cn('grid items-center gap-3 border-b bg-muted/40 px-4 py-2 text-xs font-semibold uppercase text-muted-foreground', columnClassName)} role="row">
         {selectionEnabled && (
-          <span className="bookshelf-table-select-cell">
+          <span className="grid place-items-center">
             <input
               ref={selectAllRef}
               type="checkbox"
@@ -88,7 +94,11 @@ export function DenseDocumentTable({
         return (
           <div
             key={document.uuid}
-            className={row.selected ? 'bookshelf-table-row bookshelf-table-row-selected' : 'bookshelf-table-row'}
+            className={cn(
+              'grid cursor-pointer items-center gap-3 border-b px-4 py-3 text-sm last:border-0 hover:bg-muted/50',
+              columnClassName,
+              row.selected && 'bg-accent/60',
+            )}
             role="row"
             tabIndex={0}
             aria-selected={selectionEnabled ? row.selected : undefined}
@@ -106,7 +116,7 @@ export function DenseDocumentTable({
             }}
           >
             {selectionEnabled && (
-              <span className="bookshelf-table-select-cell">
+              <span className="grid place-items-center">
                 <input
                   type="checkbox"
                   checked={Boolean(row.selected)}
@@ -117,30 +127,30 @@ export function DenseDocumentTable({
               </span>
             )}
             <span
-              className="bookshelf-table-title tooltip-overflow-cell"
+              className="min-w-0"
               data-label="Title"
               aria-label={sourceAsTitle ? `${document.title ?? document.url}, ${document.source_domain}` : undefined}
             >
-              <strong>
+              <strong className="flex min-w-0 items-center gap-1.5 font-medium">
                 <OverflowText>{document.title ?? document.url}</OverflowText>
-                <a href={document.url} target="_blank" rel="noreferrer" aria-label="Open document" onClick={(event) => event.stopPropagation()}>
+                <a className="shrink-0 text-muted-foreground hover:text-foreground" href={document.url} target="_blank" rel="noreferrer" aria-label="Open document" onClick={(event) => event.stopPropagation()}>
                   <ArrowUpRight size={14} />
                 </a>
               </strong>
-              {showSource && <OverflowText className="tooltip-overflow-text">{document.source_domain}</OverflowText>}
+              {showSource && <OverflowText className="block truncate text-xs text-muted-foreground">{document.source_domain}</OverflowText>}
             </span>
-            <span className="bookshelf-table-tags tooltip-overflow-cell" data-label="Tags">
+            <span className="min-w-0 text-muted-foreground" data-label="Tags">
               <OverflowText>{row.tags.join(', ') || '-'}</OverflowText>
             </span>
             {showNote && (
-              <span className={row.note ? 'bookshelf-note-preview tooltip-overflow-cell' : 'bookshelf-note-empty tooltip-overflow-cell'} data-label={noteHeader}>
+              <span className={`min-w-0 ${row.note ? 'text-foreground' : 'text-muted-foreground'}`} data-label={noteHeader}>
                 <OverflowText>{row.note || emptyNoteLabel}</OverflowText>
               </span>
             )}
-            <span className="bookshelf-table-date" data-label="Date">{row.date ?? ''}</span>
+            <span className="text-xs text-muted-foreground" data-label="Date">{row.date ?? ''}</span>
             {showFavorite && (
               <button
-                className={row.favorited ? 'bookshelf-fav bookshelf-fav-on' : 'bookshelf-fav'}
+                className={`grid size-8 place-items-center rounded-md text-lg ${row.favorited ? 'text-rose-500' : 'text-muted-foreground hover:bg-accent hover:text-foreground'}`}
                 type="button"
                 data-label="Favorite"
                 aria-label={row.favorited ? 'Remove favorite' : 'Favorite document'}
@@ -154,8 +164,9 @@ export function DenseDocumentTable({
               </button>
             )}
             {showActions && (
-              <span className="bookshelf-row-actions">
+              <span className="relative">
                 <button
+                  className="grid size-8 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
                   type="button"
                   aria-label="Document actions"
                   aria-expanded={openActionDocumentUuid === document.uuid}
@@ -167,8 +178,9 @@ export function DenseDocumentTable({
                   <MoreVertical size={14} />
                 </button>
                 {openActionDocumentUuid === document.uuid && (
-                  <div className={menuOpensUp ? 'bookshelf-row-menu bookshelf-row-menu-up' : 'bookshelf-row-menu'}>
+                  <div className={`absolute right-0 z-30 min-w-32 rounded-lg border bg-popover p-1 shadow-lg ${menuOpensUp ? 'bottom-9' : 'top-9'}`}>
                     <button
+                      className="flex h-8 w-full items-center gap-2 rounded-md px-2 text-sm text-destructive hover:bg-destructive/10"
                       type="button"
                       onClick={(event) => {
                         event.stopPropagation();

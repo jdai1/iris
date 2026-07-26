@@ -1,18 +1,22 @@
-import { StateMessage } from '../components/ui';
+import { Button, StateMessage } from '../components/ui';
 
 export function AuthScreen({ error, signingIn, onSignIn }: { error: string | null; signingIn: boolean; onSignIn: () => void }) {
   return (
-    <main className="auth-shell">
-      <section className="auth-landing">
-        <div className="auth-content">
-          <div className="auth-brand">
-            <span>iris</span>
-          </div>
-          {error && <StateMessage className="error" tone="error">{error}</StateMessage>}
-          <button className="auth-link-button" type="button" onClick={onSignIn} disabled={signingIn}>
+    <main className="grid min-h-svh place-items-center bg-background px-6">
+      <section className="w-full max-w-md">
+        <div className="grid gap-8">
+          <div className="text-4xl font-semibold tracking-tight">iris</div>
+          {error && <StateMessage tone="error">{error}</StateMessage>}
+          <Button
+            className="h-auto justify-between px-0 py-3 text-base"
+            uiVariant="plainIcon"
+            type="button"
+            onClick={onSignIn}
+            disabled={signingIn}
+          >
             <span>The good web is still out there</span>
             <span aria-hidden="true">→</span>
-          </button>
+          </Button>
         </div>
       </section>
     </main>

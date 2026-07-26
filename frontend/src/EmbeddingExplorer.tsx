@@ -47,26 +47,21 @@ const TRACKING_KEYS = new Set(['fbclid', 'gclid', 'mc_cid', 'mc_eid', 'ref']);
 type ThemeMode = 'light' | 'dark';
 
 function currentThemeMode(): ThemeMode {
-  return document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light';
-}
-
-function cssToken(name: string, fallback: string) {
-  if (typeof document === 'undefined') return fallback;
-  return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback;
+  return document.documentElement.classList.contains('dark') ? 'dark' : 'light';
 }
 
 function explorerTheme(mode: ThemeMode) {
   const dark = mode === 'dark';
   return {
-    bg: cssToken('--canvas-bg', dark ? '#17171a' : '#ffffff'),
-    gridPrimary: cssToken('--border-input', dark ? '#3a3a41' : '#dedede'),
-    gridSecondary: cssToken('--border-subtle', dark ? '#26262b' : '#eeeeee'),
-    highlightOuter: cssToken('--accent', dark ? '#818cf8' : '#4f46e5'),
-    highlightInner: cssToken('--canvas-label-halo', dark ? 'rgba(15, 15, 17, 0.82)' : 'rgba(255, 255, 255, 0.82)'),
-    hoverOuter: cssToken('--canvas-crosshair', dark ? 'rgba(255, 255, 255, 0.42)' : 'rgba(17, 17, 17, 0.42)'),
-    hoverInner: cssToken('--canvas-label-halo', dark ? 'rgba(15, 15, 17, 0.82)' : 'rgba(255, 255, 255, 0.82)'),
-    pointGlowStrong: cssToken('--canvas-label-halo', dark ? 'rgba(15, 15, 17, 0.82)' : 'rgba(255, 255, 255, 0.82)'),
-    pointGlowSoft: cssToken('--glass-border', dark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(17, 17, 17, 0.08)'),
+    bg: dark ? '#17171a' : '#ffffff',
+    gridPrimary: dark ? '#3a3a41' : '#dedede',
+    gridSecondary: dark ? '#26262b' : '#eeeeee',
+    highlightOuter: dark ? '#818cf8' : '#4f46e5',
+    highlightInner: dark ? 'rgba(15, 15, 17, 0.82)' : 'rgba(255, 255, 255, 0.82)',
+    hoverOuter: dark ? 'rgba(255, 255, 255, 0.42)' : 'rgba(17, 17, 17, 0.42)',
+    hoverInner: dark ? 'rgba(15, 15, 17, 0.82)' : 'rgba(255, 255, 255, 0.82)',
+    pointGlowStrong: dark ? 'rgba(15, 15, 17, 0.82)' : 'rgba(255, 255, 255, 0.82)',
+    pointGlowSoft: dark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(17, 17, 17, 0.08)',
   };
 }
 
@@ -541,10 +536,10 @@ export function EmbeddingExplorer({ sourceId }: { sourceId?: number }) {
   }
 
   return (
-    <section className="explorer-shell">
-      <div className="explorer-toolbar">
+    <section className="relative flex min-h-[calc(100svh-15rem)] flex-col overflow-hidden bg-background">
+      <div className="absolute left-4 top-4 z-20 w-[min(26rem,calc(100%-2rem))]">
         <CorpusSearchForm
-          className="explorer-teleport"
+          className="relative min-h-10 w-full bg-background/90 backdrop-blur"
           value={query}
           onChange={setQuery}
           onSubmit={(event) => {
@@ -555,27 +550,27 @@ export function EmbeddingExplorer({ sourceId }: { sourceId?: number }) {
           disabled={!searchMatches[0]}
         >
           {searchMatches.length > 0 && (
-            <div className="explorer-search-results">
+            <div className="absolute inset-x-0 top-12 z-30 grid gap-1 rounded-lg border bg-popover p-1 shadow-lg">
               {searchMatches.map((point) => (
-                <button key={point.document.uuid} type="button" onClick={() => selectSearchMatch(point)}>
-                  <span>{point.document.title || point.document.url}</span>
-                  <small>{point.document.source_domain}</small>
+                <button className="rounded-md px-3 py-2 text-left text-sm hover:bg-accent" key={point.document.uuid} type="button" onClick={() => selectSearchMatch(point)}>
+                  <span className="block truncate font-medium">{point.document.title || point.document.url}</span>
+                  <small className="block truncate text-muted-foreground">{point.document.source_domain}</small>
                 </button>
               ))}
             </div>
           )}
           {normalizeUrlForLookup(query) && searchMatches.length === 0 && (
-            <div className="explorer-search-results explorer-search-empty">
+            <div className="absolute inset-x-0 top-12 z-30 rounded-lg border bg-popover px-3 py-3 text-sm text-muted-foreground shadow-lg">
               No document with that URL.
             </div>
           )}
         </CorpusSearchForm>
       </div>
 
-      <div className="explorer-stage">
+      <div className="relative min-h-[34rem] flex-1 overflow-hidden">
         <canvas
           ref={canvasRef}
-          className="explorer-canvas"
+          className="absolute inset-0 size-full cursor-crosshair touch-none"
           onPointerMove={(event) => {
             if (!dragRef.current.active) return;
             const dx = event.clientX - dragRef.current.x;
@@ -606,30 +601,30 @@ export function EmbeddingExplorer({ sourceId }: { sourceId?: number }) {
           }}
         />
         {loading && (
-          <div className="explorer-loading" aria-label="Loading map" aria-live="polite">
-            <Loader2 size={20} />
+          <div className="absolute inset-0 z-10 grid place-items-center bg-background/70" aria-label="Loading map" aria-live="polite">
+            <Loader2 className="animate-spin text-muted-foreground" size={20} />
           </div>
         )}
-        <div className="explorer-crosshair"><Crosshair size={24} /></div>
+        <div className="pointer-events-none absolute left-1/2 top-1/2 z-10 -translate-x-1/2 -translate-y-1/2 text-foreground/40"><Crosshair size={24} /></div>
         {hover && (
-          <div className="explorer-focus-label">
-            <strong>{hover.point.document.title || hover.point.document.url}</strong>
-            <span>{hover.point.document.source_domain}</span>
+          <div className="pointer-events-none absolute left-1/2 top-[calc(50%+2rem)] z-10 max-w-sm -translate-x-1/2 rounded-lg border bg-background/90 px-3 py-2 text-center shadow-lg backdrop-blur">
+            <strong className="block truncate text-sm font-medium">{hover.point.document.title || hover.point.document.url}</strong>
+            <span className="block text-xs text-muted-foreground">{hover.point.document.source_domain}</span>
           </div>
         )}
         {!flightActive && (
-          <div className="explorer-start">Click canvas to fly · Esc releases</div>
+          <div className="absolute bottom-5 left-1/2 z-10 -translate-x-1/2 rounded-full border bg-background/85 px-3 py-1.5 text-xs text-muted-foreground shadow-sm backdrop-blur">Click canvas to fly · Esc releases</div>
         )}
-        {error && <StateMessage className="explorer-empty" tone="error">{error}</StateMessage>}
+        {error && <StateMessage className="absolute inset-x-4 top-20 z-10" tone="error">{error}</StateMessage>}
         {!loading && !error && map?.points.length === 0 && (
-          <StateMessage className="explorer-empty">No embedded essays yet. Run an embedding batch, then refresh this map.</StateMessage>
+          <StateMessage className="absolute inset-x-4 top-20 z-10">No embedded essays yet. Run an embedding batch, then refresh this map.</StateMessage>
         )}
 
       </div>
 
-      <div className="explorer-bottom-dock">
-        <div className="explorer-controls">
-          <span className={flightActive ? 'active' : ''}>
+      <div className="flex flex-wrap items-center gap-2 border-t bg-card px-4 py-2 text-[11px] text-muted-foreground">
+        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-1 [&_kbd]:rounded [&_kbd]:border [&_kbd]:bg-muted [&_kbd]:px-1 [&_kbd]:font-mono">
+          <span className={`inline-flex items-center gap-1.5 ${flightActive ? 'text-primary' : ''}`}>
             <MousePointer2 size={15} />
             {flightActive ? 'Flying' : 'Click canvas'}
           </span>
@@ -639,18 +634,18 @@ export function EmbeddingExplorer({ sourceId }: { sourceId?: number }) {
           <span><kbd>Q</kbd> Details</span>
           <span><kbd>O</kbd> Open link</span>
         </div>
-        <Button className="explorer-help" uiVariant="rowAction" type="button" onClick={() => setShowHelp((current) => !current)}>
+        <Button uiVariant="rowAction" type="button" onClick={() => setShowHelp((current) => !current)}>
           <HelpCircle size={16} />
           Help
         </Button>
       </div>
       {showHelp && (
-        <div className="explorer-help-card">
-          <strong>Controls</strong>
-          <span>Click the scene to capture the mouse. Press Esc to release it.</span>
-          <span>Use WASD to fly, Space/Control to move vertically, Shift to boost, and scroll for quick forward/back movement.</span>
-          <span>Center a document, then press Q for details or O to open the original link.</span>
-          <span>Paste an exact URL to teleport to its document.</span>
+        <div className="absolute bottom-14 right-4 z-30 grid max-w-sm gap-2 rounded-lg border bg-popover p-4 text-sm shadow-xl">
+          <strong className="font-medium">Controls</strong>
+          <span className="text-muted-foreground">Click the scene to capture the mouse. Press Esc to release it.</span>
+          <span className="text-muted-foreground">Use WASD to fly, Space/Control to move vertically, Shift to boost, and scroll for quick forward/back movement.</span>
+          <span className="text-muted-foreground">Center a document, then press Q for details or O to open the original link.</span>
+          <span className="text-muted-foreground">Paste an exact URL to teleport to its document.</span>
         </div>
       )}
     </section>

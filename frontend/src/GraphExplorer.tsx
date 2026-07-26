@@ -283,11 +283,11 @@ export function GraphExplorer({
   }
 
   return (
-    <section className="graph-view">
-      <div className="graph-toolbar">
-        <div className="graph-search-wrap" ref={searchWrapRef} onFocusCapture={() => setSearchOpen(true)}>
+    <section className="flex min-h-[calc(100svh-15rem)] flex-col bg-background">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b bg-card px-4 py-3">
+        <div className="relative w-full max-w-md" ref={searchWrapRef} onFocusCapture={() => setSearchOpen(true)}>
           <CorpusSearchForm
-            className="graph-search"
+            className="min-h-10 w-full"
             value={domain}
             onChange={(value) => {
               setDomain(value);
@@ -297,54 +297,55 @@ export function GraphExplorer({
             placeholder={mode === 'sources' ? 'focus domain, e.g. example.com' : 'filter title/domain'}
           />
           {showMatches && (
-            <div className="graph-matches">
+            <div className="absolute inset-x-0 top-12 z-30 grid gap-1 rounded-lg border bg-popover p-1 shadow-lg">
               {mode === 'sources'
                 ? sourceMatches.map((source) => (
-                    <button key={source.id} type="button" onClick={() => selectSourceSearchMatch(source)}>
-                      <span>{source.canonical_domain}</span>
-                      <small>{source.canonical_domain}</small>
+                    <button className="rounded-md px-3 py-2 text-left text-sm hover:bg-accent" key={source.id} type="button" onClick={() => selectSourceSearchMatch(source)}>
+                      <span className="block font-medium">{source.canonical_domain}</span>
+                      <small className="block text-muted-foreground">{source.canonical_domain}</small>
                     </button>
                   ))
                 : matches.map((node) => (
-                    <button key={node.id} type="button" onClick={() => selectSearchMatch(node)}>
-                      <span>{node.label}</span>
-                      <small>{node.domain}</small>
+                    <button className="rounded-md px-3 py-2 text-left text-sm hover:bg-accent" key={node.id} type="button" onClick={() => selectSearchMatch(node)}>
+                      <span className="block font-medium">{node.label}</span>
+                      <small className="block text-muted-foreground">{node.domain}</small>
                     </button>
                   ))}
             </div>
           )}
         </div>
-        <div className="segmented">
+        <div className="flex items-center gap-1 rounded-lg bg-muted p-1 text-sm">
           {mode === 'sources' && (
-            <div className="graph-depth" aria-label="Graph depth">
+            <div className="mr-1 flex items-center gap-0.5 border-r pr-2" aria-label="Graph depth">
               {[1, 2, 3].map((value) => (
-                <button key={value} type="button" className={depth === value ? 'active' : ''} onClick={() => updateDepth(value)}>
+                <button key={value} type="button" className={`grid size-8 place-items-center rounded-md text-xs ${depth === value ? 'bg-background shadow-xs' : 'text-muted-foreground hover:bg-accent'}`} onClick={() => updateDepth(value)}>
                   {value}
                 </button>
               ))}
             </div>
           )}
-          <button type="button" className={mode === 'sources' ? 'active' : ''} onClick={() => updateMode('sources')}>
+          <button type="button" className={`inline-flex h-8 items-center gap-1.5 rounded-md px-2 ${mode === 'sources' ? 'bg-background shadow-xs' : 'text-muted-foreground hover:bg-accent'}`} onClick={() => updateMode('sources')}>
             <Users size={16} /> People
           </button>
-          <button type="button" className={mode === 'documents' ? 'active' : ''} onClick={() => updateMode('documents')}>
+          <button type="button" className={`inline-flex h-8 items-center gap-1.5 rounded-md px-2 ${mode === 'documents' ? 'bg-background shadow-xs' : 'text-muted-foreground hover:bg-accent'}`} onClick={() => updateMode('documents')}>
             <FileText size={16} /> Docs
           </button>
         </div>
       </div>
 
-      {error && <StateMessage className="error" tone="error">{error}</StateMessage>}
-      <div className="graph-layout">
-        <div className="graph-canvas-wrap">
+      {error && <StateMessage className="m-4" tone="error">{error}</StateMessage>}
+      <div className="relative grid min-h-0 flex-1 lg:grid-cols-[minmax(0,1fr)_20rem]">
+        <div className="relative min-h-[34rem] overflow-hidden bg-muted/10">
           {loading && (
-            <div className="graph-loading" aria-live="polite">
-              <Loader2 size={22} />
+            <div className="absolute inset-0 z-10 grid place-items-center bg-background/70 text-sm text-muted-foreground backdrop-blur-sm" aria-live="polite">
+              <span className="flex items-center gap-2"><Loader2 className="animate-spin" size={22} />
               <span>Loading graph</span>
+              </span>
             </div>
           )}
-          {!loading && graph.nodes.length === 0 && <StateMessage className="graph-loading">No graph neighbors found.</StateMessage>}
+          {!loading && graph.nodes.length === 0 && <StateMessage className="absolute inset-x-4 top-4">No graph neighbors found.</StateMessage>}
           <svg
-            className="graph-canvas"
+            className="h-full min-h-[34rem] w-full touch-none select-none"
             viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
             role="img"
             onPointerDown={pointerDown}
@@ -374,7 +375,7 @@ export function GraphExplorer({
                   <path
                     key={`${edge.source}-${edge.target}-${index}`}
                     d={path}
-                    className={active ? 'graph-edge active' : 'graph-edge'}
+                    className={`fill-none transition-opacity ${active ? 'stroke-primary opacity-90' : 'stroke-border opacity-60'}`}
                     strokeWidth={edgeWidth(edge.weight, mode)}
                     markerEnd={active ? 'url(#graph-arrow-active)' : undefined}
                   />
@@ -384,11 +385,12 @@ export function GraphExplorer({
                 const active = activeId === node.id;
                 const related = activeId ? visibleEdges.some((edge) => (edge.source === activeId && edge.target === node.id) || (edge.target === activeId && edge.source === node.id)) : false;
                 const labeled = active || related || node.r >= 17;
-                const stateClass = node.bookshelf_status === 'read' ? ' graph-node-read' : node.bookshelf_status === 'saved' ? ' graph-node-saved' : '';
                 return (
                   <g
                     key={node.id}
-                    className={`${active ? 'graph-node active' : related ? 'graph-node related' : activeId ? 'graph-node muted' : 'graph-node'}${stateClass}`}
+                    className={`cursor-grab transition-opacity active:cursor-grabbing ${
+                      active ? 'opacity-100' : related ? 'opacity-90' : activeId ? 'opacity-35' : 'opacity-80'
+                    }`}
                     transform={`translate(${node.x} ${node.y})`}
                     onMouseEnter={() => setHoveredId(node.id)}
                     onMouseLeave={() => setHoveredId(null)}
@@ -399,8 +401,8 @@ export function GraphExplorer({
                     }}
                     onDoubleClick={() => openNodeGraph(node)}
                   >
-                    <circle r={node.r} style={{ fill: node.color }} />
-                    {labeled && <text y={node.r + 13}>{shortLabel(node.label)}</text>}
+                    <circle className={active ? 'stroke-primary stroke-[3]' : 'stroke-background stroke-2'} r={node.r} fill={node.color} />
+                    {labeled && <text className="fill-foreground text-[11px] font-medium [paint-order:stroke] stroke-background stroke-[3px]" textAnchor="middle" y={node.r + 13}>{shortLabel(node.label)}</text>}
                   </g>
                 );
               })}
@@ -408,17 +410,17 @@ export function GraphExplorer({
           </svg>
         </div>
         {selected && !panelOpen && (
-          <button className="graph-panel-tab" type="button" onClick={() => setPanelOpen(true)}>
+          <button className="absolute right-0 top-4 z-10 rounded-l-md border border-r-0 bg-card px-3 py-2 text-sm shadow-sm" type="button" onClick={() => setPanelOpen(true)}>
             {shortLabel(selected.label)}
           </button>
         )}
         {panelOpen && (
-        <aside className="graph-panel">
+        <aside className="min-h-0 overflow-y-auto border-l bg-card p-4">
           {selected ? (
             <>
-              <div className="graph-title-row">
-                <h3>{selected.label}</h3>
-                <div className="graph-title-actions" aria-label="Graph actions">
+              <div className="flex items-start justify-between gap-3">
+                <h3 className="font-semibold leading-snug">{selected.label}</h3>
+                <div className="flex items-center gap-1 [&_a]:grid [&_a]:size-8 [&_a]:place-items-center [&_a]:rounded-md [&_a]:hover:bg-accent [&_button]:grid [&_button]:size-8 [&_button]:place-items-center [&_button]:rounded-md [&_button]:hover:bg-accent" aria-label="Graph actions">
                   {mode === 'sources' && (
                     <button type="button" onClick={() => openProfile(selected)} aria-label="Open profile" data-tooltip="Open profile" data-tooltip-placement="left">
                       <Users size={16} />
@@ -434,13 +436,13 @@ export function GraphExplorer({
                   )}
                 </div>
               </div>
-              <p>{selected.subtitle || selected.domain}</p>
-              {selected.summary && <p>{selected.summary}</p>}
-              <div className="graph-stats">
-                <span>{graph.nodes.length} nodes</span>
-                <span>{visibleEdges.length} edges</span>
-                <span>{inboundReferences.length} referenced by</span>
-                <span>{outboundReferences.length} references</span>
+              <p className="mt-2 text-xs text-muted-foreground">{selected.subtitle || selected.domain}</p>
+              {selected.summary && <p className="mt-3 text-sm leading-6 text-muted-foreground">{selected.summary}</p>}
+              <div className="my-4 grid grid-cols-2 gap-2 text-xs">
+                <span className="rounded-md bg-muted px-2 py-1.5">{graph.nodes.length} nodes</span>
+                <span className="rounded-md bg-muted px-2 py-1.5">{visibleEdges.length} edges</span>
+                <span className="rounded-md bg-muted px-2 py-1.5">{inboundReferences.length} referenced by</span>
+                <span className="rounded-md bg-muted px-2 py-1.5">{outboundReferences.length} references</span>
               </div>
               <GraphReferenceSection title="Referenced by" emptyLabel="No visible inbound references." items={inboundReferences} mode={mode} onSelect={selectGraphNode} />
               <GraphReferenceSection title="References" emptyLabel="No visible outbound references." items={outboundReferences} mode={mode} onSelect={selectGraphNode} />
@@ -469,19 +471,19 @@ function GraphReferenceSection({
   onSelect: (nodeId: string) => void;
 }) {
   return (
-    <section className="graph-reference-section" aria-label={title}>
-      <h4>{title}</h4>
+    <section className="border-t py-4" aria-label={title}>
+      <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">{title}</h4>
       {items.length === 0 ? (
-        <p className="graph-reference-empty">{emptyLabel}</p>
+        <p className="py-3 text-xs text-muted-foreground">{emptyLabel}</p>
       ) : (
-        <div className="graph-reference-list">
+        <div className="space-y-1">
           {items.map((item) => (
-            <button key={`${item.edge.source}-${item.edge.target}-${item.node.id}`} type="button" onClick={() => onSelect(item.node.id)}>
-              <span className="graph-reference-copy">
-                <strong>{item.node.label}</strong>
-                <small>{graphReferenceMeta(item.node, item.edge)}</small>
+            <button className="grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-2 rounded-md px-2 py-2 text-left hover:bg-muted" key={`${item.edge.source}-${item.edge.target}-${item.node.id}`} type="button" onClick={() => onSelect(item.node.id)}>
+              <span className="min-w-0">
+                <strong className="block truncate text-sm font-medium">{item.node.label}</strong>
+                <small className="block truncate text-xs text-muted-foreground">{graphReferenceMeta(item.node, item.edge)}</small>
               </span>
-              <span className="graph-reference-weight">{graphReferenceWeightLabel(item.edge, mode)}</span>
+              <span className="text-xs text-muted-foreground">{graphReferenceWeightLabel(item.edge, mode)}</span>
             </button>
           ))}
         </div>

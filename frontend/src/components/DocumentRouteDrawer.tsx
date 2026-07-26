@@ -70,7 +70,7 @@ export function DocumentRouteDrawer({ documentUuid, reason, onClose }: { documen
 
   return createPortal(
     <>
-      <button className={closing ? 'drawer-backdrop drawer-closing' : 'drawer-backdrop'} type="button" aria-label="Close details" onClick={closeDrawer} />
+      <button className={`fixed inset-0 z-40 bg-black/35 backdrop-blur-[1px] transition-opacity duration-200 ${closing ? 'opacity-0' : 'opacity-100'}`} type="button" aria-label="Close details" onClick={closeDrawer} />
       <DocumentDetailDrawer
         entry={entry}
         detail={detail}

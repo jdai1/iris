@@ -249,31 +249,36 @@ export function SearchView({
   }
 
   return (
-    <section className="search-view">
-      <div className="chat-page-grid">
-        <aside className="chat-history-rail">
-          <div className="chat-history-rail-header">
+    <section className="min-h-svh flex-1">
+      <div className="grid min-h-svh grid-cols-1 lg:grid-cols-[15rem_minmax(0,1fr)]">
+        <aside className="hidden min-h-svh border-r bg-muted/20 lg:flex lg:flex-col">
+          <div className="flex h-14 items-center justify-between px-4 text-sm font-semibold">
             <span>Chats</span>
-            <button className="chat-new-button" type="button" onClick={startNewChat} aria-label="New chat" data-tooltip="New chat" data-tooltip-placement="bottom">
+            <button className="grid size-8 place-items-center rounded-md text-lg text-muted-foreground hover:bg-accent hover:text-accent-foreground" type="button" onClick={startNewChat} aria-label="New chat" title="New chat">
               +
             </button>
           </div>
-          <form className="corpus-search chat-history-search" onSubmit={(event) => event.preventDefault()}>
-            <Search size={15} />
+          <form className="mx-3 flex h-9 items-center gap-2 rounded-md border bg-background px-3 focus-within:ring-2 focus-within:ring-ring/20" onSubmit={(event) => event.preventDefault()}>
+            <Search className="size-3.5 text-muted-foreground" />
             <input
+              className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
               value={historyQuery}
               onChange={(event) => setHistoryQuery(event.target.value)}
               placeholder="Search chats"
             />
           </form>
-          <div className="chat-history-list" ref={historyRef} onScroll={handleHistoryScroll}>
+          <div className="mt-3 min-h-0 flex-1 space-y-1 overflow-y-auto px-2 pb-3" ref={historyRef} onScroll={handleHistoryScroll}>
             {historyLoading && <HistorySkeleton />}
-            {!historyLoading && history.length === 0 && <div className="chat-history-empty">No saved chats yet.</div>}
+            {!historyLoading && history.length === 0 && <div className="px-2 py-6 text-center text-xs text-muted-foreground">No saved chats yet.</div>}
             {!historyLoading &&
               history.map((item) => (
                 <button
                   key={item.uuid}
-                  className={item.uuid === conversationId ? 'chat-history-item chat-history-item-active' : 'chat-history-item'}
+                  className={`block w-full truncate rounded-md px-2 py-2 text-left text-sm transition-colors ${
+                    item.uuid === conversationId
+                      ? 'bg-accent text-accent-foreground'
+                      : 'text-muted-foreground hover:bg-accent/70 hover:text-accent-foreground'
+                  }`}
                   type="button"
                   onClick={() => loadConversation(item.uuid)}
                 >
@@ -284,14 +289,14 @@ export function SearchView({
           </div>
         </aside>
 
-        <div className="chat-main-panel">
+        <div className="relative flex min-h-svh min-w-0 flex-col">
 
-      {error && <div className="error">{error}</div>}
+      {error && <div className="mx-auto mt-4 w-full max-w-3xl rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">{error}</div>}
 
       {messages.length === 0 && (
-        <div className="chat-composer chat-composer-start">
+        <div className="mx-auto grid min-h-svh w-full max-w-3xl place-items-center px-6">
           <CorpusSearchForm
-            className="search-box chat-input"
+            className="w-full"
             value={query}
             onChange={setQuery}
             onSubmit={submit}
@@ -302,12 +307,19 @@ export function SearchView({
         </div>
       )}
 
-      <div className="chat-shell">
-        <div className="chat-layout">
-          <div className="chat-transcript" ref={transcriptRef}>
+      <div className="flex min-h-svh min-w-0 flex-1 flex-col">
+        <div className="min-h-0 flex-1">
+          <div className="mx-auto h-[calc(100svh-6rem)] w-full max-w-3xl space-y-8 overflow-y-auto px-6 py-10" ref={transcriptRef}>
             {messages.map((message) => (
-              <div key={message.id} className={`chat-message chat-message-${message.role}`}>
-                <div className="chat-role">{message.role === 'user' ? 'You' : 'Iris'}</div>
+              <div
+                key={message.id}
+                className={`grid gap-2 ${
+                  message.role === 'user'
+                    ? 'ml-auto max-w-[85%] rounded-xl bg-muted px-4 py-3'
+                    : 'w-full'
+                }`}
+              >
+                <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{message.role === 'user' ? 'You' : 'Iris'}</div>
                 {message.pending && !message.content ? (
                   <ThinkingState />
                 ) : (
@@ -333,9 +345,9 @@ export function SearchView({
           </div>
         </div>
         {messages.length > 0 && (
-          <div className="chat-composer chat-composer-bottom">
+          <div className="sticky bottom-0 border-t bg-background/90 px-6 py-4 backdrop-blur">
             <CorpusSearchForm
-              className="search-box chat-input"
+              className="mx-auto w-full max-w-3xl"
               value={query}
               onChange={setQuery}
               onSubmit={submit}
@@ -354,20 +366,17 @@ export function SearchView({
 
 function ThinkingState() {
   return (
-    <div className="chat-pending" aria-live="polite">
-      <div>
+    <div className="grid gap-3 text-sm text-muted-foreground" aria-live="polite">
+      <div className="flex items-center gap-2">
         <span>Thinking</span>
-        <span className="thinking-word" aria-hidden="true">
-          <span>quietly</span>
-          <span>through it</span>
-          <span>with context</span>
-          <span>ahead</span>
+        <span className="animate-pulse" aria-hidden="true">
+          through the corpus…
         </span>
       </div>
-      <div className="skeleton-stack skeleton-stack-chat" aria-hidden="true">
-        <span className="skeleton-line" />
-        <span className="skeleton-line" />
-        <span className="skeleton-line" />
+      <div className="grid gap-2" aria-hidden="true">
+        <span className="h-3 w-full animate-pulse rounded bg-muted" />
+        <span className="h-3 w-5/6 animate-pulse rounded bg-muted" />
+        <span className="h-3 w-2/3 animate-pulse rounded bg-muted" />
       </div>
     </div>
   );
@@ -375,9 +384,9 @@ function ThinkingState() {
 
 function HistorySkeleton({ rows = 5 }: { rows?: number }) {
   return (
-    <div className="skeleton-stack chat-history-skeleton" aria-label="Loading chats">
+    <div className="grid gap-2 px-2 py-1" aria-label="Loading chats">
       {Array.from({ length: rows }).map((_, index) => (
-        <span className="skeleton-line" key={index} />
+        <span className="h-8 animate-pulse rounded-md bg-muted" key={index} />
       ))}
     </div>
   );
@@ -385,12 +394,12 @@ function HistorySkeleton({ rows = 5 }: { rows?: number }) {
 
 function ResultSkeleton({ rows = 4 }: { rows?: number }) {
   return (
-    <div className="skeleton-stack chat-results-skeleton" aria-label="Loading search results">
+    <div className="grid gap-2" aria-label="Loading search results">
       {Array.from({ length: rows }).map((_, index) => (
-        <div className="chat-result-skeleton-card" key={index}>
-          <span className="skeleton-line" />
-          <span className="skeleton-line" />
-          <span className="skeleton-line" />
+        <div className="grid gap-2 rounded-lg border p-4" key={index}>
+          <span className="h-3 w-1/2 animate-pulse rounded bg-muted" />
+          <span className="h-3 w-full animate-pulse rounded bg-muted" />
+          <span className="h-3 w-2/3 animate-pulse rounded bg-muted" />
         </div>
       ))}
     </div>
@@ -407,13 +416,13 @@ function SearchResultsTable({
   onOpenResult: (result: SearchResult) => void;
 }) {
   return (
-    <div className="search-results-turn">
-      <div className="search-results-turn-header">
+    <div className="mt-5 overflow-hidden rounded-lg border">
+      <div className="flex items-center justify-between border-b bg-muted/40 px-4 py-2 text-sm font-medium">
         <span>Results</span>
-        <small>{results.length}</small>
+        <small className="text-muted-foreground">{results.length}</small>
       </div>
-      <div className="search-results-table" role="table" aria-label="Search results">
-        <div className="search-results-row search-results-head" role="row">
+      <div role="table" aria-label="Search results">
+        <div className="grid grid-cols-[minmax(0,2fr)_minmax(0,3fr)] gap-4 border-b bg-muted/20 px-4 py-2 text-xs font-semibold uppercase text-muted-foreground" role="row">
           <span>Title</span>
           <span>One-liner</span>
         </div>
@@ -423,7 +432,9 @@ function SearchResultsTable({
           return (
             <div
               key={document.uuid}
-              className={selected ? 'search-results-row search-results-row-selected' : 'search-results-row'}
+              className={`grid cursor-pointer grid-cols-[minmax(0,2fr)_minmax(0,3fr)] gap-4 border-b px-4 py-3 text-sm last:border-0 hover:bg-muted/50 ${
+                selected ? 'bg-accent/60' : ''
+              }`}
               role="row"
               tabIndex={0}
               aria-selected={selected}
@@ -439,16 +450,16 @@ function SearchResultsTable({
                 }
               }}
             >
-              <span className="search-results-title tooltip-overflow-cell" data-label="Title" data-tooltip={document.title ?? document.url}>
-                <strong>
-                  <span className="tooltip-overflow-text">{document.title ?? document.url}</span>
-                  <a href={document.url} target="_blank" rel="noreferrer" aria-label="Open document" onClick={(event) => event.stopPropagation()}>
+              <span className="min-w-0" data-label="Title" title={document.title ?? document.url}>
+                <strong className="flex min-w-0 items-center gap-1.5 font-medium">
+                  <span className="truncate">{document.title ?? document.url}</span>
+                  <a className="shrink-0 text-muted-foreground hover:text-foreground" href={document.url} target="_blank" rel="noreferrer" aria-label="Open document" onClick={(event) => event.stopPropagation()}>
                     <ArrowUpRight size={14} />
                   </a>
                 </strong>
               </span>
-              <span className="search-results-one-liner tooltip-overflow-cell" data-label="One-liner" data-tooltip={resultOneLiner(result)}>
-                <span className="tooltip-overflow-text">{resultOneLiner(result)}</span>
+              <span className="min-w-0 truncate text-muted-foreground" data-label="One-liner" title={resultOneLiner(result)}>
+                {resultOneLiner(result)}
               </span>
             </div>
           );
@@ -503,7 +514,7 @@ function MessageContent({ content }: { content: string }) {
   const blocks = content.split(/\n{2,}/).map((block) => block.trim()).filter(Boolean);
   if (blocks.length === 0) return null;
   return (
-    <div className="message-content">
+    <div className="grid gap-3 text-sm leading-7 [&_p]:whitespace-pre-wrap [&_ul]:list-disc [&_ul]:space-y-1 [&_ul]:pl-5">
       {blocks.map((block, blockIndex) => {
         const lines = block.split('\n').map((line) => line.trim()).filter(Boolean);
         const bulletLines = lines.filter((line) => line.startsWith('- '));
@@ -550,45 +561,46 @@ function SearchTrace({
   const [traceOpen, setTraceOpen] = useState(true);
   const inspectedCount = steps.reduce((total, step) => total + (step.documents?.length ?? 0), 0);
   return (
-    <details className="chat-activity" open={traceOpen} onToggle={(event) => setTraceOpen(event.currentTarget.open)}>
-      <summary>
+    <details className="mt-4 overflow-hidden rounded-lg border bg-card" open={traceOpen} onToggle={(event) => setTraceOpen(event.currentTarget.open)}>
+      <summary className="flex cursor-pointer list-none items-center justify-between gap-4 bg-muted/30 px-4 py-3 text-sm font-medium">
         <span>Search process</span>
-        <small>{steps.length} {steps.length === 1 ? 'query' : 'queries'} · {inspectedCount} inspected</small>
+        <small className="text-muted-foreground">{steps.length} {steps.length === 1 ? 'query' : 'queries'} · {inspectedCount} inspected</small>
       </summary>
-      <div className="chat-activity-body">
+      <div className="divide-y">
         {steps.map((step, index) => (
-          <details className="search-trace-step" key={`${step.kind}-${step.title}-${step.query}-${index}`}>
-            <summary className="search-trace-heading">
-              <span className="search-trace-icon">{traceIcon(step)}</span>
-              <span className="search-trace-summary-copy">
-                <strong>{traceTitle(step)}</strong>
-                {step.query && !isInternalDocumentQuery(step) && <small>{step.query}</small>}
+          <details className="group" key={`${step.kind}-${step.title}-${step.query}-${index}`}>
+            <summary className="grid cursor-pointer list-none grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 px-4 py-3 text-sm hover:bg-muted/40">
+              <span className="text-muted-foreground">{traceIcon(step)}</span>
+              <span className="min-w-0">
+                <strong className="block font-medium">{traceTitle(step)}</strong>
+                {step.query && !isInternalDocumentQuery(step) && <small className="block truncate text-muted-foreground">{step.query}</small>}
               </span>
-              {typeof step.hits === 'number' && <small>{step.hits} found</small>}
+              {typeof step.hits === 'number' && <small className="text-muted-foreground">{step.hits} found</small>}
             </summary>
-            <div className="search-trace-detail">
+            <div className="grid gap-3 border-t bg-muted/20 px-4 py-3">
               {step.query && !isInternalDocumentQuery(step) && (
-                <code className="search-trace-query">{step.query}</code>
+                <code className="overflow-x-auto rounded-md bg-muted px-3 py-2 text-xs">{step.query}</code>
               )}
               {step.documents?.length > 0 && (
-                <div className="search-trace-documents">
+                <div className="grid gap-2">
                   {step.documents.map((document, documentIndex) => (
                     <button
+                      className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-4 rounded-md border bg-background px-3 py-2 text-left text-xs hover:bg-accent"
                       key={`${document.uuid}-${documentIndex}`}
                       type="button"
                       onClick={() => onOpenDocument(document)}
                     >
-                      <span>
-                        <strong>{document.title}</strong>
-                        <small>{document.source_domain}</small>
+                      <span className="min-w-0">
+                        <strong className="block truncate font-medium">{document.title}</strong>
+                        <small className="block truncate text-muted-foreground">{document.source_domain}</small>
                       </span>
-                      <em>{document.reason}</em>
+                      <em className="line-clamp-2 not-italic text-muted-foreground">{document.reason}</em>
                     </button>
                   ))}
                 </div>
               )}
               {step.documents?.length === 0 && step.detail && (
-                <p className="search-trace-empty">{step.detail}</p>
+                <p className="text-xs text-muted-foreground">{step.detail}</p>
               )}
             </div>
           </details>

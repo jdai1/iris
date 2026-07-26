@@ -240,14 +240,14 @@ export function DirectoryView({
   }
 
   return (
-    <section className="directory-view">
+    <section className="min-h-svh min-w-0 p-4 sm:p-6">
       {target ? (
-        <Button className="directory-back directory-back-top" uiVariant="plainIcon" type="button" onClick={showDirectoryRoot} aria-label="Back to sources">
+        <Button className="mb-4 size-9 rounded-md border bg-background" uiVariant="plainIcon" type="button" onClick={showDirectoryRoot} aria-label="Back to sources">
           ←
         </Button>
       ) : (
         <CorpusSearchForm
-          className="search-box"
+          className="mb-5 w-full max-w-xl"
           value={query}
           onChange={updateQuery}
           onSubmit={submit}
@@ -256,13 +256,13 @@ export function DirectoryView({
         />
       )}
 
-      {error && <StateMessage className="error" tone="error">{error}</StateMessage>}
-      {loading && !target && <TableSkeleton columns={7} rows={10} />}
+      {error && <StateMessage className="mb-5" tone="error">{error}</StateMessage>}
+      {loading && !target && <TableSkeleton rows={10} />}
 
       {!loading && !target && (
-        <div className="directory-table-panel">
-          <div className={refreshing ? 'directory-table directory-table-refreshing' : 'directory-table'}>
-            <div className="directory-table-row directory-table-head" role="row">
+        <div className="overflow-x-auto rounded-xl border bg-card">
+          <div className={`min-w-[880px] transition-opacity ${refreshing ? 'opacity-60' : 'opacity-100'}`}>
+            <div className="grid grid-cols-[minmax(12rem,1.2fr)_minmax(16rem,2fr)_repeat(4,5.5rem)_7rem] items-center gap-3 border-b bg-muted/40 px-4 py-2 text-xs font-semibold uppercase text-muted-foreground" role="row">
               <Button uiVariant="rowAction" type="button" onClick={() => updateDirectorySort('source')}>{directorySortLabel('Source', 'source', directorySort, directorySortDirection)}</Button>
               <span>About</span>
               <Button uiVariant="rowAction" type="button" onClick={() => updateDirectorySort('essays')}>{directorySortLabel('Essays', 'essays', directorySort, directorySortDirection)}</Button>
@@ -272,31 +272,31 @@ export function DirectoryView({
               <Button uiVariant="rowAction" type="button" onClick={() => updateDirectorySort('recent')}>{directorySortLabel('Updated', 'recent', directorySort, directorySortDirection)}</Button>
             </div>
             {directoryPage.items.map((source) => (
-              <div key={source.id} className="directory-table-row" role="button" tabIndex={0} onClick={() => selectDirectorySource(source)} onKeyDown={(event) => {
+              <div key={source.id} className="grid cursor-pointer grid-cols-[minmax(12rem,1.2fr)_minmax(16rem,2fr)_repeat(4,5.5rem)_7rem] items-center gap-3 border-b px-4 py-3 text-sm last:border-0 hover:bg-muted/50" role="button" tabIndex={0} onClick={() => selectDirectorySource(source)} onKeyDown={(event) => {
                 if (event.key === 'Enter' || event.key === ' ') selectDirectorySource(source);
               }}>
-                <span className="directory-source-cell" data-label="Source">
-                  <strong>{source.canonical_domain}</strong>
-                  <a href={source.url} target="_blank" rel="noreferrer" aria-label="Open source" onClick={(event) => event.stopPropagation()}>
+                <span className="flex min-w-0 items-center gap-1.5" data-label="Source">
+                  <strong className="truncate font-medium">{source.canonical_domain}</strong>
+                  <a className="shrink-0 text-muted-foreground hover:text-foreground" href={source.url} target="_blank" rel="noreferrer" aria-label="Open source" onClick={(event) => event.stopPropagation()}>
                     <ArrowUpRight size={15} />
                   </a>
                 </span>
-                <span className="directory-description-cell tooltip-overflow-cell" data-label="About">
+                <span className="min-w-0 truncate text-muted-foreground" data-label="About">
                   <OverflowText>{source.description || source.name || '-'}</OverflowText>
                 </span>
-                <span className="directory-stat-pair" data-label="Essays">
+                <span className="text-right tabular-nums text-muted-foreground" data-label="Essays">
                   <strong>{formatCompactCount(source.essay_count)}</strong>
                 </span>
-                <span className="directory-stat-pair" data-label="Essay refs">
+                <span className="text-right tabular-nums text-muted-foreground" data-label="Essay refs">
                   <strong>{formatCompactCount(source.essay_reference_count)}</strong>
                 </span>
-                <span className="directory-stat-pair" data-label="Sources">
+                <span className="text-right tabular-nums text-muted-foreground" data-label="Sources">
                   <strong>{formatCompactCount(source.external_source_count)}</strong>
                 </span>
-                <span className="directory-stat-pair" data-label="Docs">
+                <span className="text-right tabular-nums text-muted-foreground" data-label="Docs">
                   <strong>{formatCompactCount(source.document_count)}</strong>
                 </span>
-                <span className="directory-stat-pair" data-label="Updated">
+                <span className="text-right text-xs text-muted-foreground" data-label="Updated">
                   <strong>{formatDirectoryDate(source.last_checked_at)}</strong>
                 </span>
               </div>
@@ -307,18 +307,18 @@ export function DirectoryView({
       )}
 
       {target && (
-        <div className="profile-panel directory-profile-page" aria-busy={profileLoading}>
-          <div className="profile-heading">
+        <div className="min-h-[calc(100svh-5rem)] overflow-hidden rounded-xl border bg-card" aria-busy={profileLoading}>
+          <div className="flex h-16 items-center border-b px-5">
             <div>
-              <h3>
+              <h3 className="flex items-center gap-2 text-lg font-semibold">
                 <span>{activeSelectedSource?.canonical_domain || target.domain}</span>
-                <a href={activeSelectedSource?.url ?? `https://${target.domain}`} target="_blank" rel="noreferrer" aria-label="Open source">
+                <a className="text-muted-foreground hover:text-foreground" href={activeSelectedSource?.url ?? `https://${target.domain}`} target="_blank" rel="noreferrer" aria-label="Open source">
                   <ArrowUpRight size={16} />
                 </a>
               </h3>
             </div>
           </div>
-          <nav className="source-view-menu" aria-label="Source views">
+          <nav className="flex min-h-12 items-center gap-1 overflow-x-auto border-b bg-muted/20 px-3 py-1.5" aria-label="Source views">
             <SourceViewButton
               active={activeProfileTab === 'profile'}
               icon={<LayoutTemplate size={14} />}
@@ -352,17 +352,17 @@ export function DirectoryView({
               onClick={() => setActiveProfileTab('graph')}
             />
           </nav>
-          <div className="source-view-body">
+          <div className="min-h-[calc(100svh-12rem)] p-5">
             {profileLoading && <SourceProfileSkeleton />}
             {!profileLoading && activeProfileTab === 'profile' && (
-              <div className="profile-overview-grid">
+              <div className="grid items-start gap-5 xl:grid-cols-[minmax(0,2fr)_minmax(18rem,1fr)]">
                 <ProfileAnalysisCard analysis={profileAnalysis} />
                 <SourceNetworkPanel inbound={profileNetwork.inbound} outbound={profileNetwork.outbound} onOpenProfile={onOpenProfile} />
               </div>
             )}
             {!profileLoading && activeProfileTab === 'essays' && (
               <>
-                <div className="profile-documents">
+                <div className="overflow-x-auto">
                   <DirectoryDocumentTable documents={documentsPage.items} onOpenDocument={openDirectoryDrawer} />
                 </div>
                 <ProfilePagination page={documentsPage} onChange={pageProfileDocuments} />
@@ -372,14 +372,14 @@ export function DirectoryView({
               <SourceCollectionsTab groups={profileCollectionGroups} onOpenDocument={openDirectoryDrawer} />
             )}
             {!profileLoading && activeProfileTab === 'explore' && activeSelectedSource && (
-              <div className="source-visual-panel">
+              <div className="min-h-[calc(100svh-15rem)] overflow-hidden rounded-xl border">
                 <Suspense fallback={<SourceVisualSkeleton />}>
                   <EmbeddingExplorer key={activeSelectedSource.id} sourceId={activeSelectedSource.id} />
                 </Suspense>
               </div>
             )}
             {!profileLoading && activeProfileTab === 'graph' && (
-              <div className="source-visual-panel">
+              <div className="min-h-[calc(100svh-15rem)] overflow-hidden rounded-xl border">
                 <GraphExplorer
                   key={target.domain}
                   onOpenProfile={onOpenProfile}
@@ -410,14 +410,16 @@ function SourceViewButton({
   return (
     <button
       type="button"
-      className={active ? 'source-view-menu-item source-view-menu-item-active' : 'source-view-menu-item'}
+      className={`inline-flex h-9 shrink-0 items-center gap-2 rounded-md px-3 text-sm font-medium transition-colors ${
+        active ? 'bg-background text-foreground shadow-xs' : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
+      }`}
       aria-pressed={active}
       onClick={onClick}
     >
       {icon}
       <span>{label}</span>
       {count !== undefined && (
-        <small className={typeof count === 'number' ? undefined : 'source-view-count-placeholder'} aria-hidden={typeof count !== 'number'}>
+        <small className={`rounded-full bg-muted px-1.5 py-0.5 text-[10px] tabular-nums ${typeof count === 'number' ? '' : 'invisible'}`} aria-hidden={typeof count !== 'number'}>
           {typeof count === 'number' ? count : '000'}
         </small>
       )}
@@ -460,19 +462,19 @@ function SourceCollectionsTab({
 }) {
   if (!groups.length) {
     return (
-      <StateMessage className="profile-tab-empty">
+      <StateMessage>
         No collections include documents from this source.
       </StateMessage>
     );
   }
 
   return (
-    <div className="profile-collection-list">
+    <div className="space-y-5">
       {groups.map(({ collection, items }) => (
-        <section className="profile-collection-group" key={collection.id}>
-          <div className="profile-collection-heading">
+        <section className="overflow-hidden rounded-xl border" key={collection.id}>
+          <div className="flex items-center justify-between border-b bg-muted/30 px-4 py-3">
             <strong>{collection.name}</strong>
-            <span>{items.length}</span>
+            <span className="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">{items.length}</span>
           </div>
           <DenseDocumentTable
             rows={items.map((entry) => ({
@@ -532,10 +534,10 @@ function SourceNetworkPanel({
   onOpenProfile: (sourceId: number, domain: string) => void;
 }) {
   return (
-    <aside className="profile-network-panel" aria-label="Source network">
-      <div className="profile-network-panel-heading">
-        <h4>Network</h4>
-        <span>{inbound.length + outbound.length}</span>
+    <aside className="overflow-hidden rounded-xl border" aria-label="Source network">
+      <div className="flex items-center justify-between border-b bg-muted/30 px-4 py-3">
+        <h4 className="font-medium">Network</h4>
+        <span className="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">{inbound.length + outbound.length}</span>
       </div>
       <SourceNetworkSection title="Referenced by" items={inbound} onOpenProfile={onOpenProfile} />
       <SourceNetworkSection title="References" items={outbound} onOpenProfile={onOpenProfile} />
@@ -553,21 +555,21 @@ function SourceNetworkSection({
   onOpenProfile: (sourceId: number, domain: string) => void;
 }) {
   return (
-    <section className="profile-network-section">
-      <h4>{title}</h4>
+    <section className="border-b p-4 last:border-b-0">
+      <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">{title}</h4>
       {items.length === 0 ? (
-        <p className="empty-reference-note" data-tooltip="No visible sources.">—</p>
+        <p className="py-3 text-center text-muted-foreground" title="No visible sources.">—</p>
       ) : (
-        <div className="profile-network-list">
+        <div className="space-y-1">
           {items.map((item) => {
             const sourceId = Number(item.node.id.replace('source:', ''));
             return (
-              <button key={`${item.edge.source}-${item.edge.target}`} type="button" onClick={() => onOpenProfile(sourceId, item.node.domain)}>
-                <span>
-                  <strong>{item.node.label}</strong>
-                  <small>{item.node.domain}</small>
+              <button className="grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-md px-2 py-2 text-left text-sm hover:bg-muted" key={`${item.edge.source}-${item.edge.target}`} type="button" onClick={() => onOpenProfile(sourceId, item.node.domain)}>
+                <span className="min-w-0">
+                  <strong className="block truncate font-medium">{item.node.label}</strong>
+                  <small className="block truncate text-muted-foreground">{item.node.domain}</small>
                 </span>
-                <em>{sourceNetworkWeightLabel(item.edge.weight)}</em>
+                <em className="text-xs not-italic text-muted-foreground">{sourceNetworkWeightLabel(item.edge.weight)}</em>
               </button>
             );
           })}
@@ -582,13 +584,13 @@ function sourceNetworkWeightLabel(weight: number) {
   return `${count} link${count === 1 ? '' : 's'}`;
 }
 
-function TableSkeleton({ columns, rows }: { columns: number; rows: number }) {
+function TableSkeleton({ rows }: { rows: number }) {
   return (
-    <div className="skeleton-table" aria-label="Loading rows">
+    <div className="overflow-hidden rounded-xl border bg-card" aria-label="Loading rows">
       {Array.from({ length: rows }).map((_, row) => (
-        <div className="skeleton-table-row" style={{ gridTemplateColumns: `minmax(160px, 1fr) repeat(${columns - 1}, 92px)` }} key={row}>
-          {Array.from({ length: columns }).map((__, column) => (
-            <span className="skeleton-line" key={column} />
+        <div className="grid grid-cols-[minmax(160px,1fr)_repeat(6,92px)] gap-3 border-b px-4 py-3 last:border-0" key={row}>
+          {Array.from({ length: 7 }).map((__, column) => (
+            <span className="h-4 animate-pulse rounded bg-muted" key={column} />
           ))}
         </div>
       ))}
@@ -598,16 +600,16 @@ function TableSkeleton({ columns, rows }: { columns: number; rows: number }) {
 
 function SourceProfileSkeleton() {
   return (
-    <div className="source-profile-skeleton" aria-label="Loading source">
-      <div className="source-profile-skeleton-main">
-        <span className="skeleton-line" />
-        <span className="skeleton-line" />
-        <span className="skeleton-line" />
+    <div className="grid min-h-[30rem] gap-5 xl:grid-cols-[minmax(0,2fr)_minmax(18rem,1fr)]" aria-label="Loading source">
+      <div className="grid content-start gap-3 rounded-xl border p-5">
+        <span className="h-6 w-1/3 animate-pulse rounded bg-muted" />
+        <span className="h-4 w-full animate-pulse rounded bg-muted" />
+        <span className="h-32 w-full animate-pulse rounded bg-muted" />
       </div>
-      <div className="source-profile-skeleton-side">
-        <span className="skeleton-line" />
-        <span className="skeleton-line" />
-        <span className="skeleton-line" />
+      <div className="grid content-start gap-3 rounded-xl border p-5">
+        <span className="h-5 w-1/2 animate-pulse rounded bg-muted" />
+        <span className="h-12 w-full animate-pulse rounded bg-muted" />
+        <span className="h-12 w-full animate-pulse rounded bg-muted" />
       </div>
     </div>
   );
@@ -615,8 +617,8 @@ function SourceProfileSkeleton() {
 
 function SourceVisualSkeleton() {
   return (
-    <div className="source-visual-skeleton" aria-label="Loading visualization">
-      <span className="skeleton-line" />
+    <div className="grid min-h-[30rem] place-items-center" aria-label="Loading visualization">
+      <span className="size-10 animate-pulse rounded-full bg-muted" />
     </div>
   );
 }

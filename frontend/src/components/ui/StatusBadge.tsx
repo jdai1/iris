@@ -3,13 +3,13 @@ import { cn } from '@/lib/utils';
 import { Chip } from './Chip';
 
 const statusTone: Record<string, string> = {
-  failed: 'border-[var(--status-red-border)] bg-[var(--status-red-bg)] text-[var(--status-red-text)]',
-  error: 'border-[var(--status-red-border)] bg-[var(--status-red-bg)] text-[var(--status-red-text)]',
-  complete: 'border-[var(--status-green-border)] bg-[var(--status-green-bg)] text-[var(--status-green-text)]',
-  completed: 'border-[var(--status-green-border)] bg-[var(--status-green-bg)] text-[var(--status-green-text)]',
-  success: 'border-[var(--status-green-border)] bg-[var(--status-green-bg)] text-[var(--status-green-text)]',
-  running: 'border-[var(--status-blue-border)] bg-[var(--status-blue-bg)] text-[var(--status-blue-text)]',
-  pending: 'border-[var(--border-input)] bg-[var(--bg-sunken)] text-[var(--text-muted)]',
+  failed: 'border-destructive/30 bg-destructive/10 text-destructive',
+  error: 'border-destructive/30 bg-destructive/10 text-destructive',
+  complete: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400',
+  completed: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400',
+  success: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400',
+  running: 'border-blue-500/30 bg-blue-500/10 text-blue-700 dark:text-blue-400',
+  pending: 'border-border bg-secondary text-muted-foreground',
 };
 
 export function StatusBadge({ className, value, ...props }: ComponentProps<'span'> & { value: string }) {

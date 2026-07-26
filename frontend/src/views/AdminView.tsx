@@ -12,6 +12,9 @@ import { StatusPill } from '../components/StatusPill';
 import { Button, Chip, ChipList, MetricCard, StateMessage } from '../components/ui';
 import type { AdminCrawlJob, AdminIndexRun, AdminOverview, AdminSource, Document, Page } from '../types';
 
+const adminTableWrapClass = 'overflow-x-auto rounded-xl border bg-card';
+const adminTableClass = 'w-full min-w-[760px] border-collapse text-sm [&_th]:border-b [&_th]:bg-muted/40 [&_th]:px-4 [&_th]:py-2.5 [&_th]:text-left [&_th]:text-xs [&_th]:font-semibold [&_th]:uppercase [&_th]:text-muted-foreground [&_td]:border-b [&_td]:px-4 [&_td]:py-3 [&_td]:align-top [&_tbody_tr:last-child_td]:border-b-0 [&_tbody_tr:hover]:bg-muted/40 [&_td_small]:mt-1 [&_td_small]:block [&_td_small]:text-xs [&_td_small]:text-muted-foreground';
+
 export function AdminView() {
   const [overview, setOverview] = useState<AdminOverview | null>(null);
   const [sourcesPage, setSourcesPage] = useState<Page<AdminSource>>(emptyPage);
@@ -215,36 +218,36 @@ export function AdminView() {
   const activeSources = overview?.source_statuses.crawling ?? 0;
 
   return (
-    <section>
-      <div className="section-header">
+    <section className="min-h-svh p-4 sm:p-6">
+      <div className="mb-6 flex items-start justify-between gap-4">
         <div>
-          <h2>Admin</h2>
-          <p>Read-only database view for ingestion, crawl runs, sources, and documents.</p>
+          <h2 className="text-2xl font-semibold tracking-tight">Admin</h2>
+          <p className="mt-1 text-sm text-muted-foreground">Read-only database view for ingestion, crawl runs, sources, and documents.</p>
         </div>
         <Button type="button" uiVariant="outline" onClick={() => refresh()}>
           Refresh
         </Button>
       </div>
 
-      {error && <StateMessage className="error" tone="error">{error}</StateMessage>}
+      {error && <StateMessage className="mb-5" tone="error">{error}</StateMessage>}
 
-      <div className="metric-grid">
-        <MetricCard className="metric" label="sources crawled" value={crawledSources} />
-        <MetricCard className="metric" label="active crawls" value={activeSources} />
-        <MetricCard className="metric" label="documents" value={overview?.totals.documents ?? 0} />
-        <MetricCard className="metric" label="essays" value={overview?.totals.essay_documents ?? 0} />
-        <MetricCard className="metric" label="links" value={overview?.totals.links ?? 0} />
-        <MetricCard className="metric" label="resolved links" value={overview?.totals.resolved_links ?? 0} />
+      <div className="mb-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+        <MetricCard label="sources crawled" value={crawledSources} />
+        <MetricCard label="active crawls" value={activeSources} />
+        <MetricCard label="documents" value={overview?.totals.documents ?? 0} />
+        <MetricCard label="essays" value={overview?.totals.essay_documents ?? 0} />
+        <MetricCard label="links" value={overview?.totals.links ?? 0} />
+        <MetricCard label="resolved links" value={overview?.totals.resolved_links ?? 0} />
       </div>
 
-      <div className="admin-controls">
-        <div className="tab-strip">
+      <div className="mb-4 space-y-3 rounded-xl border bg-card p-3">
+        <div className="inline-flex rounded-lg bg-muted p-1">
           {(['sources', 'documents', 'jobs', 'runs'] as const).map((table) => (
             <Button
               key={table}
               type="button"
               uiVariant="tab"
-              className={activeTable === table ? 'active' : ''}
+              data-active={activeTable === table ? 'true' : undefined}
               onClick={() => setActiveTable(table)}
             >
               {table}
@@ -252,8 +255,8 @@ export function AdminView() {
           ))}
         </div>
         {activeTable === 'sources' && (
-          <form className="admin-filter" onSubmit={submitSearch}>
-            <select value={status} onChange={(event) => updateStatus(event.target.value)}>
+          <form className="flex flex-wrap gap-2" onSubmit={submitSearch}>
+            <select className="h-9 rounded-md border bg-background px-3 text-sm" value={status} onChange={(event) => updateStatus(event.target.value)}>
               <option value="indexed">crawled/indexed</option>
               <option value="queued">queued</option>
               <option value="ignored">ignored</option>
@@ -261,14 +264,14 @@ export function AdminView() {
               <option value="crawling">crawling</option>
               <option value="all">all</option>
             </select>
-            <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="filter domain" />
+            <input className="h-9 min-w-52 rounded-md border bg-background px-3 text-sm" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="filter domain" />
             <Button type="submit" uiVariant="outline">Apply</Button>
           </form>
         )}
         {activeTable === 'documents' && (
-          <div className="admin-document-controls">
-            <div className="admin-filter">
-              <select value={documentSourceId ?? ''} onChange={(event) => updateDocumentSource(event.target.value)}>
+          <div className="space-y-2">
+            <div className="flex flex-wrap gap-2">
+              <select className="h-9 rounded-md border bg-background px-3 text-sm" value={documentSourceId ?? ''} onChange={(event) => updateDocumentSource(event.target.value)}>
                 <option value="">all sources, newest first</option>
                 {sourcesPage.items
                   .filter((source) => source.document_count > 0)
@@ -278,14 +281,14 @@ export function AdminView() {
                     </option>
                   ))}
               </select>
-              <select value={documentType} onChange={(event) => updateDocumentType(event.target.value)}>
+              <select className="h-9 rounded-md border bg-background px-3 text-sm" value={documentType} onChange={(event) => updateDocumentType(event.target.value)}>
                 <option value="all">all document types</option>
                 <option value="essay">essays</option>
                 <option value="collection">collections</option>
               </select>
             </div>
             {(documentCrawlJobId || documentIndexRunId) && (
-              <div className="admin-scope-banner">
+              <div className="flex items-center justify-between gap-3 rounded-md bg-muted px-3 py-2 text-xs text-muted-foreground">
                 <span>
                   Showing documents inferred from {documentCrawlJobId ? `crawl job ${documentCrawlJobId}` : `index run ${documentIndexRunId}`}.
                 </span>
@@ -295,21 +298,22 @@ export function AdminView() {
           </div>
         )}
         {activeTable === 'jobs' && (
-          <div className="admin-filter admin-filter-wide">
-            <select value={jobStatus} onChange={(event) => updateJobStatus(event.target.value)}>
+          <div className="flex flex-wrap gap-2">
+            <select className="h-9 rounded-md border bg-background px-3 text-sm" value={jobStatus} onChange={(event) => updateJobStatus(event.target.value)}>
               <option value="all">all job statuses</option>
               <option value="succeeded">succeeded</option>
               <option value="skipped">skipped</option>
               <option value="failed">failed</option>
               <option value="running">running</option>
             </select>
-            <select value={jobSourceId ?? ''} onChange={(event) => updateJobSource(event.target.value)}>
+            <select className="h-9 rounded-md border bg-background px-3 text-sm" value={jobSourceId ?? ''} onChange={(event) => updateJobSource(event.target.value)}>
               <option value="">all sources</option>
               {sourcesPage.items.map((source) => (
                 <option key={source.id} value={source.id}>{source.canonical_domain}</option>
               ))}
             </select>
             <input
+              className="h-9 rounded-md border bg-background px-3 text-sm"
               value={jobRunId ?? ''}
               onChange={(event) => updateJobRun(event.target.value)}
               placeholder="index run id"
@@ -318,8 +322,8 @@ export function AdminView() {
           </div>
         )}
         {activeTable === 'runs' && (
-          <div className="admin-filter">
-            <select value={runStatus} onChange={(event) => updateRunStatus(event.target.value)}>
+          <div className="flex flex-wrap gap-2">
+            <select className="h-9 rounded-md border bg-background px-3 text-sm" value={runStatus} onChange={(event) => updateRunStatus(event.target.value)}>
               <option value="all">all run statuses</option>
               <option value="succeeded">succeeded</option>
               <option value="stopped">stopped</option>
@@ -330,7 +334,7 @@ export function AdminView() {
         )}
       </div>
 
-      {loading ? <StateMessage className="empty-state">Loading admin data...</StateMessage> : null}
+      {loading ? <StateMessage>Loading admin data...</StateMessage> : null}
       {!loading && activeTable === 'sources' && (
         <>
           <Pagination page={sourcesPage} onChange={pageSources} />
@@ -371,8 +375,8 @@ export function AdminView() {
 
 function AdminSourcesTable({ sources }: { sources: AdminSource[] }) {
   return (
-    <div className="admin-table-wrap">
-      <table className="admin-table">
+    <div className={adminTableWrapClass}>
+      <table className={adminTableClass}>
         <thead>
           <tr>
             <th>Domain</th>
@@ -401,7 +405,7 @@ function AdminSourcesTable({ sources }: { sources: AdminSource[] }) {
           ))}
         </tbody>
       </table>
-      {sources.length === 0 && <StateMessage className="empty-state">No sources match this filter.</StateMessage>}
+      {sources.length === 0 && <StateMessage className="m-4">No sources match this filter.</StateMessage>}
     </div>
   );
 }
@@ -424,12 +428,12 @@ function AdminDocumentsTable({
   const end = Math.min(page.offset + page.items.length, page.total);
   return (
     <>
-      <p className="admin-note">
+      <p className="mb-2 text-xs text-muted-foreground">
         Showing {start}-{end} of {page.total} documents
         {sourceName ? ` from ${sourceName}` : ' across all sources'}{scope}.
       </p>
-      <div className="admin-table-wrap">
-        <table className="admin-table">
+      <div className={adminTableWrapClass}>
+        <table className={adminTableClass}>
         <thead>
           <tr>
             <th>Document</th>
@@ -442,12 +446,12 @@ function AdminDocumentsTable({
           {documents.map((document) => (
             <tr key={document.id}>
               <td data-label="Document">
-                <div className="admin-document-cell">
+                <div className="max-w-xl">
                   <a href={document.url} target="_blank" rel="noreferrer">{document.title || document.url}</a>
-                  <small className="admin-document-url">{document.url}</small>
-                  {document.summary && <p>{document.summary}</p>}
+                  <small className="truncate">{document.url}</small>
+                  {document.summary && <p className="mt-2 line-clamp-3 text-xs text-muted-foreground">{document.summary}</p>}
                   {document.topics.length > 0 && (
-                    <ChipList className="admin-document-topics">
+                    <ChipList className="mt-2">
                       {document.topics.map((topic) => (
                         <Chip key={topic}>{topic}</Chip>
                       ))}
@@ -469,8 +473,8 @@ function AdminDocumentsTable({
 
 function AdminJobsTable({ jobs, onShowDocuments }: { jobs: AdminCrawlJob[]; onShowDocuments: (job: AdminCrawlJob) => void }) {
   return (
-    <div className="admin-table-wrap">
-      <table className="admin-table">
+    <div className={adminTableWrapClass}>
+      <table className={adminTableClass}>
         <thead>
           <tr>
             <th>Job</th>
@@ -504,7 +508,7 @@ function AdminJobsTable({ jobs, onShowDocuments }: { jobs: AdminCrawlJob[]; onSh
               <td data-label="Discovered">{job.sources_discovered}</td>
               <td data-label="Started">{formatDate(job.started_at)}</td>
               <td data-label="Inspect">
-                <Button className="admin-inline-action" uiVariant="rowAction" type="button" onClick={() => onShowDocuments(job)}>
+                <Button uiVariant="rowAction" type="button" onClick={() => onShowDocuments(job)}>
                   View docs
                 </Button>
               </td>
@@ -518,7 +522,7 @@ function AdminJobsTable({ jobs, onShowDocuments }: { jobs: AdminCrawlJob[]; onSh
 
 function JobLabel({ job }: { job: { id: number; index_run_id: number | null; pages_fetched?: number; documents_indexed?: number } }) {
   return (
-    <span className="job-label">
+    <span className="grid gap-0.5">
       crawl job {job.id}
       {job.index_run_id ? <small>index run {job.index_run_id}</small> : <small>manual crawl</small>}
       {typeof job.pages_fetched === 'number' && typeof job.documents_indexed === 'number' && (
@@ -538,8 +542,8 @@ function AdminRunsTable({
   onShowDocuments: (run: AdminIndexRun) => void;
 }) {
   return (
-    <div className="admin-table-wrap">
-      <table className="admin-table">
+    <div className={adminTableWrapClass}>
+      <table className={adminTableClass}>
         <thead>
           <tr>
             <th>Run</th>
@@ -568,11 +572,11 @@ function AdminRunsTable({
               <td data-label="Errors">{run.errors}</td>
               <td data-label="Stop">{run.stop_reason ?? '-'}</td>
               <td data-label="Inspect">
-                <div className="admin-inline-actions">
-                  <Button className="admin-inline-action" uiVariant="rowAction" type="button" onClick={() => onShowJobs(run)}>
+                <div className="flex flex-wrap gap-1">
+                  <Button uiVariant="rowAction" type="button" onClick={() => onShowJobs(run)}>
                     View jobs
                   </Button>
-                  <Button className="admin-inline-action" uiVariant="rowAction" type="button" onClick={() => onShowDocuments(run)}>
+                  <Button uiVariant="rowAction" type="button" onClick={() => onShowDocuments(run)}>
                     View docs
                   </Button>
                 </div>

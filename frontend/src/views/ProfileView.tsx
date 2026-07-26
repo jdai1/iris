@@ -82,26 +82,27 @@ export function ProfileView({ onUsernameChange }: { onUsernameChange?: (username
   }
 
   return (
-    <section className="profile-settings-view">
-      <header className="profile-settings-header">
-        <span>Settings</span>
-        <h1>My profile</h1>
-        <p>Only connected friends can open your profile.</p>
+    <section className="mx-auto min-h-svh w-full max-w-3xl p-5 sm:p-8">
+      <header className="mb-8">
+        <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Settings</span>
+        <h1 className="mt-1 text-2xl font-semibold tracking-tight">My profile</h1>
+        <p className="mt-1 text-sm text-muted-foreground">Only connected friends can open your profile.</p>
       </header>
 
-      {error && <div className="profile-settings-error">{error}</div>}
+      {error && <div className="mb-5 rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">{error}</div>}
       {loading && <ProfileSettingsSkeleton />}
 
       {!loading && profile && (
-        <div className="profile-settings-sections">
-          <form className="profile-settings-section" onSubmit={saveUsername}>
+        <div className="space-y-5">
+          <form className="rounded-xl border bg-card p-5" onSubmit={saveUsername}>
             <div>
-              <h2>Username</h2>
-              <p>This is how you appear across Iris.</p>
+              <h2 className="font-medium">Username</h2>
+              <p className="mt-1 text-sm text-muted-foreground">This is how you appear across Iris.</p>
             </div>
-            <div className="profile-settings-inline">
-              <span>@</span>
+            <div className="mt-4 flex max-w-lg items-center gap-2">
+              <span className="text-muted-foreground">@</span>
               <input
+                className="h-9 min-w-0 flex-1 rounded-md border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring/20"
                 aria-label="Username"
                 value={username}
                 onChange={(event) => setUsername(event.target.value)}
@@ -117,14 +118,15 @@ export function ProfileView({ onUsernameChange }: { onUsernameChange?: (username
             </div>
           </form>
 
-          <section className="profile-settings-section">
+          <section className="rounded-xl border bg-card p-5">
             <div>
-              <h2>Personal websites</h2>
-              <p>Attached sites are added to the Iris indexing queue.</p>
+              <h2 className="font-medium">Personal websites</h2>
+              <p className="mt-1 text-sm text-muted-foreground">Attached sites are added to the Iris indexing queue.</p>
             </div>
-            <form className="profile-settings-inline profile-settings-website-form" onSubmit={addWebsite}>
-              <Globe2 size={15} />
+            <form className="mt-4 flex max-w-lg items-center gap-2" onSubmit={addWebsite}>
+              <Globe2 className="size-4 shrink-0 text-muted-foreground" />
               <input
+                className="h-9 min-w-0 flex-1 rounded-md border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring/20"
                 aria-label="Personal website URL"
                 value={websiteUrl}
                 onChange={(event) => setWebsiteUrl(event.target.value)}
@@ -135,15 +137,15 @@ export function ProfileView({ onUsernameChange }: { onUsernameChange?: (username
                 Add
               </Button>
             </form>
-            <div className="profile-settings-websites">
+            <div className="mt-5 divide-y rounded-lg border">
               {profile.websites.length === 0 && (
-                <p className="profile-settings-empty">No personal website attached.</p>
+                <p className="px-4 py-6 text-center text-sm text-muted-foreground">No personal website attached.</p>
               )}
               {profile.websites.map((website) => (
-                <div className="profile-settings-website" key={website.id}>
-                  <a href={website.url} target="_blank" rel="noreferrer">
-                    <span>{website.canonical_domain}</span>
-                    <small>{website.source_status}</small>
+                <div className="flex items-center justify-between gap-3 px-4 py-3" key={website.id}>
+                  <a className="flex min-w-0 items-center gap-2 text-sm hover:text-primary" href={website.url} target="_blank" rel="noreferrer">
+                    <span className="truncate font-medium">{website.canonical_domain}</span>
+                    <small className="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">{website.source_status}</small>
                     <ArrowUpRight size={14} />
                   </a>
                   <Button uiVariant="ghost" disabled={busy} onClick={() => removeWebsite(website.id)}>
@@ -161,11 +163,11 @@ export function ProfileView({ onUsernameChange }: { onUsernameChange?: (username
 
 function ProfileSettingsSkeleton() {
   return (
-    <div className="profile-settings-sections" aria-label="Loading profile">
+    <div className="space-y-5" aria-label="Loading profile">
       {[0, 1].map((item) => (
-        <div className="profile-settings-section profile-settings-skeleton" key={item}>
-          <span className="skeleton-line" />
-          <span className="skeleton-line" />
+        <div className="grid gap-3 rounded-xl border bg-card p-5" key={item}>
+          <span className="h-5 w-32 animate-pulse rounded bg-muted" />
+          <span className="h-9 w-full animate-pulse rounded bg-muted" />
         </div>
       ))}
     </div>

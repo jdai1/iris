@@ -1,6 +1,7 @@
 import { FormEvent, ReactNode } from 'react';
 import { CornerDownLeft, Search } from 'lucide-react';
 import { IconButton } from './components/ui';
+import { cn } from './lib/utils';
 
 type CorpusSearchFormProps = {
   value: string;
@@ -24,9 +25,21 @@ export function CorpusSearchForm({
   children,
 }: CorpusSearchFormProps) {
   return (
-    <form className={className ? `corpus-search ${className}` : 'corpus-search'} onSubmit={onSubmit}>
-      <Search size={18} />
-      <input className="border-0" value={value} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} autoFocus={autoFocus} />
+    <form
+      className={cn(
+        'flex min-h-12 items-center gap-3 rounded-xl border bg-card px-4 shadow-sm transition-shadow focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/20',
+        className,
+      )}
+      onSubmit={onSubmit}
+    >
+      <Search className="size-4 shrink-0 text-muted-foreground" />
+      <input
+        className="min-w-0 flex-1 border-0 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder={placeholder}
+        autoFocus={autoFocus}
+      />
       <IconButton type="submit" uiVariant="plainIcon" disabled={disabled} aria-label="Submit search" data-tooltip="Submit" data-tooltip-placement="bottom">
         <CornerDownLeft size={18} />
       </IconButton>

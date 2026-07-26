@@ -5,7 +5,7 @@ export function DataTable({ className, ...props }: ComponentProps<'div'>) {
   return (
     <div
       role="table"
-      className={cn('overflow-auto border border-[var(--border-subtle)] bg-[var(--bg-raised)]', className)}
+      className={cn('overflow-auto rounded-lg border bg-card text-card-foreground', className)}
       {...props}
     />
   );
@@ -16,8 +16,8 @@ export function DataTableRow({ className, selected = false, ...props }: Componen
     <div
       role="row"
       className={cn(
-        'grid items-center border-b border-[var(--border-subtle)] bg-transparent hover:bg-[var(--bg-hover)]',
-        selected && 'bg-[var(--bg-hover)]',
+        'grid items-center border-b bg-transparent transition-colors last:border-b-0 hover:bg-muted/60',
+        selected && 'bg-muted',
         className,
       )}
       {...props}
@@ -28,7 +28,7 @@ export function DataTableRow({ className, selected = false, ...props }: Componen
 export function DataTableHead({ className, ...props }: ComponentProps<'div'>) {
   return (
     <DataTableRow
-      className={cn('text-xs font-semibold uppercase text-[var(--text-muted)] hover:bg-transparent', className)}
+      className={cn('bg-muted/40 text-xs font-semibold uppercase text-muted-foreground hover:bg-muted/40', className)}
       {...props}
     />
   );

@@ -14,24 +14,24 @@ export type UiButtonVariant =
   | 'plainIcon';
 
 export const buttonVariants = cva(
-  'inline-flex h-8 shrink-0 items-center justify-center gap-1.5 whitespace-nowrap border text-sm font-semibold transition-colors outline-none select-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-raised)] disabled:pointer-events-none disabled:opacity-55 [&_svg]:pointer-events-none [&_svg]:shrink-0',
+  'inline-flex h-9 shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-md border border-transparent text-sm font-medium transition-colors outline-none select-none focus-visible:ring-2 focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0',
   {
     variants: {
       variant: {
-        solid: 'border-[var(--accent)] bg-[var(--accent)] px-3 text-[var(--accent-contrast)] hover:border-[var(--accent-hover)] hover:bg-[var(--accent-hover)]',
-        outline: 'border-[var(--border-input)] bg-[var(--bg-raised)] px-3 text-[var(--text)] hover:bg-[var(--bg-hover)]',
-        ghost: 'border-transparent bg-transparent px-3 text-[var(--text)] hover:bg-[var(--bg-hover)]',
-        nav: 'w-full justify-start border-transparent bg-transparent px-2 text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text)] active:bg-[var(--bg-active)]',
-        tab: 'border-transparent bg-transparent px-3 text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text)] active:bg-[var(--bg-active)] active:text-[var(--text)]',
-        danger: 'border-[var(--status-red-border)] bg-[var(--status-red-bg)] px-3 text-[var(--status-red-text)] hover:bg-[var(--status-red-bg)]',
-        rowAction: 'border-transparent bg-transparent px-2 text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text)]',
-        plainIcon: 'h-auto min-w-0 border-transparent bg-transparent p-0 text-[var(--text)] hover:bg-transparent hover:text-[var(--text)]',
+        solid: 'bg-primary px-3 text-primary-foreground shadow-xs hover:bg-primary/90',
+        outline: 'border-input bg-background px-3 shadow-xs hover:bg-accent hover:text-accent-foreground',
+        ghost: 'px-3 hover:bg-accent hover:text-accent-foreground',
+        nav: 'w-full justify-start px-2 text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground data-[active=true]:bg-sidebar-accent data-[active=true]:text-sidebar-accent-foreground',
+        tab: 'px-3 text-muted-foreground hover:bg-accent hover:text-accent-foreground data-[active=true]:bg-background data-[active=true]:text-foreground data-[active=true]:shadow-xs',
+        danger: 'bg-destructive px-3 text-white hover:bg-destructive/90',
+        rowAction: 'px-2 text-muted-foreground hover:bg-accent hover:text-accent-foreground',
+        plainIcon: 'h-auto min-w-0 p-0 text-foreground hover:text-primary',
       },
       size: {
         default: '',
-        sm: 'h-7 text-xs',
-        lg: 'h-9 px-4',
-        icon: 'size-8 p-0',
+        sm: 'h-8 gap-1.5 px-2.5 text-xs',
+        lg: 'h-10 px-4',
+        icon: 'size-9 p-0',
       },
     },
     defaultVariants: {

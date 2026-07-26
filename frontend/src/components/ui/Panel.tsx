@@ -10,8 +10,8 @@ export function Panel({ as: Component = 'div', className, interactive = false, .
   return (
     <Component
       className={cn(
-        'border border-[var(--border-subtle)] bg-[var(--bg-raised)]',
-        interactive && 'shadow-[var(--shadow-panel)]',
+        'rounded-xl border bg-card text-card-foreground',
+        interactive && 'shadow-sm',
         className,
       )}
       {...props}
@@ -22,7 +22,7 @@ export function Panel({ as: Component = 'div', className, interactive = false, .
 export function FloatingPanel({ className, ...props }: PanelProps) {
   return (
     <Panel
-      className={cn('z-50 border-[var(--border-input)] shadow-[var(--shadow-floating)]', className)}
+      className={cn('z-50 border-border shadow-lg', className)}
       {...props}
     />
   );
