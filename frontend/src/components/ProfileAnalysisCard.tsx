@@ -16,7 +16,7 @@ export function ProfileAnalysisCard({ analysis }: { analysis: SourceProfileAnaly
   }
 
   return (
-    <div className="grid gap-5 rounded-xl border p-5">
+    <div className="grid gap-5">
       {analysis.bio && <p className="leading-relaxed text-foreground">{analysis.bio}</p>}
       <ProfileChipSection title="Audience" items={analysis.audiences ?? []} />
       <ProfileChipSection title="Writes about" items={themes} />

@@ -118,9 +118,9 @@ export function PeopleView() {
 
       {error && <StateMessage tone="error">{error}</StateMessage>}
 
-      <div className="mt-5 grid gap-5 lg:grid-cols-[minmax(0,1fr)_20rem]">
-        <main className="overflow-hidden rounded-xl border bg-card">
-          <div className="border-b px-5 py-4">
+      <div className="mt-5 grid gap-8 lg:grid-cols-[minmax(0,1fr)_20rem]">
+        <main className="min-w-0">
+          <div className="border-b pb-3">
             <div>
               <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Feed</span>
               <h2 className="text-base font-medium">Reading activity</h2>
@@ -130,7 +130,7 @@ export function PeopleView() {
           {!loading && (
             <div className="divide-y">
               {feed.length === 0 && (
-                <div className="grid place-items-center gap-3 px-6 py-20 text-center">
+                <div className="grid min-h-[26rem] place-items-center content-center gap-3 px-6 py-16 text-center">
                   <span className="grid size-10 place-items-center rounded-full bg-muted text-muted-foreground"><BookOpen size={18} /></span>
                   <strong className="font-medium">No reading activity yet</strong>
                   <p className="max-w-xs text-sm text-muted-foreground">Pages your friends save or finish will appear here.</p>
@@ -146,7 +146,7 @@ export function PeopleView() {
                 <button
                   key={`${item.person.user_id}-${item.document.uuid}-${item.activity_at}`}
                   type="button"
-                  className="grid w-full grid-cols-[2.25rem_minmax(0,1fr)] gap-3 px-5 py-4 text-left hover:bg-muted/50"
+                  className="grid w-full grid-cols-[2.25rem_minmax(0,1fr)] gap-3 px-2 py-4 text-left hover:bg-muted/50"
                   onClick={() => navigateTo(documentPath(item.document.uuid))}
                 >
                   <span className="grid size-9 place-items-center rounded-full bg-primary/10 text-xs font-semibold text-primary">{initials(item.person)}</span>
@@ -164,8 +164,8 @@ export function PeopleView() {
           )}
         </main>
 
-        <aside className="self-start overflow-hidden rounded-xl border bg-card" ref={networkRef}>
-          <div className="flex items-center justify-between border-b px-4 py-3">
+        <aside className="self-start lg:border-l lg:pl-6" ref={networkRef}>
+          <div className="flex items-center justify-between border-b pb-3">
             <div className="flex items-center gap-2">
               <Users size={15} />
               <h2 className="text-sm font-medium">Your network</h2>
@@ -177,7 +177,7 @@ export function PeopleView() {
           ) : (
             <>
             <CorpusSearchForm
-              className="m-4 min-h-10"
+              className="my-4 min-h-10"
               value={peopleQuery}
               onChange={setPeopleQuery}
               onSubmit={searchPeople}
@@ -185,7 +185,7 @@ export function PeopleView() {
               disabled={busy || !peopleQuery.trim()}
             />
               {peopleResults.length > 0 && (
-                <div className="border-t p-4">
+                <div className="border-t py-4">
                   <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">People</h3>
                   <div className="space-y-1">
                     {peopleResults.map((person) => (
@@ -234,7 +234,7 @@ export function PeopleView() {
                 />
               )}
 
-              <section className="border-t p-4">
+              <section className="border-t py-4">
                 <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Friends</h3>
                 {friends.length === 0 && <div className="py-4 text-center text-sm text-muted-foreground">No connections yet.</div>}
                 <div className="space-y-1">
@@ -290,7 +290,7 @@ function RequestList({
   onSecondary: (id: number) => void;
 }) {
   return (
-    <section className="border-t p-4">
+    <section className="border-t py-4">
       <h3 className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">{icon}{title}<span className="ml-auto rounded-full bg-muted px-2 py-0.5">{rows.length}</span></h3>
       <div className="space-y-1">
         {rows.map((friendship) => (
@@ -318,7 +318,7 @@ function RequestList({
 
 function ProfileSummary({ profile }: { profile: UserProfile }) {
   return (
-    <div className="mt-4 rounded-lg border bg-muted/20 p-3">
+    <div className="mt-4 border-t pt-4">
       <h3 className="text-sm font-medium">@{profile.username}</h3>
       {profile.bio && <p className="mt-1 text-xs text-muted-foreground">{profile.bio}</p>}
       {profile.websites.map((website) => (

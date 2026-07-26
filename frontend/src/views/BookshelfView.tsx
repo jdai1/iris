@@ -389,8 +389,8 @@ export function BookshelfView({ onDiscover }: { onDiscover: () => void }) {
 
   return (
     <section className="min-h-svh p-4 sm:p-6">
-      <div className="grid min-h-[calc(100svh-3rem)] overflow-hidden rounded-xl border bg-card lg:grid-cols-[11rem_minmax(0,1fr)]">
-        <aside className="border-b bg-muted/20 p-3 lg:border-r lg:border-b-0">
+      <div className="grid min-h-[calc(100svh-3rem)] lg:grid-cols-[11rem_minmax(0,1fr)]">
+        <aside className="border-b p-3 lg:border-r lg:border-b-0">
           <div className="px-2 pb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Library</div>
           <button className={`flex h-9 w-full items-center justify-between rounded-md px-2 text-sm ${activeView === 'unread' ? 'bg-accent text-accent-foreground' : 'text-muted-foreground hover:bg-accent/60 hover:text-accent-foreground'}`} type="button" onClick={() => setActiveView('unread')}>
             <span className="truncate">Read next</span>

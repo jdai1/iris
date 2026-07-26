@@ -260,7 +260,7 @@ export function DirectoryView({
       {loading && !target && <TableSkeleton rows={10} />}
 
       {!loading && !target && (
-        <div className="overflow-x-auto rounded-xl border bg-card">
+        <div className="overflow-x-auto border-y">
           <div className={`min-w-[880px] transition-opacity ${refreshing ? 'opacity-60' : 'opacity-100'}`}>
             <div className="grid grid-cols-[minmax(12rem,1.2fr)_minmax(16rem,2fr)_repeat(4,5.5rem)_7rem] items-center gap-3 border-b bg-muted/40 px-4 py-2 text-xs font-semibold uppercase text-muted-foreground" role="row">
               <Button uiVariant="rowAction" type="button" onClick={() => updateDirectorySort('source')}>{directorySortLabel('Source', 'source', directorySort, directorySortDirection)}</Button>
@@ -307,7 +307,7 @@ export function DirectoryView({
       )}
 
       {target && (
-        <div className="min-h-[calc(100svh-5rem)] overflow-hidden rounded-xl border bg-card" aria-busy={profileLoading}>
+        <div className="min-h-[calc(100svh-5rem)]" aria-busy={profileLoading}>
           <div className="flex h-16 items-center border-b px-5">
             <div>
               <h3 className="flex items-center gap-2 text-lg font-semibold">
@@ -318,7 +318,7 @@ export function DirectoryView({
               </h3>
             </div>
           </div>
-          <nav className="flex min-h-12 items-center gap-1 overflow-x-auto border-b bg-muted/20 px-3 py-1.5" aria-label="Source views">
+          <nav className="flex min-h-12 items-center gap-4 overflow-x-auto border-b px-5" aria-label="Source views">
             <SourceViewButton
               active={activeProfileTab === 'profile'}
               icon={<LayoutTemplate size={14} />}
@@ -410,8 +410,8 @@ function SourceViewButton({
   return (
     <button
       type="button"
-      className={`inline-flex h-9 shrink-0 items-center gap-2 rounded-md px-3 text-sm font-medium transition-colors ${
-        active ? 'bg-background text-foreground shadow-xs' : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
+      className={`inline-flex h-12 shrink-0 items-center gap-2 border-b-2 px-0 text-sm font-medium transition-colors ${
+        active ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'
       }`}
       aria-pressed={active}
       onClick={onClick}
@@ -471,8 +471,8 @@ function SourceCollectionsTab({
   return (
     <div className="space-y-5">
       {groups.map(({ collection, items }) => (
-        <section className="overflow-hidden rounded-xl border" key={collection.id}>
-          <div className="flex items-center justify-between border-b bg-muted/30 px-4 py-3">
+        <section key={collection.id}>
+          <div className="flex items-center justify-between border-b py-3">
             <strong>{collection.name}</strong>
             <span className="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">{items.length}</span>
           </div>
@@ -534,8 +534,8 @@ function SourceNetworkPanel({
   onOpenProfile: (sourceId: number, domain: string) => void;
 }) {
   return (
-    <aside className="overflow-hidden rounded-xl border" aria-label="Source network">
-      <div className="flex items-center justify-between border-b bg-muted/30 px-4 py-3">
+    <aside className="border-t pt-5 xl:border-t-0 xl:border-l xl:pt-0 xl:pl-5" aria-label="Source network">
+      <div className="flex items-center justify-between pb-3">
         <h4 className="font-medium">Network</h4>
         <span className="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">{inbound.length + outbound.length}</span>
       </div>
@@ -555,7 +555,7 @@ function SourceNetworkSection({
   onOpenProfile: (sourceId: number, domain: string) => void;
 }) {
   return (
-    <section className="border-b p-4 last:border-b-0">
+    <section className="border-t py-4">
       <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">{title}</h4>
       {items.length === 0 ? (
         <p className="py-3 text-center text-muted-foreground" title="No visible sources.">—</p>
@@ -586,7 +586,7 @@ function sourceNetworkWeightLabel(weight: number) {
 
 function TableSkeleton({ rows }: { rows: number }) {
   return (
-    <div className="overflow-hidden rounded-xl border bg-card" aria-label="Loading rows">
+    <div className="overflow-hidden border-y" aria-label="Loading rows">
       {Array.from({ length: rows }).map((_, row) => (
         <div className="grid grid-cols-[minmax(160px,1fr)_repeat(6,92px)] gap-3 border-b px-4 py-3 last:border-0" key={row}>
           {Array.from({ length: 7 }).map((__, column) => (
@@ -601,12 +601,12 @@ function TableSkeleton({ rows }: { rows: number }) {
 function SourceProfileSkeleton() {
   return (
     <div className="grid min-h-[30rem] gap-5 xl:grid-cols-[minmax(0,2fr)_minmax(18rem,1fr)]" aria-label="Loading source">
-      <div className="grid content-start gap-3 rounded-xl border p-5">
+      <div className="grid content-start gap-3 py-5">
         <span className="h-6 w-1/3 animate-pulse rounded bg-muted" />
         <span className="h-4 w-full animate-pulse rounded bg-muted" />
         <span className="h-32 w-full animate-pulse rounded bg-muted" />
       </div>
-      <div className="grid content-start gap-3 rounded-xl border p-5">
+      <div className="grid content-start gap-3 border-t py-5 xl:border-t-0 xl:border-l xl:pl-5">
         <span className="h-5 w-1/2 animate-pulse rounded bg-muted" />
         <span className="h-12 w-full animate-pulse rounded bg-muted" />
         <span className="h-12 w-full animate-pulse rounded bg-muted" />
