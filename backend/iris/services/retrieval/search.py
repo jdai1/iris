@@ -23,7 +23,7 @@ from iris.services.common.langfuse_tracing import agent_search_observation, fini
 from iris.services.ingestion.embedding import cosine, embed_text, loads_embedding
 from iris.models import Category, Document, DocumentCategoryAssignment, DocumentTag, Source, Tag
 from iris.schemas.enums import AgentStepKind, AgentToolName, DocumentType
-from iris.schemas.retrieval import AgentChatResult, AgentChatStreamEvent, AgentSearchOutput, AgentStep, AgentToolRun, RankedDocument
+from iris.schemas.retrieval import AgentChatResult, AgentChatStreamEvent, AgentInspectedDocument, AgentSearchOutput, AgentStep, AgentToolRun, RankedDocument
 
 AGENT_RESULT_SAFETY_CAP = 20
 AGENT_INSTRUCTIONS = (
@@ -749,6 +749,16 @@ def _category_query_terms(query_terms: set[str]) -> set[str]:
 
 
 def _tool_step(tool: AgentToolName, query: str, rows: list[RankedDocument]) -> AgentStep:
+    documents = [
+        AgentInspectedDocument(
+            uuid=row.document.uuid,
+            title=row.document.title or row.document.url,
+            source_domain=row.document.source.canonical_domain,
+            url=row.document.url,
+            reason=row.reason,
+        )
+        for row in rows
+    ]
     if tool == AgentToolName.DOCUMENT_METADATA:
         title = rows[0].document.title or rows[0].document.url if rows else "Document details"
         return AgentStep(
@@ -758,6 +768,7 @@ def _tool_step(tool: AgentToolName, query: str, rows: list[RankedDocument]) -> A
             tool=tool,
             query=query,
             hits=None,
+            documents=documents,
         )
     if tool == AgentToolName.SOURCE_METADATA:
         return AgentStep(
@@ -767,6 +778,7 @@ def _tool_step(tool: AgentToolName, query: str, rows: list[RankedDocument]) -> A
             tool=tool,
             query=query,
             hits=None,
+            documents=documents,
         )
     titles = [row.document.title or row.document.url for row in rows[:3]]
     return AgentStep(
@@ -776,6 +788,7 @@ def _tool_step(tool: AgentToolName, query: str, rows: list[RankedDocument]) -> A
         tool=tool,
         query=query,
         hits=len(rows),
+        documents=documents,
     )
 
 

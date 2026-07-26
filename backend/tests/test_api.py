@@ -420,7 +420,7 @@ def test_agent_chat_persists_conversation_and_results(session, monkeypatch):
     from iris.dao import agent as agent_dao
     from iris.routes import api as api_routes
     from iris.schemas.enums import AgentStepKind
-    from iris.schemas.retrieval import AgentChatResult, AgentStep, RankedDocument
+    from iris.schemas.retrieval import AgentChatResult, AgentInspectedDocument, AgentStep, RankedDocument
 
     source = get_or_create_source("https://agent.test", status="indexed")
     document = upsert_document(
@@ -458,7 +458,23 @@ def test_agent_chat_persists_conversation_and_results(session, monkeypatch):
             results=[RankedDocument(document=document, score=1.0, reason="test sdk result")],
             steps=[
                 AgentStep(kind=AgentStepKind.PLAN, title="Run OpenAI agent loop", detail="test"),
-                AgentStep(kind=AgentStepKind.TOOL, title="Run semantic", detail="test", tool="semantic", query=message, hits=1),
+                AgentStep(
+                    kind=AgentStepKind.TOOL,
+                    title="Run semantic",
+                    detail="test",
+                    tool="semantic",
+                    query=message,
+                    hits=1,
+                    documents=[
+                        AgentInspectedDocument(
+                            uuid=document.uuid,
+                            title=document.title or document.url,
+                            source_domain=source.canonical_domain,
+                            url=document.url,
+                            reason="pgvector cosine 0.91",
+                        )
+                    ],
+                ),
                 AgentStep(kind=AgentStepKind.ANSWER, title="Agent final answer", detail="test"),
             ],
         )
@@ -485,6 +501,9 @@ def test_agent_chat_persists_conversation_and_results(session, monkeypatch):
     assert first_body["results"][0]["document"]["title"] == "Choosing a company"
     assert str(UUID(first_body["results"][0]["document"]["uuid"]))
     assert {step["kind"] for step in first_body["steps"]} >= {"plan", "tool", "answer"}
+    first_tool_step = next(step for step in first_body["steps"] if step["kind"] == "tool")
+    assert first_tool_step["query"] == "how should I evaluate joining a company?"
+    assert first_tool_step["documents"][0]["uuid"] == document.uuid
 
     second = client.post(
         "/api/agent-chat",
@@ -522,6 +541,8 @@ def test_agent_chat_persists_conversation_and_results(session, monkeypatch):
     assert replay_body["uuid"] == first_body["conversation_uuid"]
     assert [message["role"] for message in replay_body["messages"]] == ["user", "assistant", "user", "assistant"]
     assert replay_body["messages"][1]["results"][0]["document"]["title"] == "Choosing a company"
+    replay_tool_step = next(step for step in replay_body["messages"][1]["steps"] if step["kind"] == "tool")
+    assert replay_tool_step["documents"][0]["source_domain"] == "agent.test"
 
 
 def test_agent_conversations_are_scoped_to_firebase_user(session, monkeypatch):

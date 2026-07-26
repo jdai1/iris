@@ -842,11 +842,13 @@ async def _agent_chat_event_chunks(event, conversation, user_message, payload: A
                 "step": _agent_step_payload(event.step),
                 "hits": [
                     {
+                        "uuid": row.document.uuid,
                         "title": row.document.title or row.document.url,
                         "source_domain": row.document.source.canonical_domain,
+                        "url": row.document.url,
                         "reason": row.reason,
                     }
-                    for row in event.rows[:5]
+                    for row in event.rows
                 ],
             },
         )
@@ -891,6 +893,16 @@ def _agent_step_payload(step) -> dict[str, object]:
         "tool": tool,
         "query": step.query,
         "hits": step.hits,
+        "documents": [
+            {
+                "uuid": document.uuid,
+                "title": document.title,
+                "source_domain": document.source_domain,
+                "url": document.url,
+                "reason": document.reason,
+            }
+            for document in step.documents
+        ],
     }
 
 
@@ -976,6 +988,7 @@ def _dump_agent_message(message, user: User) -> AgentMessageSchema:
             tool=step.get("tool"),
             query=step.get("query"),
             hits=step.get("hits"),
+            documents=step.get("documents") or [],
         )
         for step in (message.steps or [])
     ]

@@ -1,6 +1,6 @@
-import { FormEvent, lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
+import { FormEvent, lazy, ReactNode, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { Box } from '@chakra-ui/react';
-import { ArrowUpRight } from 'lucide-react';
+import { ArrowUpRight, FileText, Folder, GitFork, LayoutTemplate, Orbit } from 'lucide-react';
 import { getAdminDocuments, getAdminSources, getBookshelfCollections, getDirectorySources, getGraph, getSourceProfileAnalysis } from '../api';
 import { GraphExplorer } from '../GraphExplorer';
 import { emptyPage } from '../app/paging';
@@ -56,7 +56,6 @@ export function DirectoryView({
   const [profileCollections, setProfileCollections] = useState<BookshelfCollection[]>([]);
   const [profileGraph, setProfileGraph] = useState<GraphResponse | null>(null);
   const [activeProfileTab, setActiveProfileTab] = useState<SourceProfileTab>('profile');
-  const [selected, setSelected] = useState<ProfileTarget>(target);
   const [documentPageState, setDocumentPageState] = useState<PageState>({ limit: 50, offset: 0 });
   const [directoryPageState, setDirectoryPageState] = useState<PageState>({ limit: 50, offset: 0 });
   const [loading, setLoading] = useState(true);
@@ -64,23 +63,23 @@ export function DirectoryView({
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const didLoadDirectoryRef = useRef(false);
+  const sourceLoadKeyRef = useRef<string | null>(null);
   const profileCollectionGroups = useMemo(
-    () => selected ? sourceCollectionGroups(profileCollections, selected.sourceId, selected.domain) : [],
-    [profileCollections, selected?.sourceId, selected?.domain],
+    () => target ? sourceCollectionGroups(profileCollections, target.sourceId, target.domain) : [],
+    [profileCollections, target?.sourceId, target?.domain],
   );
-  const hasProfileEssays = documentsPage.total > 0;
+  const activeSelectedSource = selectedSource?.canonical_domain === target?.domain ? selectedSource : null;
+  const resolvedSourceId = activeSelectedSource?.id ?? target?.sourceId ?? 0;
   const profileNetwork = useMemo(
-    () => selected && profileGraph ? sourceNetwork(profileGraph, `source:${selected.sourceId}`) : { inbound: [], outbound: [] },
-    [profileGraph, selected?.sourceId],
+    () => target && profileGraph ? sourceNetwork(profileGraph, `source:${resolvedSourceId}`) : { inbound: [], outbound: [] },
+    [profileGraph, resolvedSourceId, target?.domain],
   );
 
   useEffect(() => {
     if (activeProfileTab === 'collections' && profileCollectionGroups.length === 0) setActiveProfileTab('profile');
-    if (activeProfileTab === 'essays' && !hasProfileEssays) setActiveProfileTab('profile');
-  }, [activeProfileTab, hasProfileEssays, profileCollectionGroups.length]);
+  }, [activeProfileTab, profileCollectionGroups.length]);
 
   useEffect(() => {
-    setSelected(target);
     setActiveProfileTab('profile');
     if (target) {
       setQuery(target.domain);
@@ -90,7 +89,7 @@ export function DirectoryView({
 
   async function refresh(
     nextQuery = query,
-    nextSelected = selected,
+    nextSelected = target,
     nextPage = documentPageState,
     nextDirectoryPage = directoryPageState,
     nextSort = directorySort,
@@ -113,7 +112,6 @@ export function DirectoryView({
         });
         setDirectoryPage(tablePage);
         setSelectedSource(null);
-        setSelected(null);
         setDocumentsPage(emptyPage<Document>());
         setProfileAnalysis(null);
         setProfileCollections([]);
@@ -129,7 +127,6 @@ export function DirectoryView({
         null;
       const nextProfile = source ? { sourceId: source.id, domain: source.canonical_domain } : null;
       setSelectedSource(source);
-      setSelected(nextProfile);
       if (source && !nextSelected) setQuery(source.canonical_domain);
       const [documents, analysis, collections, graph] = nextProfile
         ? await Promise.all([
@@ -154,22 +151,29 @@ export function DirectoryView({
   }
 
   useEffect(() => {
+    if (!target) {
+      sourceLoadKeyRef.current = null;
+      return;
+    }
+    const loadKey = `${target.sourceId}:${target.domain}`;
+    if (sourceLoadKeyRef.current === loadKey) return;
+    sourceLoadKeyRef.current = loadKey;
     const nextPage = { limit: 50, offset: 0 };
     setDocumentPageState(nextPage);
     const nextDirectoryPage = { limit: directoryPageState.limit, offset: 0 };
     setDirectoryPageState(nextDirectoryPage);
-    refresh(target?.domain ?? '', target, nextPage, nextDirectoryPage);
+    refresh(target.domain, target, nextPage, nextDirectoryPage);
   }, [target?.sourceId, target?.domain]);
 
   useEffect(() => {
-    if (selected) return;
+    if (target) return;
     const timeout = window.setTimeout(() => {
       const nextDirectoryPage = { limit: directoryPageState.limit, offset: 0 };
       setDirectoryPageState(nextDirectoryPage);
       refresh(query, null, documentPageState, nextDirectoryPage);
     }, 160);
     return () => window.clearTimeout(timeout);
-  }, [query, selected?.domain]);
+  }, [query, target?.domain]);
 
   function submit(event: FormEvent) {
     event.preventDefault();
@@ -185,10 +189,7 @@ export function DirectoryView({
   }
 
   function openSourceProfile(source: Pick<AdminSource, 'id' | 'canonical_domain'>) {
-    const nextPage = { limit: documentPageState.limit, offset: 0 };
-    const nextProfile = { sourceId: source.id, domain: source.canonical_domain };
     setQuery(source.canonical_domain);
-    setSelected(nextProfile);
     setSelectedSource(null);
     setDocumentsPage(emptyPage<Document>());
     setProfileAnalysis(null);
@@ -196,14 +197,12 @@ export function DirectoryView({
     setProfileGraph(null);
     setProfileLoading(true);
     setActiveProfileTab('profile');
-    setDocumentPageState(nextPage);
-    refresh(source.canonical_domain, nextProfile, nextPage);
     onOpenProfile(source.id, source.canonical_domain);
   }
 
   function pageProfileDocuments(nextPage: PageState) {
     setDocumentPageState(nextPage);
-    refresh(selected?.domain ?? query, selected, nextPage);
+    refresh(target?.domain ?? query, target, nextPage);
   }
 
   function updateDirectorySort(nextSort: DirectorySourceSort) {
@@ -212,12 +211,12 @@ export function DirectoryView({
     setDirectorySort(nextSort);
     setDirectorySortDirection(nextDirection);
     setDirectoryPageState(nextPage);
-    refresh(query, selected, documentPageState, nextPage, nextSort, nextDirection);
+    refresh(query, target, documentPageState, nextPage, nextSort, nextDirection);
   }
 
   function pageDirectory(nextPage: PageState) {
     setDirectoryPageState(nextPage);
-    refresh(query, selected, documentPageState, nextPage);
+    refresh(query, target, documentPageState, nextPage);
   }
 
   function selectDirectorySource(source: DirectorySource) {
@@ -228,7 +227,6 @@ export function DirectoryView({
   }
 
   function showDirectoryRoot() {
-    setSelected(null);
     setSelectedSource(null);
     setProfileAnalysis(null);
     setProfileCollections([]);
@@ -248,7 +246,7 @@ export function DirectoryView({
 
   return (
     <Box as="section" className="directory-view">
-      {selected ? (
+      {target ? (
         <Button className="directory-back directory-back-top" uiVariant="plainIcon" type="button" onClick={showDirectoryRoot} aria-label="Back to sources">
           ←
         </Button>
@@ -264,9 +262,9 @@ export function DirectoryView({
       )}
 
       {error && <StateMessage className="error" tone="error">{error}</StateMessage>}
-      {loading && !selected && <TableSkeleton columns={7} rows={10} />}
+      {loading && !target && <TableSkeleton columns={7} rows={10} />}
 
-      {!loading && !selected && (
+      {!loading && !target && (
         <div className="directory-table-panel">
           <div className={refreshing ? 'directory-table directory-table-refreshing' : 'directory-table'}>
             <div className="directory-table-row directory-table-head" role="row">
@@ -313,74 +311,120 @@ export function DirectoryView({
         </div>
       )}
 
-      {!loading && selected && (
+      {target && (
         <div className="profile-panel directory-profile-page" aria-busy={profileLoading}>
           <div className="profile-heading">
             <div>
               <h3>
-                <span>{selectedSource?.canonical_domain || selected.domain}</span>
-                <a href={selectedSource?.url ?? `https://${selected.domain}`} target="_blank" rel="noreferrer" aria-label="Open source">
+                <span>{activeSelectedSource?.canonical_domain || target.domain}</span>
+                <a href={activeSelectedSource?.url ?? `https://${target.domain}`} target="_blank" rel="noreferrer" aria-label="Open source">
                   <ArrowUpRight size={16} />
                 </a>
               </h3>
             </div>
-            <label className="source-view-switcher">
-              <span>View</span>
-              <select
-                aria-label="Source view"
-                value={activeProfileTab}
-                disabled={profileLoading}
-                onChange={(event) => setActiveProfileTab(event.target.value as SourceProfileTab)}
-              >
-                <option value="profile">Overview</option>
-                <option value="essays" disabled={!hasProfileEssays}>
-                  Essays{hasProfileEssays ? ` (${documentsPage.total})` : ''}
-                </option>
-                <option value="collections" disabled={profileCollectionGroups.length === 0}>
-                  Collections{profileCollectionGroups.length ? ` (${profileCollectionGroups.length})` : ''}
-                </option>
-                <option value="explore">Explore</option>
-                <option value="graph">Graph</option>
-              </select>
-            </label>
           </div>
-          {profileLoading && <SourceProfileSkeleton />}
-          {!profileLoading && activeProfileTab === 'profile' && (
-            <div className="profile-overview-grid">
-              <ProfileAnalysisCard analysis={profileAnalysis} />
-              <SourceNetworkPanel inbound={profileNetwork.inbound} outbound={profileNetwork.outbound} onOpenProfile={onOpenProfile} />
-            </div>
-          )}
-          {!profileLoading && activeProfileTab === 'essays' && (
-            <>
-              <div className="profile-documents">
-                <DirectoryDocumentTable documents={documentsPage.items} onOpenDocument={openDirectoryDrawer} />
-              </div>
-              <ProfilePagination page={documentsPage} onChange={pageProfileDocuments} />
-            </>
-          )}
-          {!profileLoading && activeProfileTab === 'collections' && (
-            <SourceCollectionsTab groups={profileCollectionGroups} onOpenDocument={openDirectoryDrawer} />
-          )}
-          {!profileLoading && activeProfileTab === 'explore' && selectedSource && (
-            <div className="source-visual-panel">
-              <Suspense fallback={<SourceVisualSkeleton />}>
-                <EmbeddingExplorer key={selectedSource.id} sourceId={selectedSource.id} />
-              </Suspense>
-            </div>
-          )}
-          {!profileLoading && activeProfileTab === 'graph' && (
-            <div className="source-visual-panel">
-              <GraphExplorer
-                key={selected.domain}
-                onOpenProfile={onOpenProfile}
-                initialDomain={selected.domain}
+          <nav className="source-view-menu" aria-label="Source views">
+            <SourceViewButton
+              active={activeProfileTab === 'profile'}
+              icon={<LayoutTemplate size={14} />}
+              label="Overview"
+              onClick={() => setActiveProfileTab('profile')}
+            />
+            <SourceViewButton
+              active={activeProfileTab === 'essays'}
+              icon={<FileText size={14} />}
+              label="Essays"
+              count={profileLoading ? null : documentsPage.total}
+              onClick={() => setActiveProfileTab('essays')}
+            />
+            {profileCollectionGroups.length > 0 && (
+              <SourceViewButton
+                active={activeProfileTab === 'collections'}
+                icon={<Folder size={14} />}
+                label="Collections"
+                count={profileCollectionGroups.length}
+                onClick={() => setActiveProfileTab('collections')}
               />
-            </div>
-          )}
+            )}
+            <SourceViewButton
+              active={activeProfileTab === 'explore'}
+              icon={<Orbit size={14} />}
+              label="Explore"
+              onClick={() => setActiveProfileTab('explore')}
+            />
+            <SourceViewButton
+              active={activeProfileTab === 'graph'}
+              icon={<GitFork size={14} />}
+              label="Graph"
+              onClick={() => setActiveProfileTab('graph')}
+            />
+          </nav>
+          <div className="source-view-body">
+            {profileLoading && <SourceProfileSkeleton />}
+            {!profileLoading && activeProfileTab === 'profile' && (
+              <div className="profile-overview-grid">
+                <ProfileAnalysisCard analysis={profileAnalysis} />
+                <SourceNetworkPanel inbound={profileNetwork.inbound} outbound={profileNetwork.outbound} onOpenProfile={onOpenProfile} />
+              </div>
+            )}
+            {!profileLoading && activeProfileTab === 'essays' && (
+              <>
+                <div className="profile-documents">
+                  <DirectoryDocumentTable documents={documentsPage.items} onOpenDocument={openDirectoryDrawer} />
+                </div>
+                <ProfilePagination page={documentsPage} onChange={pageProfileDocuments} />
+              </>
+            )}
+            {!profileLoading && activeProfileTab === 'collections' && (
+              <SourceCollectionsTab groups={profileCollectionGroups} onOpenDocument={openDirectoryDrawer} />
+            )}
+            {!profileLoading && activeProfileTab === 'explore' && activeSelectedSource && (
+              <div className="source-visual-panel">
+                <Suspense fallback={<SourceVisualSkeleton />}>
+                  <EmbeddingExplorer key={activeSelectedSource.id} sourceId={activeSelectedSource.id} />
+                </Suspense>
+              </div>
+            )}
+            {!profileLoading && activeProfileTab === 'graph' && (
+              <div className="source-visual-panel">
+                <GraphExplorer
+                  key={target.domain}
+                  onOpenProfile={onOpenProfile}
+                  initialDomain={target.domain}
+                />
+              </div>
+            )}
+          </div>
         </div>
       )}
     </Box>
+  );
+}
+
+function SourceViewButton({
+  active,
+  icon,
+  label,
+  count,
+  onClick,
+}: {
+  active: boolean;
+  icon: ReactNode;
+  label: string;
+  count?: number | null;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      className={active ? 'source-view-menu-item source-view-menu-item-active' : 'source-view-menu-item'}
+      aria-pressed={active}
+      onClick={onClick}
+    >
+      {icon}
+      <span>{label}</span>
+      {typeof count === 'number' && <small>{count}</small>}
+    </button>
   );
 }
 

@@ -20,6 +20,7 @@ from iris.services.retrieval.search import (
     _keyword_score,
     _rank_agent_documents,
     _serialize_document_metadata,
+    _tool_step,
     search_documents,
 )
 
@@ -89,6 +90,23 @@ def test_agent_document_metadata_includes_structured_summary_fields(session):
     assert metadata["one_liner"] == "Describes how to run calibrated behavioral interviews."
     assert metadata["audience"] == "Engineering managers and interviewers."
     assert metadata["takeaways"] == ["Interview evidence should map to clear competencies."]
+
+
+def test_agent_tool_step_exposes_query_and_inspected_documents(session):
+    source = get_or_create_source("https://a.test", status="indexed")
+    document = add_doc(session, source, "Behavioral interviews", "interview loops and calibration")
+
+    step = _tool_step(
+        AgentToolName.SEMANTIC,
+        "calibrated behavioral interview loops",
+        [RankedDocument(document=document, score=0.82, reason="pgvector cosine 0.82")],
+    )
+
+    assert step.query == "calibrated behavioral interview loops"
+    assert step.hits == 1
+    assert step.documents[0].uuid == document.uuid
+    assert step.documents[0].source_domain == "a.test"
+    assert step.documents[0].reason == "pgvector cosine 0.82"
 
 
 def test_keyword_score_matches_structured_summary_fields(session):

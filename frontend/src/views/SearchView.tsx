@@ -1,9 +1,9 @@
 import { FormEvent, ReactNode, useEffect, useRef, useState } from 'react';
 import { Box } from '@chakra-ui/react';
-import { ArrowUpRight, Search } from 'lucide-react';
+import { ArrowUpRight, BrainCircuit, FileSearch, Hash, Search, Tags } from 'lucide-react';
 import { getAgentConversation, getAgentConversations, streamChatSearch } from '../api';
 import { CorpusSearchForm } from '../CorpusSearchForm';
-import type { AgentConversation, AgentConversationSummary, AgentStep, SearchResult } from '../types';
+import type { AgentConversation, AgentConversationSummary, AgentInspectedDocument, AgentStep, SearchResult } from '../types';
 
 type ChatMessage = {
   id: string;
@@ -186,7 +186,12 @@ export function SearchView({
           return;
         }
         if (event.event === 'tool_result') {
-          replaceOrAppendAssistantStep(assistantId, event.data.step);
+          replaceOrAppendAssistantStep(assistantId, {
+            ...event.data.step,
+            documents: event.data.step.documents?.length
+              ? event.data.step.documents
+              : event.data.hits,
+          });
           return;
         }
         if (event.event === 'final') {
@@ -310,23 +315,12 @@ export function SearchView({
                   <MessageContent content={message.content} />
                 )}
                 {message.steps && message.steps.length > 0 && (
-                  <details className="chat-activity">
-                    <summary>Activity</summary>
-                    <div className="chat-activity-body">
-                      {message.steps.map((step, index) => {
-                        const meta = activityMeta(step);
-                        return (
-                          <div key={`${step.kind}-${step.title}-${index}`} className="activity-row">
-                            <span className="activity-dot" />
-                            <div>
-                              <strong>{activityTitle(step)}</strong>
-                              {meta && <small>{meta}</small>}
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </details>
+                  <SearchTrace
+                    steps={message.steps}
+                    onOpenDocument={(document) =>
+                      onOpenDocument(document.uuid, traceDocumentReason(document))
+                    }
+                  />
                 )}
                 {message.role === 'assistant' && message.results && message.results.length > 0 && (
                   <SearchResultsTable
@@ -547,23 +541,84 @@ function isSyntheticStep(step: AgentStep): boolean {
   return false;
 }
 
-function activityTitle(step: AgentStep): string {
+function SearchTrace({
+  steps,
+  onOpenDocument,
+}: {
+  steps: AgentStep[];
+  onOpenDocument: (document: AgentInspectedDocument) => void;
+}) {
+  const inspectedCount = steps.reduce((total, step) => total + (step.documents?.length ?? 0), 0);
+  return (
+    <details className="chat-activity" open>
+      <summary>
+        <span>Search process</span>
+        <small>{steps.length} {steps.length === 1 ? 'query' : 'queries'} · {inspectedCount} inspected</small>
+      </summary>
+      <div className="chat-activity-body">
+        {steps.map((step, index) => (
+          <section className="search-trace-step" key={`${step.kind}-${step.title}-${step.query}-${index}`}>
+            <div className="search-trace-heading">
+              <span className="search-trace-icon">{traceIcon(step)}</span>
+              <strong>{traceTitle(step)}</strong>
+              {typeof step.hits === 'number' && <small>{step.hits} found</small>}
+            </div>
+            {step.query && !isInternalDocumentQuery(step) && (
+              <code className="search-trace-query">{step.query}</code>
+            )}
+            {step.documents?.length > 0 && (
+              <div className="search-trace-documents">
+                {step.documents.map((document, documentIndex) => (
+                  <button
+                    key={`${document.uuid}-${documentIndex}`}
+                    type="button"
+                    onClick={() => onOpenDocument(document)}
+                  >
+                    <span>
+                      <strong>{document.title}</strong>
+                      <small>{document.source_domain}</small>
+                    </span>
+                    <em>{document.reason}</em>
+                  </button>
+                ))}
+              </div>
+            )}
+            {step.documents?.length === 0 && step.detail && (
+              <p className="search-trace-empty">{step.detail}</p>
+            )}
+          </section>
+        ))}
+      </div>
+    </details>
+  );
+}
+
+function traceTitle(step: AgentStep): string {
   const tool = step.tool?.toLowerCase();
-  if (tool === 'keyword') return 'Keyword';
-  if (tool === 'semantic') return 'Semantic';
-  if (tool === 'tags') return 'Tags';
-  if (tool === 'categories') return 'Categories';
+  if (tool === 'keyword') return 'Keyword search';
+  if (tool === 'semantic') return 'Semantic search';
+  if (tool === 'tags') return 'Tag search';
+  if (tool === 'categories') return 'Category search';
+  if (tool === 'document_metadata') return 'Inspect document';
+  if (tool === 'source_metadata') return 'Inspect source';
   return step.title.replace(/^Run\s+/i, '');
 }
 
-function activityMeta(step: AgentStep): string {
-  if (typeof step.hits === 'number') return `${step.hits}`;
-  return step.detail
-    .replace(/^Top hits:\s*/i, '')
-    // Older conversations persisted internal database IDs in activity details.
-    .replace(/\b(?:source_|target_)?document_id\s*=\s*\d+\b/gi, '')
-    .replace(/^[\s·•:,-]+|[\s·•:,-]+$/g, '')
-    .trim();
+function traceIcon(step: AgentStep) {
+  const tool = step.tool?.toLowerCase();
+  if (tool === 'semantic') return <BrainCircuit size={14} />;
+  if (tool === 'keyword') return <Search size={14} />;
+  if (tool === 'tags') return <Tags size={14} />;
+  if (tool === 'categories') return <Hash size={14} />;
+  return <FileSearch size={14} />;
+}
+
+function isInternalDocumentQuery(step: AgentStep) {
+  return step.tool?.toLowerCase() === 'document_metadata' && /^\d+$/.test(step.query ?? '');
+}
+
+function traceDocumentReason(document: AgentInspectedDocument) {
+  return `${document.source_domain} · ${document.reason}`;
 }
 
 function isLegacySyntheticAssistantMessage(message: AgentConversation['messages'][number]): boolean {

@@ -122,6 +122,15 @@ export interface AgentStep {
   tool: string | null;
   query: string | null;
   hits: number | null;
+  documents: AgentInspectedDocument[];
+}
+
+export interface AgentInspectedDocument {
+  uuid: string;
+  title: string;
+  source_domain: string;
+  url: string;
+  reason: string;
 }
 
 export interface AgentChatResponse {
@@ -156,8 +165,10 @@ export type AgentStreamEvent =
       data: {
         step: AgentStep;
         hits: Array<{
+          uuid: string;
           title: string;
           source_domain: string;
+          url: string;
           reason: string;
         }>;
       };

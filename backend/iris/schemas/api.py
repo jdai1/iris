@@ -209,6 +209,15 @@ class AgentStepSchema(BaseModel):
     tool: str | None = None
     query: str | None = None
     hits: int | None = None
+    documents: list["AgentInspectedDocumentSchema"] = Field(default_factory=list)
+
+
+class AgentInspectedDocumentSchema(BaseModel):
+    uuid: str
+    title: str
+    source_domain: str
+    url: str
+    reason: str
 
 
 class SearchSchema(BaseModel):

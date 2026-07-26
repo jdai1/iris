@@ -1,5 +1,5 @@
-import { FormEvent, useEffect, useState } from 'react';
-import { ArrowUpRight, BookOpen, UserPlus } from 'lucide-react';
+import { FormEvent, ReactNode, useEffect, useRef, useState } from 'react';
+import { ArrowUpRight, Bell, BookOpen, UserPlus, Users } from 'lucide-react';
 import {
   acceptFriendRequest,
   disconnectFriend,
@@ -22,12 +22,9 @@ import type {
   UserProfile,
 } from '../types';
 
-type PeopleTab = 'feed' | 'friends' | 'requests';
-
 const emptyRequests: FriendRequests = { incoming: [], outgoing: [] };
 
 export function PeopleView() {
-  const [tab, setTab] = useState<PeopleTab>('feed');
   const [feed, setFeed] = useState<FriendFeedItem[]>([]);
   const [friends, setFriends] = useState<Friendship[]>([]);
   const [requests, setRequests] = useState<FriendRequests>(emptyRequests);
@@ -37,8 +34,12 @@ export function PeopleView() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const networkRef = useRef<HTMLElement | null>(null);
+  const didLoadPeopleRef = useRef(false);
 
   useEffect(() => {
+    if (didLoadPeopleRef.current) return;
+    didLoadPeopleRef.current = true;
     refresh();
   }, []);
 
@@ -113,62 +114,68 @@ export function PeopleView() {
           <h1>People</h1>
           <p>Your private network and its reading activity.</p>
         </div>
-        <div className="people-tabs" role="tablist" aria-label="People sections">
-          {(['feed', 'friends', 'requests'] as PeopleTab[]).map((item) => (
-            <button
-              key={item}
-              type="button"
-              role="tab"
-              aria-selected={tab === item}
-              className={tab === item ? 'people-tab people-tab-active' : 'people-tab'}
-              onClick={() => setTab(item)}
-            >
-              {item === 'requests' && requests.incoming.length > 0
-                ? `Requests ${requests.incoming.length}`
-                : capitalize(item)}
-            </button>
-          ))}
-        </div>
       </header>
 
       {error && <StateMessage tone="error">{error}</StateMessage>}
-      {loading && <PeopleSkeleton />}
 
-      {!loading && tab === 'feed' && (
-        <div className="people-feed">
-          {feed.length === 0 && (
-            <div className="people-feed-empty">
-              <BookOpen size={18} />
-              <strong>No reading activity yet</strong>
-              <p>Pages your friends save or finish will appear here.</p>
-              <Button uiVariant="outline" onClick={() => setTab('friends')}>Find friends</Button>
+      <div className="people-layout">
+        <main className="people-feed-panel">
+          <div className="people-section-heading">
+            <div>
+              <span>Feed</span>
+              <h2>Reading activity</h2>
+            </div>
+          </div>
+          {loading && <PeopleSkeleton />}
+          {!loading && (
+            <div className="people-feed">
+              {feed.length === 0 && (
+                <div className="people-feed-empty">
+                  <BookOpen size={18} />
+                  <strong>No reading activity yet</strong>
+                  <p>Pages your friends save or finish will appear here.</p>
+                  <Button
+                    uiVariant="outline"
+                    onClick={() => networkRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+                  >
+                    Find people
+                  </Button>
+                </div>
+              )}
+              {feed.map((item) => (
+                <button
+                  key={`${item.person.user_id}-${item.document.uuid}-${item.activity_at}`}
+                  type="button"
+                  className="people-feed-row"
+                  onClick={() => navigateTo(documentPath(item.document.uuid))}
+                >
+                  <span className="people-avatar">{initials(item.person)}</span>
+                  <span className="people-feed-copy">
+                    <span>
+                      <strong>@{item.person.username}</strong>{' '}
+                      {item.status === 'read' ? 'read' : 'saved'}
+                    </span>
+                    <strong>{item.document.title || item.document.url}</strong>
+                    <small>{item.document.source_domain} · {formatDate(item.activity_at)}</small>
+                  </span>
+                </button>
+              ))}
             </div>
           )}
-          {feed.map((item) => (
-            <button
-              key={`${item.person.user_id}-${item.document.uuid}-${item.activity_at}`}
-              type="button"
-              className="people-feed-row"
-              onClick={() => navigateTo(documentPath(item.document.uuid))}
-            >
-              <span className="people-avatar">{initials(item.person)}</span>
-              <span className="people-feed-copy">
-                <span>
-                  <strong>@{item.person.username}</strong>{' '}
-                  {item.status === 'read' ? 'read' : 'saved'}
-                </span>
-                <strong>{item.document.title || item.document.url}</strong>
-                <small>{item.document.source_domain} · {formatDate(item.activity_at)}</small>
-              </span>
-            </button>
-          ))}
-        </div>
-      )}
+        </main>
 
-      {!loading && tab === 'friends' && (
-        <div className="people-grid">
-          <section className="people-panel">
-            <h2>Find people</h2>
+        <aside className="people-network-panel" ref={networkRef}>
+          <div className="people-network-heading">
+            <div>
+              <Users size={15} />
+              <h2>Your network</h2>
+            </div>
+            {!loading && <span>{friends.length}</span>}
+          </div>
+          {loading ? (
+            <NetworkSkeleton />
+          ) : (
+            <>
             <CorpusSearchForm
               className="people-search"
               value={peopleQuery}
@@ -177,92 +184,96 @@ export function PeopleView() {
               placeholder="Search usernames"
               disabled={busy || !peopleQuery.trim()}
             />
-            <div className="people-list">
-              {peopleResults.map((person) => (
-                <div className="people-row" key={person.user_id}>
-                  <span className="people-avatar">{initials(person)}</span>
-                  <span>
-                    <strong>@{person.username}</strong>
-                  </span>
-                  {person.relationship === 'none' && (
-                    <Button
-                      uiVariant="outline"
-                      disabled={busy}
-                      onClick={() => runAction(() => sendFriendRequest(person.user_id))}
-                    >
-                      <UserPlus size={14} /> Add
-                    </Button>
-                  )}
-                  {person.relationship !== 'none' && (
-                    <small className="people-relationship">{relationshipLabel(person.relationship)}</small>
-                  )}
+              {peopleResults.length > 0 && (
+                <div className="people-network-section">
+                  <h3>People</h3>
+                  <div className="people-list">
+                    {peopleResults.map((person) => (
+                      <div className="people-row" key={person.user_id}>
+                        <span className="people-avatar">{initials(person)}</span>
+                        <span>
+                          <strong>@{person.username}</strong>
+                        </span>
+                        {person.relationship === 'none' && (
+                          <Button
+                            uiVariant="outline"
+                            disabled={busy}
+                            onClick={() => runAction(() => sendFriendRequest(person.user_id))}
+                          >
+                            <UserPlus size={14} /> Add
+                          </Button>
+                        )}
+                        {person.relationship !== 'none' && (
+                          <small className="people-relationship">{relationshipLabel(person.relationship)}</small>
+                        )}
+                      </div>
+                    ))}
+                  </div>
                 </div>
-              ))}
-            </div>
-          </section>
+              )}
 
-          <section className="people-panel">
-            <h2>Friends</h2>
-            {friends.length === 0 && <div className="people-section-empty">No connected friends yet.</div>}
-            <div className="people-list">
-              {friends.map((friendship) => (
-                <div className="people-row" key={friendship.id}>
-                  <button
-                    type="button"
-                    className="people-row-profile"
-                    onClick={() => openFriendProfile(friendship)}
-                  >
-                    <span className="people-avatar">{initials(friendship.person)}</span>
-                    <span>
-                      <strong>@{friendship.person.username}</strong>
-                    </span>
-                  </button>
-                  <Button
-                    uiVariant="ghost"
-                    disabled={busy}
-                    onClick={() => runAction(() => disconnectFriend(friendship.id))}
-                  >
-                    Disconnect
-                  </Button>
+              {requests.incoming.length > 0 && (
+                <RequestList
+                  title="Requests"
+                  icon={<Bell size={13} />}
+                  rows={requests.incoming}
+                  busy={busy}
+                  primaryLabel="Accept"
+                  onPrimary={(id) => runAction(() => acceptFriendRequest(id))}
+                  secondaryLabel="Decline"
+                  onSecondary={(id) => runAction(() => removeFriendRequest(id))}
+                />
+              )}
+              {requests.outgoing.length > 0 && (
+                <RequestList
+                  title="Sent"
+                  rows={requests.outgoing}
+                  busy={busy}
+                  secondaryLabel="Cancel"
+                  onSecondary={(id) => runAction(() => removeFriendRequest(id))}
+                />
+              )}
+
+              <section className="people-network-section">
+                <h3>Friends</h3>
+                {friends.length === 0 && <div className="people-section-empty">No connections yet.</div>}
+                <div className="people-list">
+                  {friends.map((friendship) => (
+                    <div className="people-row" key={friendship.id}>
+                      <button
+                        type="button"
+                        className="people-row-profile"
+                        onClick={() => openFriendProfile(friendship)}
+                      >
+                        <span className="people-avatar">{initials(friendship.person)}</span>
+                        <span>
+                          <strong>@{friendship.person.username}</strong>
+                        </span>
+                      </button>
+                      <Button
+                        uiVariant="ghost"
+                        disabled={busy}
+                        onClick={() => runAction(() => disconnectFriend(friendship.id))}
+                      >
+                        Remove
+                      </Button>
+                    </div>
+                  ))}
                 </div>
-              ))}
-            </div>
-            {selectedProfile && <ProfileSummary profile={selectedProfile} />}
-          </section>
-        </div>
-      )}
-
-      {!loading && tab === 'requests' && (
-        <div className="people-grid">
-          <RequestList
-            title="Incoming"
-            rows={requests.incoming}
-            empty="No incoming requests."
-            busy={busy}
-            primaryLabel="Accept"
-            onPrimary={(id) => runAction(() => acceptFriendRequest(id))}
-            secondaryLabel="Decline"
-            onSecondary={(id) => runAction(() => removeFriendRequest(id))}
-          />
-          <RequestList
-            title="Sent"
-            rows={requests.outgoing}
-            empty="No sent requests."
-            busy={busy}
-            secondaryLabel="Cancel"
-            onSecondary={(id) => runAction(() => removeFriendRequest(id))}
-          />
-        </div>
-      )}
-
+                {selectedProfile && <ProfileSummary profile={selectedProfile} />}
+              </section>
+            </>
+          )}
+        </aside>
+      </div>
     </section>
   );
 }
 
 function RequestList({
   title,
+  icon,
   rows,
-  empty,
   busy,
   primaryLabel,
   secondaryLabel,
@@ -270,8 +281,8 @@ function RequestList({
   onSecondary,
 }: {
   title: string;
+  icon?: ReactNode;
   rows: Friendship[];
-  empty: string;
   busy: boolean;
   primaryLabel?: string;
   secondaryLabel: string;
@@ -279,9 +290,8 @@ function RequestList({
   onSecondary: (id: number) => void;
 }) {
   return (
-    <section className="people-panel">
-      <h2>{title}</h2>
-      {rows.length === 0 && <div className="people-section-empty">{empty}</div>}
+    <section className="people-network-section">
+      <h3>{icon}{title}<span>{rows.length}</span></h3>
       <div className="people-list">
         {rows.map((friendship) => (
           <div className="people-row" key={friendship.id}>
@@ -343,10 +353,6 @@ function formatDate(value: string) {
   }).format(new Date(value));
 }
 
-function capitalize(value: string) {
-  return value.charAt(0).toUpperCase() + value.slice(1);
-}
-
 function PeopleSkeleton() {
   return (
     <div className="people-loading" aria-label="Loading people">
@@ -356,6 +362,16 @@ function PeopleSkeleton() {
           <span className="skeleton-line" />
         </div>
       ))}
+    </div>
+  );
+}
+
+function NetworkSkeleton() {
+  return (
+    <div className="people-network-skeleton skeleton-stack" aria-label="Loading network">
+      <span className="skeleton-line" />
+      <span className="skeleton-line" />
+      <span className="skeleton-line" />
     </div>
   );
 }
