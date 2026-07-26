@@ -354,10 +354,15 @@ export function removeBookshelfCollectionItem(collectionId: number, documentUuid
   });
 }
 
-export function getEmbeddingMap(limit = 3000): Promise<EmbeddingMap> {
+export function getEmbeddingMap(limit = 3000, sourceId?: number): Promise<EmbeddingMap> {
+  const search = new URLSearchParams({
+    limit: String(limit),
+    document_type: 'essay',
+  });
+  if (sourceId) search.set('source_id', String(sourceId));
   return cachedRequest<EmbeddingMap>(
-    `embedding-map:${limit}:essay`,
-    `/api/embedding-map?limit=${limit}&document_type=essay`,
+    `embedding-map:${limit}:essay:${sourceId ?? 'all'}`,
+    `/api/embedding-map?${search.toString()}`,
   );
 }
 

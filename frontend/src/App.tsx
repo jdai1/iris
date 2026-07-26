@@ -9,8 +9,9 @@ import { AdminView } from './views/AdminView';
 import { BookshelfView } from './views/BookshelfView';
 import { DirectoryHub } from './views/DirectoryHub';
 import { PeopleView } from './views/PeopleView';
+import { ProfileView } from './views/ProfileView';
 import { SearchView } from './views/SearchView';
-import { directoryModeFromLocation, documentParentPath, documentPath, documentUuidFromPath, initialView, navigateTo, profileTargetFromPath, VIEW_STORAGE_KEY, viewFromPath, viewPaths, type DirectoryMode, type ProfileTarget, type View } from './app/navigation';
+import { documentParentPath, documentPath, documentUuidFromPath, initialView, navigateTo, profileTargetFromPath, VIEW_STORAGE_KEY, viewFromPath, viewPaths, type ProfileTarget, type View } from './app/navigation';
 import { DocumentRouteDrawer } from './components/DocumentRouteDrawer';
 import { AppShell, Sidebar, Workspace } from './layout';
 import { Button } from './components/ui';
@@ -26,11 +27,6 @@ function initialTheme(): ThemeMode {
 
 function IrisApp({ currentUser, onSignOut }: { currentUser: IrisUser | null; onSignOut: () => void }) {
   const [view, setView] = useState<View>(initialView);
-  const [directoryMode, setDirectoryMode] = useState<DirectoryMode>(() =>
-    typeof window === 'undefined'
-      ? 'sources'
-      : directoryModeFromLocation(window.location.pathname, window.location.search),
-  );
   const [profileTarget, setProfileTarget] = useState<ProfileTarget>(() =>
     typeof window === 'undefined'
       ? null
@@ -42,6 +38,7 @@ function IrisApp({ currentUser, onSignOut }: { currentUser: IrisUser | null; onS
   const [documentReason, setDocumentReason] = useState<string | null>(() =>
     typeof window === 'undefined' ? null : readDocumentReason(window.history.state),
   );
+  const [profileUsername, setProfileUsername] = useState(currentUser?.username ?? null);
   const [themeMode, setThemeMode] = useState<ThemeMode>(initialTheme);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const settingsRef = useRef<HTMLDivElement | null>(null);
@@ -52,17 +49,9 @@ function IrisApp({ currentUser, onSignOut }: { currentUser: IrisUser | null; onS
     window.localStorage.setItem(VIEW_STORAGE_KEY, view);
     let nextPath = viewPaths[view];
     if (view === 'directory') {
-      if (directoryMode === 'sources') {
-        nextPath = profileTarget?.domain
-          ? `/directory/${encodeURIComponent(profileTarget.domain)}`
-          : '/directory';
-      } else {
-        const params = new URLSearchParams({ mode: directoryMode });
-        const focusedDocument = new URLSearchParams(window.location.search).get('document');
-        if (focusedDocument) params.set('document', focusedDocument);
-        if (profileTarget?.domain) params.set('domain', profileTarget.domain);
-        nextPath = `/directory?${params.toString()}`;
-      }
+      nextPath = profileTarget?.domain
+        ? `/directory/${encodeURIComponent(profileTarget.domain)}`
+        : '/directory';
     }
     const currentPath = view === 'directory'
       ? `${window.location.pathname}${window.location.search}`
@@ -75,7 +64,7 @@ function IrisApp({ currentUser, onSignOut }: { currentUser: IrisUser | null; onS
       }
     }
     applyingPopState.current = false;
-  }, [directoryMode, view, profileTarget?.domain]);
+  }, [view, profileTarget?.domain]);
 
   useEffect(() => {
     function handlePopState() {
@@ -83,7 +72,6 @@ function IrisApp({ currentUser, onSignOut }: { currentUser: IrisUser | null; onS
       setDocumentUuid(nextDocumentUuid);
       setDocumentReason(nextDocumentUuid === null ? null : readDocumentReason(window.history.state));
       const nextView = viewFromPath(window.location.pathname) ?? 'search';
-      setDirectoryMode(directoryModeFromLocation(window.location.pathname, window.location.search));
       setProfileTarget(profileTargetFromPath(window.location.pathname, window.location.search));
       applyingPopState.current = true;
       setView(nextView);
@@ -97,6 +85,10 @@ function IrisApp({ currentUser, onSignOut }: { currentUser: IrisUser | null; onS
       setView('search');
     }
   }, [currentUser?.is_admin, view]);
+
+  useEffect(() => {
+    setProfileUsername(currentUser?.username ?? null);
+  }, [currentUser?.username]);
 
   useEffect(() => {
     document.documentElement.dataset.theme = themeMode;
@@ -117,21 +109,13 @@ function IrisApp({ currentUser, onSignOut }: { currentUser: IrisUser | null; onS
 
   function openProfile(sourceId: number, domain: string) {
     setDocumentUuid(null);
-    setDirectoryMode('sources');
     setProfileTarget({ sourceId, domain });
     setView('directory');
   }
 
   function openDirectoryRoot() {
     setDocumentUuid(null);
-    setDirectoryMode('sources');
     setProfileTarget(null);
-    setView('directory');
-  }
-
-  function openDirectoryMode(mode: DirectoryMode) {
-    setDocumentUuid(null);
-    setDirectoryMode(mode);
     setView('directory');
   }
 
@@ -195,9 +179,21 @@ function IrisApp({ currentUser, onSignOut }: { currentUser: IrisUser | null; onS
               <div className="settings-menu">
                 <div className="settings-menu-row settings-menu-muted">
                   <UserCircle size={16} />
-                  <span>{currentUser.email || currentUser.display_name}</span>
+                  <span>{currentUser.email}</span>
                 </div>
                 <div className="settings-menu-divider" />
+                <button
+                  className="settings-menu-row"
+                  type="button"
+                  onClick={() => {
+                    setDocumentUuid(null);
+                    setSettingsOpen(false);
+                    setView('profile');
+                  }}
+                >
+                  <UserCircle size={16} />
+                  <span>My profile</span>
+                </button>
                 <button
                   className="settings-menu-row"
                   type="button"
@@ -223,7 +219,7 @@ function IrisApp({ currentUser, onSignOut }: { currentUser: IrisUser | null; onS
               <span>Settings</span>
             </button>
             <div className="sidebar-settings-meta">
-              {currentUser.display_name || currentUser.email}
+              {profileUsername ? `@${profileUsername}` : currentUser.email}
             </div>
           </div>
         )}
@@ -235,11 +231,10 @@ function IrisApp({ currentUser, onSignOut }: { currentUser: IrisUser | null; onS
           setView('search');
         }} />}
         {view === 'people' && <PeopleView />}
+        {view === 'profile' && <ProfileView onUsernameChange={setProfileUsername} />}
         {view === 'directory' && (
           <DirectoryHub
-            mode={directoryMode}
             target={profileTarget}
-            onModeChange={openDirectoryMode}
             onOpenProfile={openProfile}
             onDirectoryRoot={openDirectoryRoot}
           />

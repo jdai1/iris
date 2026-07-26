@@ -1268,9 +1268,10 @@ def get_shared_bookshelf_collection(
 @app.get("/api/embedding-map", response_model=EmbeddingMapSchema)
 def embedding_map(
     limit: int = 3000,
+    source_id: int | None = None,
     _bound_session=Depends(get_session),
 ) -> EmbeddingMapSchema:
-    return admin.get_embedding_map(limit=limit)
+    return admin.get_embedding_map(limit=limit, source_id=source_id)
 
 
 @app.get("/api/graph", response_model=GraphSchema)

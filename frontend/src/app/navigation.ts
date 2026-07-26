@@ -1,13 +1,13 @@
-export type View = 'search' | 'bookshelf' | 'people' | 'directory' | 'admin';
-export type DirectoryMode = 'sources' | 'explore' | 'graph';
+export type View = 'search' | 'bookshelf' | 'people' | 'profile' | 'directory' | 'admin';
 export type ProfileTarget = { sourceId: number; domain: string } | null;
 
 export const VIEW_STORAGE_KEY = 'iris.activeView';
-export const views: View[] = ['search', 'bookshelf', 'people', 'directory', 'admin'];
+export const views: View[] = ['search', 'bookshelf', 'people', 'profile', 'directory', 'admin'];
 export const viewPaths: Record<View, string> = {
   search: '/search',
   bookshelf: '/bookshelf',
   people: '/people',
+  profile: '/profile',
   directory: '/directory',
   admin: '/admin',
 };
@@ -66,14 +66,6 @@ export function viewFromPath(pathname: string): View | null {
   if (normalized === '/graph' || normalized.startsWith('/graph/')) return 'directory';
   const match = views.find((view) => normalized === viewPaths[view] || normalized.startsWith(`${viewPaths[view]}/`));
   return match ?? null;
-}
-
-export function directoryModeFromLocation(pathname: string, search: string): DirectoryMode {
-  const normalized = pathname.replace(/\/+$/, '') || '/';
-  if (normalized === '/explore' || normalized.startsWith('/explore/')) return 'explore';
-  if (normalized === '/graph' || normalized.startsWith('/graph/')) return 'graph';
-  const mode = new URLSearchParams(search).get('mode');
-  return mode === 'explore' || mode === 'graph' ? mode : 'sources';
 }
 
 export function profileTargetFromPath(pathname: string, search = ''): ProfileTarget {

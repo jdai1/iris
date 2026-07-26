@@ -1,7 +1,8 @@
-import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
+import { FormEvent, lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { Box } from '@chakra-ui/react';
 import { ArrowUpRight } from 'lucide-react';
 import { getAdminDocuments, getAdminSources, getBookshelfCollections, getDirectorySources, getGraph, getSourceProfileAnalysis } from '../api';
+import { GraphExplorer } from '../GraphExplorer';
 import { emptyPage } from '../app/paging';
 import { documentPath, navigateTo, type ProfileTarget } from '../app/navigation';
 import { CorpusSearchForm } from '../CorpusSearchForm';
@@ -12,7 +13,11 @@ import { ProfileAnalysisCard } from '../components/ProfileAnalysisCard';
 import { Button, StateMessage } from '../components/ui';
 import type { AdminSource, BookshelfCollection, BookshelfEntry, DirectorySource, DirectorySourceSort, Document, GraphEdge, GraphNode, GraphResponse, Page, SortDirection, SourceProfileAnalysis } from '../types';
 
-type SourceProfileTab = 'profile' | 'essays' | 'collections';
+type SourceProfileTab = 'profile' | 'essays' | 'collections' | 'explore' | 'graph';
+
+const EmbeddingExplorer = lazy(() =>
+  import('../EmbeddingExplorer').then((module) => ({ default: module.EmbeddingExplorer })),
+);
 
 function defaultDirectorySortDirection(sort: DirectorySourceSort): SortDirection {
   return sort === 'source' ? 'asc' : 'desc';
@@ -55,6 +60,7 @@ export function DirectoryView({
   const [documentPageState, setDocumentPageState] = useState<PageState>({ limit: 50, offset: 0 });
   const [directoryPageState, setDirectoryPageState] = useState<PageState>({ limit: 50, offset: 0 });
   const [loading, setLoading] = useState(true);
+  const [profileLoading, setProfileLoading] = useState(Boolean(target));
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const didLoadDirectoryRef = useRef(false);
@@ -75,7 +81,11 @@ export function DirectoryView({
 
   useEffect(() => {
     setSelected(target);
-    if (target) setQuery(target.domain);
+    setActiveProfileTab('profile');
+    if (target) {
+      setQuery(target.domain);
+      setProfileLoading(true);
+    }
   }, [target?.sourceId, target?.domain]);
 
   async function refresh(
@@ -87,7 +97,8 @@ export function DirectoryView({
     nextSortDirection = directorySortDirection,
   ) {
     const firstLoad = !didLoadDirectoryRef.current;
-    setLoading(firstLoad);
+    setLoading(firstLoad && !nextSelected);
+    setProfileLoading(Boolean(nextSelected));
     setRefreshing(!firstLoad);
     setError(null);
     try {
@@ -107,6 +118,7 @@ export function DirectoryView({
         setProfileAnalysis(null);
         setProfileCollections([]);
         setProfileGraph(null);
+        setProfileLoading(false);
         return;
       }
       const sources = await getAdminSources({ status: 'indexed', q: normalizedQuery, limit: 25 });
@@ -136,6 +148,7 @@ export function DirectoryView({
     } finally {
       didLoadDirectoryRef.current = true;
       setLoading(false);
+      setProfileLoading(false);
       setRefreshing(false);
     }
   }
@@ -176,6 +189,12 @@ export function DirectoryView({
     const nextProfile = { sourceId: source.id, domain: source.canonical_domain };
     setQuery(source.canonical_domain);
     setSelected(nextProfile);
+    setSelectedSource(null);
+    setDocumentsPage(emptyPage<Document>());
+    setProfileAnalysis(null);
+    setProfileCollections([]);
+    setProfileGraph(null);
+    setProfileLoading(true);
     setActiveProfileTab('profile');
     setDocumentPageState(nextPage);
     refresh(source.canonical_domain, nextProfile, nextPage);
@@ -245,7 +264,7 @@ export function DirectoryView({
       )}
 
       {error && <StateMessage className="error" tone="error">{error}</StateMessage>}
-      {loading && <TableSkeleton columns={7} rows={10} />}
+      {loading && !selected && <TableSkeleton columns={7} rows={10} />}
 
       {!loading && !selected && (
         <div className="directory-table-panel">
@@ -295,52 +314,44 @@ export function DirectoryView({
       )}
 
       {!loading && selected && (
-        <div className="profile-panel directory-profile-page">
+        <div className="profile-panel directory-profile-page" aria-busy={profileLoading}>
           <div className="profile-heading">
             <div>
               <h3>
-                <span>{profileAnalysis?.display_name || selectedSource?.canonical_domain || selected.domain}</span>
+                <span>{selectedSource?.canonical_domain || selected.domain}</span>
                 <a href={selectedSource?.url ?? `https://${selected.domain}`} target="_blank" rel="noreferrer" aria-label="Open source">
                   <ArrowUpRight size={16} />
                 </a>
               </h3>
-              {profileAnalysis?.display_name && profileAnalysis.display_name !== selected.domain && <p>{selectedSource?.canonical_domain ?? selected.domain}</p>}
             </div>
-          </div>
-          <div className="profile-tabs" role="tablist" aria-label="Source profile sections">
-            <button className={activeProfileTab === 'profile' ? 'profile-tab profile-tab-active' : 'profile-tab'} type="button" role="tab" aria-selected={activeProfileTab === 'profile'} onClick={() => setActiveProfileTab('profile')}>
-              Profile
-            </button>
-            {hasProfileEssays && (
-              <button
-                className={activeProfileTab === 'essays' ? 'profile-tab profile-tab-active' : 'profile-tab'}
-                type="button"
-                role="tab"
-                aria-selected={activeProfileTab === 'essays'}
-                onClick={() => setActiveProfileTab('essays')}
+            <label className="source-view-switcher">
+              <span>View</span>
+              <select
+                aria-label="Source view"
+                value={activeProfileTab}
+                disabled={profileLoading}
+                onChange={(event) => setActiveProfileTab(event.target.value as SourceProfileTab)}
               >
-                Essays <span>{documentsPage.total}</span>
-              </button>
-            )}
-            {profileCollectionGroups.length > 0 && (
-              <button
-                className={activeProfileTab === 'collections' ? 'profile-tab profile-tab-active' : 'profile-tab'}
-                type="button"
-                role="tab"
-                aria-selected={activeProfileTab === 'collections'}
-                onClick={() => setActiveProfileTab('collections')}
-              >
-                Collections <span>{profileCollectionGroups.length}</span>
-              </button>
-            )}
+                <option value="profile">Overview</option>
+                <option value="essays" disabled={!hasProfileEssays}>
+                  Essays{hasProfileEssays ? ` (${documentsPage.total})` : ''}
+                </option>
+                <option value="collections" disabled={profileCollectionGroups.length === 0}>
+                  Collections{profileCollectionGroups.length ? ` (${profileCollectionGroups.length})` : ''}
+                </option>
+                <option value="explore">Explore</option>
+                <option value="graph">Graph</option>
+              </select>
+            </label>
           </div>
-          {activeProfileTab === 'profile' && (
+          {profileLoading && <SourceProfileSkeleton />}
+          {!profileLoading && activeProfileTab === 'profile' && (
             <div className="profile-overview-grid">
               <ProfileAnalysisCard analysis={profileAnalysis} />
               <SourceNetworkPanel inbound={profileNetwork.inbound} outbound={profileNetwork.outbound} onOpenProfile={onOpenProfile} />
             </div>
           )}
-          {activeProfileTab === 'essays' && (
+          {!profileLoading && activeProfileTab === 'essays' && (
             <>
               <div className="profile-documents">
                 <DirectoryDocumentTable documents={documentsPage.items} onOpenDocument={openDirectoryDrawer} />
@@ -348,8 +359,24 @@ export function DirectoryView({
               <ProfilePagination page={documentsPage} onChange={pageProfileDocuments} />
             </>
           )}
-          {activeProfileTab === 'collections' && (
+          {!profileLoading && activeProfileTab === 'collections' && (
             <SourceCollectionsTab groups={profileCollectionGroups} onOpenDocument={openDirectoryDrawer} />
+          )}
+          {!profileLoading && activeProfileTab === 'explore' && selectedSource && (
+            <div className="source-visual-panel">
+              <Suspense fallback={<SourceVisualSkeleton />}>
+                <EmbeddingExplorer key={selectedSource.id} sourceId={selectedSource.id} />
+              </Suspense>
+            </div>
+          )}
+          {!profileLoading && activeProfileTab === 'graph' && (
+            <div className="source-visual-panel">
+              <GraphExplorer
+                key={selected.domain}
+                onOpenProfile={onOpenProfile}
+                initialDomain={selected.domain}
+              />
+            </div>
           )}
         </div>
       )}
@@ -524,6 +551,31 @@ function TableSkeleton({ columns, rows }: { columns: number; rows: number }) {
           ))}
         </div>
       ))}
+    </div>
+  );
+}
+
+function SourceProfileSkeleton() {
+  return (
+    <div className="source-profile-skeleton" aria-label="Loading source">
+      <div className="source-profile-skeleton-main">
+        <span className="skeleton-line" />
+        <span className="skeleton-line" />
+        <span className="skeleton-line" />
+      </div>
+      <div className="source-profile-skeleton-side">
+        <span className="skeleton-line" />
+        <span className="skeleton-line" />
+        <span className="skeleton-line" />
+      </div>
+    </div>
+  );
+}
+
+function SourceVisualSkeleton() {
+  return (
+    <div className="source-visual-skeleton" aria-label="Loading visualization">
+      <span className="skeleton-line" />
     </div>
   );
 }

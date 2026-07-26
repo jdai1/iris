@@ -1,19 +1,15 @@
 import { FormEvent, useEffect, useState } from 'react';
-import { ArrowUpRight, Globe2, UserPlus } from 'lucide-react';
+import { ArrowUpRight, BookOpen, UserPlus } from 'lucide-react';
 import {
   acceptFriendRequest,
-  attachProfileWebsite,
-  deleteProfileWebsite,
   disconnectFriend,
   findUsers,
   getFriendRequests,
   getFriends,
   getFriendsFeed,
-  getMyProfile,
   getUserProfile,
   removeFriendRequest,
   sendFriendRequest,
-  updateMyProfile,
 } from '../api';
 import { documentPath, navigateTo } from '../app/navigation';
 import { CorpusSearchForm } from '../CorpusSearchForm';
@@ -26,7 +22,7 @@ import type {
   UserProfile,
 } from '../types';
 
-type PeopleTab = 'feed' | 'friends' | 'requests' | 'profile';
+type PeopleTab = 'feed' | 'friends' | 'requests';
 
 const emptyRequests: FriendRequests = { incoming: [], outgoing: [] };
 
@@ -35,12 +31,9 @@ export function PeopleView() {
   const [feed, setFeed] = useState<FriendFeedItem[]>([]);
   const [friends, setFriends] = useState<Friendship[]>([]);
   const [requests, setRequests] = useState<FriendRequests>(emptyRequests);
-  const [profile, setProfile] = useState<UserProfile | null>(null);
   const [selectedProfile, setSelectedProfile] = useState<UserProfile | null>(null);
   const [peopleQuery, setPeopleQuery] = useState('');
   const [peopleResults, setPeopleResults] = useState<Person[]>([]);
-  const [profileForm, setProfileForm] = useState({ username: '', displayName: '', bio: '' });
-  const [websiteForm, setWebsiteForm] = useState({ url: '', label: '' });
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -53,21 +46,19 @@ export function PeopleView() {
     setLoading(true);
     setError(null);
     try {
-      const [feedPage, friendRows, requestRows, ownProfile] = await Promise.all([
+      const [feedPage, friendRows, requestRows] = await Promise.all([
         getFriendsFeed(),
         getFriends(),
         getFriendRequests(),
-        getMyProfile(),
       ]);
       setFeed(feedPage.items);
       setFriends(friendRows);
       setRequests(requestRows);
-      setProfile(ownProfile);
-      setProfileForm({
-        username: ownProfile.username,
-        displayName: ownProfile.display_name ?? '',
-        bio: ownProfile.bio ?? '',
-      });
+      setSelectedProfile((current) => (
+        current && friendRows.some((friendship) => friendship.person.username === current.username)
+          ? current
+          : null
+      ));
     } catch (err) {
       setError(errorMessage(err));
     } finally {
@@ -115,50 +106,15 @@ export function PeopleView() {
     }
   }
 
-  async function saveProfile(event: FormEvent) {
-    event.preventDefault();
-    setBusy(true);
-    setError(null);
-    try {
-      const updated = await updateMyProfile({
-        username: profileForm.username,
-        display_name: profileForm.displayName,
-        bio: profileForm.bio,
-      });
-      setProfile(updated);
-      setProfileForm({
-        username: updated.username,
-        displayName: updated.display_name ?? '',
-        bio: updated.bio ?? '',
-      });
-    } catch (err) {
-      setError(errorMessage(err));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function addWebsite(event: FormEvent) {
-    event.preventDefault();
-    if (!websiteForm.url.trim()) return;
-    await runAction(async () => {
-      await attachProfileWebsite({
-        url: websiteForm.url,
-        label: websiteForm.label || null,
-      });
-      setWebsiteForm({ url: '', label: '' });
-    });
-  }
-
   return (
     <section className="people-view">
       <header className="people-header">
         <div>
           <h1>People</h1>
-          <p>Private profiles, friends, and what your friends are reading.</p>
+          <p>Your private network and its reading activity.</p>
         </div>
         <div className="people-tabs" role="tablist" aria-label="People sections">
-          {(['feed', 'friends', 'requests', 'profile'] as PeopleTab[]).map((item) => (
+          {(['feed', 'friends', 'requests'] as PeopleTab[]).map((item) => (
             <button
               key={item}
               type="button"
@@ -176,12 +132,17 @@ export function PeopleView() {
       </header>
 
       {error && <StateMessage tone="error">{error}</StateMessage>}
-      {loading && <StateMessage>Loading people…</StateMessage>}
+      {loading && <PeopleSkeleton />}
 
       {!loading && tab === 'feed' && (
         <div className="people-feed">
           {feed.length === 0 && (
-            <StateMessage>Your friends' saved and read pages will appear here.</StateMessage>
+            <div className="people-feed-empty">
+              <BookOpen size={18} />
+              <strong>No reading activity yet</strong>
+              <p>Pages your friends save or finish will appear here.</p>
+              <Button uiVariant="outline" onClick={() => setTab('friends')}>Find friends</Button>
+            </div>
           )}
           {feed.map((item) => (
             <button
@@ -193,7 +154,7 @@ export function PeopleView() {
               <span className="people-avatar">{initials(item.person)}</span>
               <span className="people-feed-copy">
                 <span>
-                  <strong>{personName(item.person)}</strong>{' '}
+                  <strong>@{item.person.username}</strong>{' '}
                   {item.status === 'read' ? 'read' : 'saved'}
                 </span>
                 <strong>{item.document.title || item.document.url}</strong>
@@ -213,7 +174,7 @@ export function PeopleView() {
               value={peopleQuery}
               onChange={setPeopleQuery}
               onSubmit={searchPeople}
-              placeholder="Search by name or username"
+              placeholder="Search usernames"
               disabled={busy || !peopleQuery.trim()}
             />
             <div className="people-list">
@@ -221,8 +182,7 @@ export function PeopleView() {
                 <div className="people-row" key={person.user_id}>
                   <span className="people-avatar">{initials(person)}</span>
                   <span>
-                    <strong>{personName(person)}</strong>
-                    <small>@{person.username}</small>
+                    <strong>@{person.username}</strong>
                   </span>
                   {person.relationship === 'none' && (
                     <Button
@@ -243,7 +203,7 @@ export function PeopleView() {
 
           <section className="people-panel">
             <h2>Friends</h2>
-            {friends.length === 0 && <StateMessage>No connected friends yet.</StateMessage>}
+            {friends.length === 0 && <div className="people-section-empty">No connected friends yet.</div>}
             <div className="people-list">
               {friends.map((friendship) => (
                 <div className="people-row" key={friendship.id}>
@@ -254,8 +214,7 @@ export function PeopleView() {
                   >
                     <span className="people-avatar">{initials(friendship.person)}</span>
                     <span>
-                      <strong>{personName(friendship.person)}</strong>
-                      <small>@{friendship.person.username}</small>
+                      <strong>@{friendship.person.username}</strong>
                     </span>
                   </button>
                   <Button
@@ -296,81 +255,6 @@ export function PeopleView() {
         </div>
       )}
 
-      {!loading && tab === 'profile' && profile && (
-        <div className="people-grid">
-          <form className="people-panel people-form" onSubmit={saveProfile}>
-            <h2>Your profile</h2>
-            <label>
-              Display name
-              <input
-                value={profileForm.displayName}
-                onChange={(event) => setProfileForm((value) => ({ ...value, displayName: event.target.value }))}
-              />
-            </label>
-            <label>
-              Username
-              <input
-                value={profileForm.username}
-                onChange={(event) => setProfileForm((value) => ({ ...value, username: event.target.value }))}
-              />
-            </label>
-            <label>
-              Bio
-              <textarea
-                value={profileForm.bio}
-                onChange={(event) => setProfileForm((value) => ({ ...value, bio: event.target.value }))}
-                rows={5}
-              />
-            </label>
-            <Button uiVariant="solid" type="submit" disabled={busy}>Save profile</Button>
-            <small>Only connected friends can open this profile.</small>
-          </form>
-
-          <section className="people-panel people-form">
-            <h2>Personal websites</h2>
-            <form className="people-website-form" onSubmit={addWebsite}>
-              <label>
-                Website URL
-                <input
-                  value={websiteForm.url}
-                  onChange={(event) => setWebsiteForm((value) => ({ ...value, url: event.target.value }))}
-                  placeholder="https://example.com"
-                />
-              </label>
-              <label>
-                Label
-                <input
-                  value={websiteForm.label}
-                  onChange={(event) => setWebsiteForm((value) => ({ ...value, label: event.target.value }))}
-                  placeholder="Writing"
-                />
-              </label>
-              <Button uiVariant="outline" type="submit" disabled={busy || !websiteForm.url.trim()}>
-                <Globe2 size={14} /> Attach website
-              </Button>
-            </form>
-            <div className="people-websites">
-              {profile.websites.map((website) => (
-                <div className="people-website-row" key={website.id}>
-                  <a href={website.url} target="_blank" rel="noreferrer">
-                    <strong>{website.label || website.canonical_domain}</strong>
-                    <small>{website.canonical_domain} · {website.source_status}</small>
-                    <ArrowUpRight size={14} />
-                  </a>
-                  <Button
-                    uiVariant="ghost"
-                    disabled={busy}
-                    onClick={() => runAction(() => deleteProfileWebsite(website.id))}
-                  >
-                    Remove
-                  </Button>
-                </div>
-              ))}
-            </div>
-            <small>Website ownership is not verified yet.</small>
-          </section>
-        </div>
-      )}
     </section>
   );
 }
@@ -397,14 +281,13 @@ function RequestList({
   return (
     <section className="people-panel">
       <h2>{title}</h2>
-      {rows.length === 0 && <StateMessage>{empty}</StateMessage>}
+      {rows.length === 0 && <div className="people-section-empty">{empty}</div>}
       <div className="people-list">
         {rows.map((friendship) => (
           <div className="people-row" key={friendship.id}>
             <span className="people-avatar">{initials(friendship.person)}</span>
             <span>
-              <strong>{personName(friendship.person)}</strong>
-              <small>@{friendship.person.username}</small>
+              <strong>@{friendship.person.username}</strong>
             </span>
             <span className="people-actions">
               {primaryLabel && onPrimary && (
@@ -426,8 +309,7 @@ function RequestList({
 function ProfileSummary({ profile }: { profile: UserProfile }) {
   return (
     <div className="people-profile-summary">
-      <h3>{personName(profile)}</h3>
-      <small>@{profile.username}</small>
+      <h3>@{profile.username}</h3>
       {profile.bio && <p>{profile.bio}</p>}
       {profile.websites.map((website) => (
         <a key={website.id} href={website.url} target="_blank" rel="noreferrer">
@@ -438,12 +320,8 @@ function ProfileSummary({ profile }: { profile: UserProfile }) {
   );
 }
 
-function personName(person: Person | UserProfile) {
-  return person.display_name || person.username;
-}
-
 function initials(person: Person | UserProfile) {
-  return personName(person)
+  return person.username
     .split(/\s+/)
     .slice(0, 2)
     .map((part) => part[0]?.toUpperCase())
@@ -467,6 +345,19 @@ function formatDate(value: string) {
 
 function capitalize(value: string) {
   return value.charAt(0).toUpperCase() + value.slice(1);
+}
+
+function PeopleSkeleton() {
+  return (
+    <div className="people-loading" aria-label="Loading people">
+      {[0, 1, 2].map((item) => (
+        <div className="people-loading-row" key={item}>
+          <span />
+          <span className="skeleton-line" />
+        </div>
+      ))}
+    </div>
+  );
 }
 
 function errorMessage(error: unknown) {

@@ -110,7 +110,7 @@ def get_admin_overview() -> AdminOverviewSchema:
     return AdminOverviewSchema(totals=totals, source_statuses=source_statuses, document_types=document_types)
 
 
-def get_embedding_map(*, limit: int) -> EmbeddingMapSchema:
+def get_embedding_map(*, limit: int, source_id: int | None = None) -> EmbeddingMapSchema:
     """Return embedded essay documents projected into a compact 3D map."""
     session = db.current_session()
     normalized_limit = clamped_embedding_limit(limit)
@@ -135,6 +135,8 @@ def get_embedding_map(*, limit: int) -> EmbeddingMapSchema:
         .where(Document.document_type == DocumentType.ESSAY.value)
         .order_by(Document.id.asc())
     )
+    if source_id is not None:
+        statement = statement.where(Document.source_id == source_id)
     documents = session.execute(statement.limit(normalized_limit)).scalars().all()
 
     loaded: list[tuple[Document, list[float]]] = []

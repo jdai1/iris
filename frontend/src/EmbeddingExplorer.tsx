@@ -210,7 +210,7 @@ function createHoverTexture(mode: ThemeMode) {
   return texture;
 }
 
-export function EmbeddingExplorer() {
+export function EmbeddingExplorer({ sourceId }: { sourceId?: number }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
@@ -258,7 +258,10 @@ export function EmbeddingExplorer() {
 
   useEffect(() => {
     let mounted = true;
-    getEmbeddingMap()
+    setLoading(true);
+    setError(null);
+    setMap(null);
+    getEmbeddingMap(3000, sourceId)
       .then((payload) => {
         if (!mounted) return;
         const documentUuid = new URLSearchParams(window.location.search).get('document');
@@ -274,7 +277,7 @@ export function EmbeddingExplorer() {
     return () => {
       mounted = false;
     };
-  }, []);
+  }, [sourceId]);
 
   useEffect(() => {
     if (!canvasRef.current || !map) return;

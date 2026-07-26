@@ -607,10 +607,25 @@ def test_embedding_map_api_projects_embedded_documents(session):
             embedding=dumps_embedding(embed_text(text)),
             content_hash=f"map-test-{index}",
         )
+    other_source = get_or_create_source("https://other-map.test", status="indexed")
+    upsert_document(
+        source=other_source,
+        url="https://other-map.test/doc",
+        document_type="essay",
+        crawl_status="fetched",
+        title="Other map doc",
+        author=None,
+        published_at=None,
+        extracted_text="other map",
+        summary="other map",
+        topics=["map"],
+        embedding=dumps_embedding(embed_text("other map")),
+        content_hash="other-map-test",
+    )
     session.commit()
 
     client = TestClient(app)
-    response = client.get("/api/embedding-map", params={"limit": 10})
+    response = client.get("/api/embedding-map", params={"limit": 10, "source_id": source.id})
 
     assert response.status_code == 200
     body = response.json()
@@ -620,8 +635,9 @@ def test_embedding_map_api_projects_embedded_documents(session):
     assert all({"x", "y", "z"}.issubset(point) for point in body["points"])
 
 
-def test_bookshelf_link_api_captures_external_url_with_notes_and_tags(session):
+def test_bookshelf_link_api_captures_external_url_with_notes_and_tags(session, monkeypatch):
     client = TestClient(app)
+    headers = _bookshelf_auth(monkeypatch)
 
     response = client.post(
         "/api/bookshelf/links",
@@ -632,6 +648,7 @@ def test_bookshelf_link_api_captures_external_url_with_notes_and_tags(session):
             "note": "Initial reflection.",
             "tags": ["writing", "reflection"],
         },
+        headers=headers,
     )
 
     assert response.status_code == 200
@@ -646,19 +663,25 @@ def test_bookshelf_link_api_captures_external_url_with_notes_and_tags(session):
     repeat_response = client.post(
         "/api/bookshelf/links",
         json={"url": "https://example.com/post", "title": "A saved post"},
+        headers=headers,
     )
     assert repeat_response.status_code == 200
     assert repeat_response.json()["note"] == "Initial reflection."
     assert repeat_response.json()["tags"] == ["reflection", "writing"]
 
-    list_response = client.get("/api/bookshelf", params={"status": "saved"})
+    list_response = client.get("/api/bookshelf", params={"status": "saved"}, headers=headers)
     assert list_response.status_code == 200
     assert list_response.json()["total"] == 1
 
 
-def test_browser_capture_resolve_and_highlight_lifecycle(session):
+def test_browser_capture_resolve_and_highlight_lifecycle(session, monkeypatch):
     client = TestClient(app)
-    capture = client.post("/api/browser/pages/capture", json={"url": "https://example.com/read?utm_source=x", "title": "Read me"})
+    headers = _bookshelf_auth(monkeypatch)
+    capture = client.post(
+        "/api/browser/pages/capture",
+        json={"url": "https://example.com/read?utm_source=x", "title": "Read me"},
+        headers=headers,
+    )
     assert capture.status_code == 200
     page = capture.json()
     assert page["saved"] is True
@@ -668,27 +691,44 @@ def test_browser_capture_resolve_and_highlight_lifecycle(session):
     created = client.post(f"/api/documents/{document_id}/highlights", json={
         "quote": "important sentence", "prefix": "before ", "suffix": " after",
         "start_offset": 10, "end_offset": 28, "comment": "Remember this.",
-    })
+    }, headers=headers)
     assert created.status_code == 200
     highlight_id = created.json()["id"]
 
-    resolved = client.get("/api/browser/pages/resolve", params={"url": "https://example.com/read?utm_campaign=y"})
+    resolved = client.get(
+        "/api/browser/pages/resolve",
+        params={"url": "https://example.com/read?utm_campaign=y"},
+        headers=headers,
+    )
     assert resolved.status_code == 200
     assert resolved.json()["highlights"][0]["quote"] == "important sentence"
 
-    updated = client.patch(f"/api/highlights/{highlight_id}", json={"comment": "Updated thought."})
+    updated = client.patch(
+        f"/api/highlights/{highlight_id}",
+        json={"comment": "Updated thought."},
+        headers=headers,
+    )
     assert updated.status_code == 200
     assert updated.json()["comment"] == "Updated thought."
-    deleted = client.delete(f"/api/highlights/{highlight_id}")
+    deleted = client.delete(f"/api/highlights/{highlight_id}", headers=headers)
     assert deleted.status_code == 204
-    assert client.get(f"/api/documents/{document_id}/highlights").json() == []
+    assert client.get(f"/api/documents/{document_id}/highlights", headers=headers).json() == []
 
 
 def test_highlights_are_user_owned(session, monkeypatch):
     client = TestClient(app)
-    first = client.post("/api/browser/pages/capture", json={"url": "https://example.com/private"}).json()
+    first_user_headers = _bookshelf_auth(monkeypatch)
+    first = client.post(
+        "/api/browser/pages/capture",
+        json={"url": "https://example.com/private"},
+        headers=first_user_headers,
+    ).json()
     document_id = first["entry"]["document"]["id"]
-    highlight_id = client.post(f"/api/documents/{document_id}/highlights", json={"quote": "private"}).json()["id"]
+    highlight_id = client.post(
+        f"/api/documents/{document_id}/highlights",
+        json={"quote": "private"},
+        headers=first_user_headers,
+    ).json()["id"]
 
     from iris.services.auth import FirebaseIdentity
     monkeypatch.setattr("iris.routes.api.verify_firebase_token", lambda _token: FirebaseIdentity(uid="other", email="other@example.com"))

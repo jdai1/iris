@@ -45,64 +45,7 @@
 }
 
 .directory-hub {
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
   min-height: 0;
-}
-
-.directory-mode-tabs {
-  display: flex;
-  gap: 2px;
-  margin-bottom: 18px;
-  border-bottom: 1px solid var(--border-subtle);
-}
-
-.directory-mode-tab {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  min-height: 38px;
-  padding: 0 12px;
-  border: 0;
-  border-bottom: 2px solid transparent;
-  background: transparent;
-  color: var(--text-subtle);
-  font: inherit;
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.directory-mode-tab:hover,
-.directory-mode-tab-active {
-  border-bottom-color: var(--text);
-  color: var(--text);
-}
-
-.directory-mode-content {
-  min-width: 0;
-  min-height: 0;
-}
-
-.directory-mode-content-visual {
-  height: calc(100vh - 142px);
-  min-height: 560px;
-  overflow: hidden;
-  border: 1px solid var(--border-subtle);
-}
-
-.directory-mode-content-visual .explorer-shell,
-.directory-mode-content-visual .graph-view {
-  height: 100%;
-}
-
-.directory-mode-content-visual .explorer-toolbar {
-  padding-top: 14px;
-  padding-left: 18px;
-}
-
-.directory-mode-content-visual .graph-toolbar {
-  --graph-pad-x: 18px;
-  --graph-pad-top: 14px;
 }
 
 .profile-panel {
@@ -116,6 +59,10 @@
   width: 100%;
   margin-left: 0;
   margin-top: 8px;
+}
+
+.directory-profile-page {
+  min-height: min(720px, calc(100vh - 104px));
 }
 
 .directory-table-panel {
@@ -225,7 +172,10 @@
 
 .profile-heading {
   display: flex;
+  align-items: center;
+  justify-content: space-between;
   gap: 20px;
+  min-height: 54px;
   padding-bottom: 16px;
   border-bottom: 1px solid var(--border-subtle);
 }
@@ -268,6 +218,38 @@
 .profile-heading h3:focus-within a {
   opacity: 1;
   transform: translateX(0);
+}
+
+.source-view-switcher {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  flex: 0 0 auto;
+  color: var(--text-subtle);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.source-view-switcher select {
+  min-width: 132px;
+  min-height: 34px;
+  border: 1px solid var(--border-input);
+  background: var(--bg-raised);
+  color: var(--text);
+  padding: 0 30px 0 10px;
+  font: inherit;
+  font-size: 12px;
+  text-transform: none;
+}
+
+.source-view-switcher select:focus {
+  border-color: var(--text);
+  outline: 0;
+}
+
+.source-view-switcher select:disabled {
+  color: var(--text-faint);
 }
 
 .profile-tabs {
@@ -326,6 +308,71 @@
 .profile-tab-empty {
   min-height: 120px;
   align-items: center;
+}
+
+.source-profile-skeleton {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 340px);
+  gap: clamp(28px, 4vw, 56px);
+  min-height: 480px;
+  padding-top: 8px;
+}
+
+.source-profile-skeleton-main,
+.source-profile-skeleton-side {
+  display: grid;
+  align-content: start;
+  gap: 18px;
+}
+
+.source-profile-skeleton-main .skeleton-line:first-child {
+  width: 72%;
+  height: 20px;
+}
+
+.source-profile-skeleton-main .skeleton-line:nth-child(2) {
+  width: 94%;
+}
+
+.source-profile-skeleton-main .skeleton-line:nth-child(3) {
+  width: 58%;
+}
+
+.source-profile-skeleton-side {
+  padding-top: 4px;
+}
+
+.source-visual-panel {
+  height: min(720px, calc(100vh - 198px));
+  min-height: 560px;
+  overflow: hidden;
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-raised);
+}
+
+.source-visual-panel .explorer-shell,
+.source-visual-panel .graph-view {
+  height: 100%;
+}
+
+.source-visual-panel .explorer-toolbar {
+  padding-top: 14px;
+  padding-left: 18px;
+}
+
+.source-visual-panel .graph-toolbar {
+  --graph-pad-x: 18px;
+  --graph-pad-top: 14px;
+}
+
+.source-visual-skeleton {
+  display: grid;
+  place-items: center;
+  height: 100%;
+}
+
+.source-visual-skeleton .skeleton-line {
+  width: 84px;
 }
 
 .profile-collection-list {
@@ -606,6 +653,10 @@
 
   .profile-network-panel {
     position: static;
+  }
+
+  .source-profile-skeleton {
+    grid-template-columns: 1fr;
   }
 }
 
