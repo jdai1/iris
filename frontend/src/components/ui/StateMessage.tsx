@@ -1,22 +1,22 @@
-import { Box, type BoxProps } from '@chakra-ui/react';
+import type { ComponentProps } from 'react';
+import { cn } from '@/lib/utils';
 
 export type StateMessageTone = 'neutral' | 'error';
 
-export type StateMessageProps = BoxProps & {
+export type StateMessageProps = ComponentProps<'div'> & {
   tone?: StateMessageTone;
 };
 
-export function StateMessage({ tone = 'neutral', ...props }: StateMessageProps) {
+export function StateMessage({ className, tone = 'neutral', ...props }: StateMessageProps) {
   return (
-    <Box
-      borderWidth="1px"
-      borderColor={tone === 'error' ? 'danger.border' : 'border.subtle'}
-      bg={tone === 'error' ? 'danger.subtle' : 'bg.surface'}
-      color={tone === 'error' ? 'danger.default' : 'fg.muted'}
-      px="4"
-      py="3"
-      fontSize="sm"
-      lineHeight="1.5"
+    <div
+      className={cn(
+        'border px-4 py-3 text-sm leading-[1.5]',
+        tone === 'error'
+          ? 'border-[var(--status-red-border)] bg-[var(--status-red-bg)] text-[var(--status-red-text)]'
+          : 'border-[var(--border-subtle)] bg-[var(--bg-raised)] text-[var(--text-muted)]',
+        className,
+      )}
       {...props}
     />
   );

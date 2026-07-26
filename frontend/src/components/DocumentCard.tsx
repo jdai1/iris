@@ -1,5 +1,4 @@
 import { type MouseEvent, useEffect, useState } from 'react';
-import { Box, Heading, HStack, Link, Text } from '@chakra-ui/react';
 import { ArrowUpRight, ChevronRight, MoreHorizontal } from 'lucide-react';
 import { addBookshelfCollectionItem, getBookshelfCollections, updateDocumentBookshelf } from '../api';
 import { documentPath, navigateTo } from '../app/navigation';
@@ -143,24 +142,24 @@ export function DocumentCard({
   return (
     <Panel as="article" className={compact ? 'document-card document-card-compact' : 'document-card'}>
       {!compact && (
-        <HStack gap="2" flexWrap="wrap" color="iris.500" fontSize="xs" textTransform="uppercase">
+        <div className="flex flex-wrap items-center gap-2 text-xs uppercase text-[var(--text-subtle)]">
           <button className="profile-link" type="button" onClick={() => onOpenProfile?.(document.source_id, document.source_domain)}>
             {document.source_domain}
           </button>
-          <Text as="span">{document.document_type}</Text>
-        </HStack>
+          <span>{document.document_type}</span>
+        </div>
       )}
       <div className={compact ? 'document-title-row' : undefined}>
-        <Heading as="h3" mt="2" mb="3" fontSize="xl" lineHeight="1.2" fontWeight="600">
+        <h3 className="mb-3 mt-2 text-xl font-semibold leading-tight">
           <a className="document-detail-link" href={documentPath(document.uuid)} onClick={openDocument}>
             {document.title ?? document.url}
           </a>
           {compact && (
-            <Link href={document.url} target="_blank" rel="noreferrer" className="document-open-icon" color="iris.900" fontWeight="600" textDecoration="none" aria-label="Open document" data-tooltip="Open document">
+            <a href={document.url} target="_blank" rel="noreferrer" className="document-open-icon font-semibold text-[var(--text)] no-underline" aria-label="Open document" data-tooltip="Open document">
               <ArrowUpRight size={16} />
-            </Link>
+            </a>
           )}
-        </Heading>
+        </h3>
         {compact && actionsMenu}
       </div>
       {compact && (
@@ -168,9 +167,9 @@ export function DocumentCard({
           {document.source_domain}
         </button>
       )}
-      {document.summary && <Text color="iris.700" lineHeight="1.6" mb="3">{document.summary}</Text>}
-      {!compact && <Text color="iris.500" fontSize="sm" lineHeight="1.55" mb="4">{reason}</Text>}
-      <ChipList className="topics" mb="4">
+      {document.summary && <p className="mb-3 leading-relaxed text-[var(--text-secondary)]">{document.summary}</p>}
+      {!compact && <p className="mb-4 text-sm leading-relaxed text-[var(--text-subtle)]">{reason}</p>}
+      <ChipList className="topics mb-4">
         {document.topics.map((topic) => (
           <Chip key={topic}>
             {topic}
@@ -178,12 +177,12 @@ export function DocumentCard({
         ))}
       </ChipList>
       {!compact && (
-        <HStack>
-          <Link href={document.url} target="_blank" rel="noreferrer" color="iris.900" fontWeight="600" textDecoration="none">
+        <div>
+          <a href={document.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 font-semibold text-[var(--text)] no-underline">
             <ArrowUpRight size={16} />
             Open
-          </Link>
-        </HStack>
+          </a>
+        </div>
       )}
       {(!compact || error) && (
         <div className="document-bookshelf-actions">

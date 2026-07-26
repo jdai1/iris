@@ -1,8 +1,4 @@
 import { ReactNode, useEffect, useRef, useState } from 'react';
-import {
-  Box,
-  Stack,
-} from '@chakra-ui/react';
 import { BookOpen, LayoutDashboard, LogOut, Moon, Orbit, Search, Settings, Sun, UserCircle, Users } from 'lucide-react';
 import { AuthGate } from './auth';
 import { AdminView } from './views/AdminView';
@@ -139,10 +135,10 @@ function IrisApp({ currentUser, onSignOut }: { currentUser: IrisUser | null; onS
   return (
     <AppShell>
       <Sidebar>
-        <Box className="sidebar-brand">
+        <div className="sidebar-brand">
           <span>iris</span>
-        </Box>
-        <Stack as="nav" className="sidebar-nav" gap="1">
+        </div>
+        <nav className="sidebar-nav">
           {visibleNavItems.map((item) => (
             <Button
               key={item.view}
@@ -156,23 +152,14 @@ function IrisApp({ currentUser, onSignOut }: { currentUser: IrisUser | null; onS
                 }
               }}
               uiVariant="nav"
-              justifyContent="flex-start"
+              className="hover:bg-transparent"
               data-active={view === item.view ? 'true' : undefined}
-              bg="transparent"
-              color={view === item.view ? 'iris.900' : 'iris.500'}
-              fontSize="14px"
-              fontWeight={view === item.view ? '600' : '500'}
-              lineHeight="1"
-              _hover={{
-                bg: 'transparent',
-                color: 'iris.900',
-              }}
             >
               {item.icon}
               {item.label}
             </Button>
           ))}
-        </Stack>
+        </nav>
         {currentUser && (
           <div className="sidebar-settings" ref={settingsRef}>
             {settingsOpen && (

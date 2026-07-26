@@ -1,23 +1,20 @@
-import type { BadgeProps } from '@chakra-ui/react';
+import type { ComponentProps } from 'react';
+import { cn } from '@/lib/utils';
 import { Chip } from './Chip';
 
-const statusTone: Record<string, BadgeProps> = {
-  failed: { color: 'danger.default', bg: 'danger.subtle', borderColor: 'danger.border' },
-  error: { color: 'danger.default', bg: 'danger.subtle', borderColor: 'danger.border' },
-  complete: { color: 'var(--status-green-text)', bg: 'var(--status-green-bg)', borderColor: 'var(--status-green-border)' },
-  completed: { color: 'var(--status-green-text)', bg: 'var(--status-green-bg)', borderColor: 'var(--status-green-border)' },
-  success: { color: 'var(--status-green-text)', bg: 'var(--status-green-bg)', borderColor: 'var(--status-green-border)' },
-  running: { color: 'var(--status-blue-text)', bg: 'var(--status-blue-bg)', borderColor: 'var(--status-blue-border)' },
-  pending: { color: 'fg.muted', bg: 'bg.subtle', borderColor: 'border.strong' },
+const statusTone: Record<string, string> = {
+  failed: 'border-[var(--status-red-border)] bg-[var(--status-red-bg)] text-[var(--status-red-text)]',
+  error: 'border-[var(--status-red-border)] bg-[var(--status-red-bg)] text-[var(--status-red-text)]',
+  complete: 'border-[var(--status-green-border)] bg-[var(--status-green-bg)] text-[var(--status-green-text)]',
+  completed: 'border-[var(--status-green-border)] bg-[var(--status-green-bg)] text-[var(--status-green-text)]',
+  success: 'border-[var(--status-green-border)] bg-[var(--status-green-bg)] text-[var(--status-green-text)]',
+  running: 'border-[var(--status-blue-border)] bg-[var(--status-blue-bg)] text-[var(--status-blue-text)]',
+  pending: 'border-[var(--border-input)] bg-[var(--bg-sunken)] text-[var(--text-muted)]',
 };
 
-export function StatusBadge({ value, ...props }: BadgeProps & { value: string }) {
+export function StatusBadge({ className, value, ...props }: ComponentProps<'span'> & { value: string }) {
   return (
-    <Chip
-      textTransform="lowercase"
-      {...(statusTone[value.toLowerCase()] ?? statusTone.pending)}
-      {...props}
-    >
+    <Chip className={cn('lowercase', statusTone[value.toLowerCase()] ?? statusTone.pending, className)} {...props}>
       {value}
     </Chip>
   );

@@ -544,7 +544,7 @@ export function BookshelfView({ onDiscover }: { onDiscover: () => void }) {
             <form className="bookshelf-add-link bookshelf-add-link-compact" onSubmit={submitLink}>
               <input value={linkUrl} onChange={(event) => setLinkUrl(event.target.value)} placeholder="Paste a URL..." />
               <input value={linkTitle} onChange={(event) => setLinkTitle(event.target.value)} placeholder="Title override" />
-              <Button type="submit" disabled={saving || !linkUrl.trim()} borderRadius="0">Save</Button>
+              <Button type="submit" disabled={saving || !linkUrl.trim()}>Save</Button>
             </form>
           )}
 

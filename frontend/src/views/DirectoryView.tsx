@@ -1,5 +1,4 @@
 import { FormEvent, lazy, ReactNode, Suspense, useEffect, useMemo, useRef, useState } from 'react';
-import { Box } from '@chakra-ui/react';
 import { ArrowUpRight, FileText, Folder, GitFork, LayoutTemplate, Orbit } from 'lucide-react';
 import { getAdminDocuments, getAdminSources, getBookshelfCollections, getDirectorySources, getGraph, getSourceProfileAnalysis } from '../api';
 import { GraphExplorer } from '../GraphExplorer';
@@ -241,7 +240,7 @@ export function DirectoryView({
   }
 
   return (
-    <Box as="section" className="directory-view">
+    <section className="directory-view">
       {target ? (
         <Button className="directory-back directory-back-top" uiVariant="plainIcon" type="button" onClick={showDirectoryRoot} aria-label="Back to sources">
           ←
@@ -391,7 +390,7 @@ export function DirectoryView({
           </div>
         </div>
       )}
-    </Box>
+    </section>
   );
 }
 

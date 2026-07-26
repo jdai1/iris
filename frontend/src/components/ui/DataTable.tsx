@@ -1,32 +1,34 @@
-import { Box, type BoxProps } from '@chakra-ui/react';
+import type { ComponentProps } from 'react';
+import { cn } from '@/lib/utils';
 
-export function DataTable(props: BoxProps) {
-  return <Box role="table" borderWidth="1px" borderColor="border.subtle" bg="bg.surface" overflow="auto" {...props} />;
-}
-
-export function DataTableRow({ selected = false, ...props }: BoxProps & { selected?: boolean }) {
+export function DataTable({ className, ...props }: ComponentProps<'div'>) {
   return (
-    <Box
-      role="row"
-      display="grid"
-      alignItems="center"
-      borderBottomWidth="1px"
-      borderBottomColor="border.subtle"
-      bg={selected ? 'bg.subtle' : 'transparent'}
-      _hover={{ bg: 'bg.subtle' }}
+    <div
+      role="table"
+      className={cn('overflow-auto border border-[var(--border-subtle)] bg-[var(--bg-raised)]', className)}
       {...props}
     />
   );
 }
 
-export function DataTableHead(props: BoxProps) {
+export function DataTableRow({ className, selected = false, ...props }: ComponentProps<'div'> & { selected?: boolean }) {
+  return (
+    <div
+      role="row"
+      className={cn(
+        'grid items-center border-b border-[var(--border-subtle)] bg-transparent hover:bg-[var(--bg-hover)]',
+        selected && 'bg-[var(--bg-hover)]',
+        className,
+      )}
+      {...props}
+    />
+  );
+}
+
+export function DataTableHead({ className, ...props }: ComponentProps<'div'>) {
   return (
     <DataTableRow
-      color="fg.muted"
-      fontSize="xs"
-      fontWeight="600"
-      textTransform="uppercase"
-      _hover={{ bg: 'transparent' }}
+      className={cn('text-xs font-semibold uppercase text-[var(--text-muted)] hover:bg-transparent', className)}
       {...props}
     />
   );

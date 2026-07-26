@@ -1,10 +1,11 @@
-import { Box, type BoxProps } from '@chakra-ui/react';
+import type { ComponentProps } from 'react';
 import type { View } from '../app/navigation';
+import { cn } from '@/lib/utils';
 
-export function Workspace({ view, ...props }: BoxProps & { view: View }) {
-  const className = view === 'search'
+export function Workspace({ view, className, ...props }: ComponentProps<'section'> & { view: View }) {
+  const viewClassName = view === 'search'
     ? 'workspace workspace-search'
     : 'workspace';
 
-  return <Box className={className} minW="0" {...props} />;
+  return <section className={cn(viewClassName, className)} {...props} />;
 }

@@ -1,5 +1,4 @@
 import { FormEvent, ReactNode, useEffect, useRef, useState } from 'react';
-import { Box } from '@chakra-ui/react';
 import { ArrowUpRight, BrainCircuit, FileSearch, Hash, Search, Tags } from 'lucide-react';
 import { getAgentConversation, getAgentConversations, streamChatSearch } from '../api';
 import { CorpusSearchForm } from '../CorpusSearchForm';
@@ -250,7 +249,7 @@ export function SearchView({
   }
 
   return (
-    <Box as="section" className="search-view">
+    <section className="search-view">
       <div className="chat-page-grid">
         <aside className="chat-history-rail">
           <div className="chat-history-rail-header">
@@ -303,8 +302,8 @@ export function SearchView({
         </div>
       )}
 
-      <Box className="chat-shell">
-        <Box className="chat-layout">
+      <div className="chat-shell">
+        <div className="chat-layout">
           <div className="chat-transcript" ref={transcriptRef}>
             {messages.map((message) => (
               <div key={message.id} className={`chat-message chat-message-${message.role}`}>
@@ -332,7 +331,7 @@ export function SearchView({
               </div>
             ))}
           </div>
-        </Box>
+        </div>
         {messages.length > 0 && (
           <div className="chat-composer chat-composer-bottom">
             <CorpusSearchForm
@@ -346,10 +345,10 @@ export function SearchView({
             />
           </div>
         )}
-      </Box>
+      </div>
         </div>
       </div>
-    </Box>
+    </section>
   );
 }
 

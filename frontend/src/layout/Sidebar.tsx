@@ -1,5 +1,6 @@
-import { Box, type BoxProps } from '@chakra-ui/react';
+import type { ComponentProps } from 'react';
+import { cn } from '@/lib/utils';
 
-export function Sidebar(props: BoxProps) {
-  return <Box as="aside" className="sidebar" bg="bg.surface" borderColor="border.subtle" {...props} />;
+export function Sidebar({ className, ...props }: ComponentProps<'aside'>) {
+  return <aside className={cn('sidebar', className)} {...props} />;
 }

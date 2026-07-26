@@ -1,4 +1,4 @@
-export * from './Button';
+export * from './button';
 export * from './Chip';
 export * from './DataTable';
 export * from './MetricCard';

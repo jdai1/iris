@@ -1,5 +1,4 @@
 import { FormEvent, useEffect, useRef, useState } from 'react';
-import { Flex, Heading, SimpleGrid, Text } from '@chakra-ui/react';
 import {
   getAdminCrawlJobs,
   getAdminDocuments,
@@ -217,26 +216,26 @@ export function AdminView() {
 
   return (
     <section>
-      <Flex className="section-header">
+      <div className="section-header">
         <div>
-          <Heading as="h2" fontSize="2xl" fontWeight="600">Admin</Heading>
-          <Text color="iris.500" mt="1">Read-only database view for ingestion, crawl runs, sources, and documents.</Text>
+          <h2>Admin</h2>
+          <p>Read-only database view for ingestion, crawl runs, sources, and documents.</p>
         </div>
         <Button type="button" uiVariant="outline" onClick={() => refresh()}>
           Refresh
         </Button>
-      </Flex>
+      </div>
 
       {error && <StateMessage className="error" tone="error">{error}</StateMessage>}
 
-      <SimpleGrid className="metric-grid" columns={{ base: 2, md: 3, xl: 6 }} gap="2.5">
+      <div className="metric-grid">
         <MetricCard className="metric" label="sources crawled" value={crawledSources} />
         <MetricCard className="metric" label="active crawls" value={activeSources} />
         <MetricCard className="metric" label="documents" value={overview?.totals.documents ?? 0} />
         <MetricCard className="metric" label="essays" value={overview?.totals.essay_documents ?? 0} />
         <MetricCard className="metric" label="links" value={overview?.totals.links ?? 0} />
         <MetricCard className="metric" label="resolved links" value={overview?.totals.resolved_links ?? 0} />
-      </SimpleGrid>
+      </div>
 
       <div className="admin-controls">
         <div className="tab-strip">

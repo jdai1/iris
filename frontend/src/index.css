@@ -1,3 +1,7 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+@import "@fontsource-variable/inter";
 @import "./styles/base.css";
 @import "./styles/search.css";
 @import "./styles/directory.css";
@@ -6,3 +10,57 @@
 @import "./styles/graph.css";
 @import "./styles/explorer.css";
 @import "./styles/responsive.css";
+
+@custom-variant dark (&:is([data-theme="dark"] *));
+
+@theme inline {
+  --font-heading: InterVariable, Inter, ui-sans-serif, system-ui, sans-serif;
+  --font-sans: InterVariable, Inter, ui-sans-serif, system-ui, sans-serif;
+  --color-background: var(--bg);
+  --color-foreground: var(--text);
+  --color-card: var(--bg-raised);
+  --color-card-foreground: var(--text);
+  --color-popover: var(--bg-raised);
+  --color-popover-foreground: var(--text);
+  --color-primary: var(--accent);
+  --color-primary-foreground: var(--accent-contrast);
+  --color-secondary: var(--bg-sunken);
+  --color-secondary-foreground: var(--text);
+  --color-muted: var(--bg-hover);
+  --color-muted-foreground: var(--text-muted);
+  --color-accent: var(--bg-hover);
+  --color-accent-foreground: var(--text);
+  --color-destructive: var(--status-red-text);
+  --color-border: var(--border);
+  --color-input: var(--border-input);
+  --color-ring: var(--focus-ring);
+  --color-sidebar: var(--bg-raised);
+  --color-sidebar-foreground: var(--text);
+  --color-sidebar-primary: var(--accent);
+  --color-sidebar-primary-foreground: var(--accent-contrast);
+  --color-sidebar-accent: var(--bg-hover);
+  --color-sidebar-accent-foreground: var(--text);
+  --color-sidebar-border: var(--border-subtle);
+  --color-sidebar-ring: var(--focus-ring);
+  --radius-sm: 0;
+  --radius-md: 0;
+  --radius-lg: 0;
+  --radius-xl: 0;
+  --radius-2xl: 0;
+  --radius-3xl: 0;
+  --radius-4xl: 0;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+  }
+
+  html {
+    @apply font-sans;
+  }
+}

@@ -1,34 +1,25 @@
+import type { ComponentProps } from 'react';
 import { Search } from 'lucide-react';
-import { Box, HStack, Input, type InputProps } from '@chakra-ui/react';
+import { cn } from '@/lib/utils';
 
-export type SearchInputProps = InputProps & {
+export type SearchInputProps = ComponentProps<'input'> & {
   icon?: boolean;
+  wrapperClassName?: string;
 };
 
-export function SearchInput({ icon = true, ...props }: SearchInputProps) {
+export function SearchInput({ className, icon = true, wrapperClassName, ...props }: SearchInputProps) {
   return (
-    <HStack
-      borderBottomWidth="1px"
-      borderBottomColor="border.subtle"
-      bg="bg.surface"
-      color="fg.default"
-      gap="2"
-      minH="9"
-      borderRadius="0"
-      _focusWithin={{ borderBottomColor: 'accent.default', outline: '2px solid var(--focus-ring)', outlineOffset: '2px' }}
-    >
-      {icon && (
-        <Box as={Search} width="14px" height="14px" color="fg.muted" flexShrink="0" />
+    <label
+      className={cn(
+        'flex min-h-9 items-center gap-2 border-b border-[var(--border-subtle)] bg-[var(--bg-raised)] text-[var(--text)] focus-within:border-[var(--accent)] focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-[var(--focus-ring)]',
+        wrapperClassName,
       )}
-      <Input
-        variant="flushed"
-        border="0"
-        minH="8"
-        px="0"
-        fontSize="sm"
-        _focusVisible={{ boxShadow: 'none', borderColor: 'transparent' }}
+    >
+      {icon && <Search aria-hidden="true" className="size-3.5 shrink-0 text-[var(--text-muted)]" />}
+      <input
+        className={cn('min-h-8 min-w-0 flex-1 border-0 bg-transparent p-0 text-sm outline-none', className)}
         {...props}
       />
-    </HStack>
+    </label>
   );
 }
