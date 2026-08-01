@@ -15,7 +15,10 @@ load_dotenv(BACKEND_DIR / ".env")
 
 
 def database_url() -> str:
-    return os.getenv("DATABASE_URL") or os.getenv("DEV_DATABASE_URL") or f"sqlite:///{BACKEND_DIR / 'iris.db'}"
+    value = os.getenv("DATABASE_URL") or os.getenv("DEV_DATABASE_URL") or f"sqlite:///{BACKEND_DIR / 'iris.db'}"
+    if value.startswith("postgres://"):
+        return value.replace("postgres://", "postgresql://", 1)
+    return value
 
 
 DEFAULT_CORS_ORIGINS = [
