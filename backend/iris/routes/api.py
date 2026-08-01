@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from contextlib import asynccontextmanager
 from typing import TypeVar
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Response, status
@@ -87,7 +88,7 @@ from iris.schemas.api import (
     UserWebsiteCreateSchema,
     UserWebsiteSchema,
 )
-from iris.services.auth import verify_firebase_token
+from iris.services.auth import verify_firebase_token, warm_firebase_token_verifier
 from iris.services.common.config import ADMIN_EMAILS, cors_origins, firebase_auth_enabled, openai_api_key
 from iris.services.common.langfuse_tracing import agent_conversation_session_id, agent_trace_metadata, agent_user_id
 from iris.services.retrieval.search import search_documents, stream_openai_agentic_chat, synthesize_answer
@@ -97,7 +98,13 @@ from iris.services.ingestion.source_classifier import classify_source_url
 from iris.services.common.url_utils import normalize_url
 
 
-app = FastAPI(title="Iris", version="0.1.0")
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    warm_firebase_token_verifier()
+    yield
+
+
+app = FastAPI(title="Iris", version="0.1.0", lifespan=lifespan)
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 app.add_middleware(
     CORSMiddleware,
@@ -107,6 +114,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
 
 T = TypeVar("T")
 

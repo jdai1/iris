@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import base64
 import json
+import logging
+import time
 from dataclasses import dataclass
 from functools import lru_cache
 
@@ -13,6 +16,9 @@ from iris.services.common.config import (
     FIREBASE_SERVICE_ACCOUNT_FILE,
     FIREBASE_SERVICE_ACCOUNT_JSON,
 )
+
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -49,3 +55,41 @@ def verify_firebase_token(token: str) -> FirebaseIdentity:
         display_name=decoded.get("name"),
         photo_url=decoded.get("picture"),
     )
+
+
+def warm_firebase_token_verifier() -> None:
+    """Fetch and cache Firebase signing certificates before serving requests."""
+    if not (FIREBASE_PROJECT_ID or FIREBASE_SERVICE_ACCOUNT_FILE or FIREBASE_SERVICE_ACCOUNT_JSON):
+        return
+
+    project_id = _firebase_app().project_id
+    if not project_id:
+        return
+
+    now = int(time.time())
+    header = {"alg": "RS256", "kid": "iris-startup-warmup", "typ": "JWT"}
+    payload = {
+        "aud": project_id,
+        "exp": now + 60,
+        "iat": now,
+        "iss": f"https://securetoken.google.com/{project_id}",
+        "sub": "iris-startup-warmup",
+    }
+    token = ".".join(
+        [
+            _base64url_json(header),
+            _base64url_json(payload),
+            "c3RhcnR1cA",
+        ]
+    )
+    try:
+        # This intentionally fails signature validation after the Admin SDK has
+        # populated its shared cache of Google's Firebase signing certificates.
+        auth.verify_id_token(token, app=_firebase_app())
+    except Exception:
+        logger.info("Firebase token verifier certificate cache is warm")
+
+
+def _base64url_json(value: dict[str, object]) -> str:
+    encoded = json.dumps(value, separators=(",", ":")).encode("utf-8")
+    return base64.urlsafe_b64encode(encoded).rstrip(b"=").decode("ascii")
