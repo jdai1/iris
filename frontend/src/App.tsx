@@ -344,9 +344,9 @@ function IrisApp({ currentUser, onSignOut }: { currentUser: IrisUser | null; onS
         {view === 'admin' && currentUser?.is_admin && <AdminView />}
       </Workspace>
       {documentArtifactOpen && documentUuid !== null && (
-        <DocumentRouteArtifact documentUuid={documentUuid} reason={documentReason} friendHighlights={friendHighlights} onClose={closeDocumentDrawer} />
+        <DocumentRouteArtifact key={documentUuid} documentUuid={documentUuid} reason={documentReason} friendHighlights={friendHighlights} onClose={closeDocumentDrawer} />
       )}
-      {documentUuid !== null && !documentArtifactOpen && <DocumentRouteDrawer documentUuid={documentUuid} reason={documentReason} friendHighlights={friendHighlights} onClose={closeDocumentDrawer} />}
+      {documentUuid !== null && !documentArtifactOpen && <DocumentRouteDrawer key={documentUuid} documentUuid={documentUuid} reason={documentReason} friendHighlights={friendHighlights} onClose={closeDocumentDrawer} />}
     </AppShell>
   );
 }
