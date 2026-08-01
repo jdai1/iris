@@ -6,7 +6,7 @@ import {
   getMyProfile,
   updateMyProfile,
 } from '../api';
-import { Button } from '../components/ui';
+import { Button, ToastRegion, type ToastNotice } from '../components/ui';
 import type { UserProfile } from '../types';
 
 export function ProfileView({ onUsernameChange }: { onUsernameChange?: (username: string) => void }) {
@@ -16,6 +16,7 @@ export function ProfileView({ onUsernameChange }: { onUsernameChange?: (username
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<ToastNotice | null>(null);
 
   useEffect(() => {
     loadProfile();
@@ -45,8 +46,14 @@ export function ProfileView({ onUsernameChange }: { onUsernameChange?: (username
       setProfile(updated);
       setUsername(updated.username);
       onUsernameChange?.(updated.username);
+      setNotice({ id: Date.now(), title: 'Username saved', tone: 'success' });
     } catch (err) {
-      setError(errorMessage(err));
+      setNotice({
+        id: Date.now(),
+        title: 'Could not save username',
+        description: errorMessage(err),
+        tone: 'error',
+      });
     } finally {
       setBusy(false);
     }
@@ -121,7 +128,6 @@ export function ProfileView({ onUsernameChange }: { onUsernameChange?: (username
           <section className="rounded-xl border bg-card p-5">
             <div>
               <h2 className="font-medium">Personal websites</h2>
-              <p className="mt-1 text-sm text-muted-foreground">Attached sites are added to the Iris indexing queue.</p>
             </div>
             <form className="mt-4 flex max-w-lg items-center gap-2" onSubmit={addWebsite}>
               <Globe2 className="size-4 shrink-0 text-muted-foreground" />
@@ -137,26 +143,25 @@ export function ProfileView({ onUsernameChange }: { onUsernameChange?: (username
                 Add
               </Button>
             </form>
-            <div className="mt-5 divide-y rounded-lg border">
-              {profile.websites.length === 0 && (
-                <p className="px-4 py-6 text-center text-sm text-muted-foreground">No personal website attached.</p>
-              )}
-              {profile.websites.map((website) => (
-                <div className="flex items-center justify-between gap-3 px-4 py-3" key={website.id}>
-                  <a className="flex min-w-0 items-center gap-2 text-sm hover:text-primary" href={website.url} target="_blank" rel="noreferrer">
-                    <span className="truncate font-medium">{website.canonical_domain}</span>
-                    <small className="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">{website.source_status}</small>
-                    <ArrowUpRight size={14} />
-                  </a>
-                  <Button uiVariant="ghost" disabled={busy} onClick={() => removeWebsite(website.id)}>
-                    Remove
-                  </Button>
-                </div>
-              ))}
-            </div>
+            {profile.websites.length > 0 && (
+              <div className="mt-5 divide-y rounded-lg border">
+                {profile.websites.map((website) => (
+                  <div className="flex items-center justify-between gap-3 px-4 py-3" key={website.id}>
+                    <a className="flex min-w-0 items-center gap-2 text-sm hover:text-primary" href={website.url} target="_blank" rel="noreferrer">
+                      <span className="truncate font-medium">{website.canonical_domain}</span>
+                      <ArrowUpRight size={14} />
+                    </a>
+                    <Button uiVariant="ghost" disabled={busy} onClick={() => removeWebsite(website.id)}>
+                      Remove
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            )}
           </section>
         </div>
       )}
+      <ToastRegion notice={notice} onDismiss={() => setNotice(null)} />
     </section>
   );
 }

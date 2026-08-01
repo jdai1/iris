@@ -1,22 +1,23 @@
-import { FormEvent, lazy, ReactNode, Suspense, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowUpRight, FileText, Folder, GitFork, LayoutTemplate, Orbit } from 'lucide-react';
+import { ReactNode, useEffect, useMemo, useRef, useState } from 'react';
+import { ArrowLeft, ArrowUpRight, ChevronDown, ChevronUp, FileText, Folder, GitFork, LayoutPanelLeft, LayoutTemplate, PanelLeftClose } from 'lucide-react';
 import { getAdminDocuments, getAdminSources, getBookshelfCollections, getDirectorySources, getGraph, getSourceProfileAnalysis } from '../api';
 import { GraphExplorer } from '../GraphExplorer';
 import { emptyPage } from '../app/paging';
 import { documentPath, navigateTo, type ProfileTarget } from '../app/navigation';
-import { CorpusSearchForm } from '../CorpusSearchForm';
 import { DenseDocumentTable } from '../components/DenseDocumentTable';
+import { DenseTableViewport, denseTableHeaderClass, denseTableRowClass } from '../components/ui/dense-table';
+import { FilterBar } from '../components/FilterBar';
 import { OverflowText } from '../components/OverflowText';
 import { ProfilePagination, type PageState } from '../components/Pagination';
 import { ProfileAnalysisCard } from '../components/ProfileAnalysisCard';
-import { Button, StateMessage } from '../components/ui';
+import { Button, SearchInput, StateMessage } from '../components/ui';
+import { cn } from '../lib/utils';
 import type { AdminSource, BookshelfCollection, BookshelfEntry, DirectorySource, DirectorySourceSort, Document, GraphEdge, GraphNode, GraphResponse, Page, SortDirection, SourceProfileAnalysis } from '../types';
 
-type SourceProfileTab = 'profile' | 'essays' | 'collections' | 'explore' | 'graph';
-
-const EmbeddingExplorer = lazy(() =>
-  import('../EmbeddingExplorer').then((module) => ({ default: module.EmbeddingExplorer })),
-);
+type SourceProfileTab = 'profile' | 'essays' | 'collections' | 'graph';
+type DirectoryFilterKind = 'text' | 'tag';
+type DirectoryFilter = { id: string; kind: DirectoryFilterKind; value: string };
+const directoryHeaderSortButtonClass = 'h-auto justify-end p-0 text-xs font-semibold uppercase hover:bg-transparent';
 
 function defaultDirectorySortDirection(sort: DirectorySourceSort): SortDirection {
   return sort === 'source' ? 'asc' : 'desc';
@@ -36,6 +37,10 @@ function formatDirectoryDate(value: string | null) {
   return new Date(value).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
+function filterValues(filters: DirectoryFilter[], kind: DirectoryFilterKind) {
+  return filters.filter((filter) => filter.kind === kind).map((filter) => filter.value);
+}
+
 export function DirectoryView({
   target,
   onOpenProfile,
@@ -45,9 +50,12 @@ export function DirectoryView({
   onOpenProfile: (sourceId: number, domain: string) => void;
   onDirectoryRoot: () => void;
 }) {
-  const [query, setQuery] = useState(target?.domain ?? '');
+  const [directoryFilters, setDirectoryFilters] = useState<DirectoryFilter[]>([]);
+  const [documentFilters, setDocumentFilters] = useState<DirectoryFilter[]>([]);
+  const [explorerCollapsed, setExplorerCollapsed] = useState(false);
   const [selectedSource, setSelectedSource] = useState<AdminSource | null>(null);
   const [directoryPage, setDirectoryPage] = useState<Page<DirectorySource>>(emptyPage);
+  const [explorerContextLoading, setExplorerContextLoading] = useState(false);
   const [directorySort, setDirectorySort] = useState<DirectorySourceSort>('essays');
   const [directorySortDirection, setDirectorySortDirection] = useState<SortDirection>('desc');
   const [documentsPage, setDocumentsPage] = useState<Page<Document>>(emptyPage);
@@ -59,15 +67,24 @@ export function DirectoryView({
   const [directoryPageState, setDirectoryPageState] = useState<PageState>({ limit: 50, offset: 0 });
   const [loading, setLoading] = useState(true);
   const [profileLoading, setProfileLoading] = useState(Boolean(target));
+  const [documentsRefreshing, setDocumentsRefreshing] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const didLoadDirectoryRef = useRef(false);
   const sourceLoadKeyRef = useRef<string | null>(null);
+  const preserveDirectoryContextRef = useRef(false);
+  const refreshRequestIdRef = useRef(0);
+  const documentsRequestIdRef = useRef(0);
   const profileCollectionGroups = useMemo(
     () => target ? sourceCollectionGroups(profileCollections, target.sourceId, target.domain) : [],
     [profileCollections, target?.sourceId, target?.domain],
   );
   const activeSelectedSource = selectedSource?.canonical_domain === target?.domain ? selectedSource : null;
+  const activeDirectorySource = target
+    ? directoryPage.items.find((source) => source.canonical_domain === target.domain) ?? null
+    : null;
+  const profileCollectionCount = activeDirectorySource?.collection_count ?? (profileLoading ? null : profileCollectionGroups.length);
+  const showProfileCollections = profileCollectionCount === null || profileCollectionCount > 0;
   const resolvedSourceId = activeSelectedSource?.id ?? target?.sourceId ?? 0;
   const profileNetwork = useMemo(
     () => target && profileGraph ? sourceNetwork(profileGraph, `source:${resolvedSourceId}`) : { inbound: [], outbound: [] },
@@ -77,19 +94,49 @@ export function DirectoryView({
   useEffect(() => {
     setActiveProfileTab('profile');
     if (target) {
-      setQuery(target.domain);
       setProfileLoading(true);
     }
   }, [target?.sourceId, target?.domain]);
 
+  useEffect(() => {
+    if (!target || directoryPage.items.length > 0) return;
+    let cancelled = false;
+    setExplorerContextLoading(true);
+    getDirectorySources({
+      status: 'indexed',
+      textFilters: filterValues(directoryFilters, 'text'),
+      tags: filterValues(directoryFilters, 'tag'),
+      sort: directorySort,
+      direction: directorySortDirection,
+      ...directoryPageState,
+    })
+      .then((page) => {
+        if (!cancelled) setDirectoryPage(page);
+      })
+      .catch(() => {
+        // A directly opened profile can remain usable without table context.
+      })
+      .finally(() => {
+        if (!cancelled) setExplorerContextLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [target?.sourceId, target?.domain]);
+
   async function refresh(
-    nextQuery = query,
+    nextQuery = target?.domain ?? '',
     nextSelected = target,
     nextPage = documentPageState,
     nextDirectoryPage = directoryPageState,
     nextSort = directorySort,
     nextSortDirection = directorySortDirection,
+    nextDirectoryFilters = directoryFilters,
+    nextDocumentFilters = documentFilters,
   ) {
+    const requestId = ++refreshRequestIdRef.current;
+    documentsRequestIdRef.current += 1;
+    setDocumentsRefreshing(false);
     const firstLoad = !didLoadDirectoryRef.current;
     setLoading(firstLoad && !nextSelected);
     setProfileLoading(Boolean(nextSelected));
@@ -100,11 +147,13 @@ export function DirectoryView({
       if (!nextSelected) {
         const tablePage = await getDirectorySources({
           status: 'indexed',
-          q: normalizedQuery,
+          textFilters: filterValues(nextDirectoryFilters, 'text'),
+          tags: filterValues(nextDirectoryFilters, 'tag'),
           sort: nextSort,
           direction: nextSortDirection,
           ...nextDirectoryPage,
         });
+        if (requestId !== refreshRequestIdRef.current) return;
         setDirectoryPage(tablePage);
         setSelectedSource(null);
         setDocumentsPage(emptyPage<Document>());
@@ -115,6 +164,7 @@ export function DirectoryView({
         return;
       }
       const sources = await getAdminSources({ status: 'indexed', q: normalizedQuery, limit: 25 });
+      if (requestId !== refreshRequestIdRef.current) return;
       const source =
         (nextSelected?.sourceId ? sources.items.find((item) => item.id === nextSelected.sourceId) : null) ??
         sources.items.find((item) => item.canonical_domain === normalizedQuery.toLowerCase()) ??
@@ -122,26 +172,59 @@ export function DirectoryView({
         null;
       const nextProfile = source ? { sourceId: source.id, domain: source.canonical_domain } : null;
       setSelectedSource(source);
-      if (source && !nextSelected) setQuery(source.canonical_domain);
       const [documents, analysis, collections, graph] = nextProfile
         ? await Promise.all([
-            getAdminDocuments({ ...nextPage, sourceId: nextProfile.sourceId, documentType: 'essay' }),
+            getAdminDocuments({
+              ...nextPage,
+              sourceId: nextProfile.sourceId,
+              documentType: 'essay',
+              textFilters: filterValues(nextDocumentFilters, 'text'),
+              tags: filterValues(nextDocumentFilters, 'tag'),
+            }),
             getSourceProfileAnalysis(nextProfile.sourceId).catch(() => null),
             getBookshelfCollections().catch(() => []),
             getGraph({ mode: 'sources', sourceId: nextProfile.sourceId, limit: 80, depth: 1 }).catch(() => null),
           ])
         : [emptyPage<Document>(), null, [], null];
+      if (requestId !== refreshRequestIdRef.current) return;
       setDocumentsPage(documents);
       setProfileAnalysis(analysis);
       setProfileCollections(collections);
       setProfileGraph(graph);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Directory failed');
+      if (requestId === refreshRequestIdRef.current) {
+        setError(err instanceof Error ? err.message : 'Directory failed');
+      }
     } finally {
+      if (requestId !== refreshRequestIdRef.current) return;
       didLoadDirectoryRef.current = true;
       setLoading(false);
       setProfileLoading(false);
       setRefreshing(false);
+    }
+  }
+
+  async function refreshProfileDocuments(nextPage: PageState, nextFilters = documentFilters) {
+    if (!resolvedSourceId) return;
+    const requestId = ++documentsRequestIdRef.current;
+    setDocumentsRefreshing(true);
+    setError(null);
+    try {
+      const documents = await getAdminDocuments({
+        ...nextPage,
+        sourceId: resolvedSourceId,
+        documentType: 'essay',
+        textFilters: filterValues(nextFilters, 'text'),
+        tags: filterValues(nextFilters, 'tag'),
+      });
+      if (requestId !== documentsRequestIdRef.current) return;
+      setDocumentsPage(documents);
+    } catch (err) {
+      if (requestId === documentsRequestIdRef.current) {
+        setError(err instanceof Error ? err.message : 'Could not filter documents');
+      }
+    } finally {
+      if (requestId === documentsRequestIdRef.current) setDocumentsRefreshing(false);
     }
   }
 
@@ -155,36 +238,32 @@ export function DirectoryView({
     sourceLoadKeyRef.current = loadKey;
     const nextPage = { limit: 50, offset: 0 };
     setDocumentPageState(nextPage);
-    const nextDirectoryPage = { limit: directoryPageState.limit, offset: 0 };
-    setDirectoryPageState(nextDirectoryPage);
-    refresh(target.domain, target, nextPage, nextDirectoryPage);
+    setDocumentFilters([]);
+    refresh(target.domain, target, nextPage, directoryPageState, directorySort, directorySortDirection, directoryFilters, []);
   }, [target?.sourceId, target?.domain]);
 
   useEffect(() => {
     if (target) return;
+    if (preserveDirectoryContextRef.current) {
+      preserveDirectoryContextRef.current = false;
+      return;
+    }
     const timeout = window.setTimeout(() => {
       const nextDirectoryPage = { limit: directoryPageState.limit, offset: 0 };
       setDirectoryPageState(nextDirectoryPage);
-      refresh(query, null, documentPageState, nextDirectoryPage);
+      refresh('', null, documentPageState, nextDirectoryPage, directorySort, directorySortDirection, directoryFilters);
     }, 160);
     return () => window.clearTimeout(timeout);
-  }, [query, target?.domain]);
+  }, [directoryFilters, target?.domain]);
 
-  function submit(event: FormEvent) {
-    event.preventDefault();
+  function updateDocumentFilters(nextFilters: DirectoryFilter[]) {
     const nextPage = { limit: documentPageState.limit, offset: 0 };
-    const nextDirectoryPage = { limit: directoryPageState.limit, offset: 0 };
+    setDocumentFilters(nextFilters);
     setDocumentPageState(nextPage);
-    setDirectoryPageState(nextDirectoryPage);
-    refresh(query, null, nextPage, nextDirectoryPage);
-  }
-
-  function updateQuery(value: string) {
-    setQuery(value);
+    refreshProfileDocuments(nextPage, nextFilters);
   }
 
   function openSourceProfile(source: Pick<AdminSource, 'id' | 'canonical_domain'>) {
-    setQuery(source.canonical_domain);
     setSelectedSource(null);
     setDocumentsPage(emptyPage<Document>());
     setProfileAnalysis(null);
@@ -197,7 +276,7 @@ export function DirectoryView({
 
   function pageProfileDocuments(nextPage: PageState) {
     setDocumentPageState(nextPage);
-    refresh(target?.domain ?? query, target, nextPage);
+    refreshProfileDocuments(nextPage);
   }
 
   function updateDirectorySort(nextSort: DirectorySourceSort) {
@@ -206,12 +285,12 @@ export function DirectoryView({
     setDirectorySort(nextSort);
     setDirectorySortDirection(nextDirection);
     setDirectoryPageState(nextPage);
-    refresh(query, target, documentPageState, nextPage, nextSort, nextDirection);
+    refresh('', target, documentPageState, nextPage, nextSort, nextDirection);
   }
 
   function pageDirectory(nextPage: PageState) {
     setDirectoryPageState(nextPage);
-    refresh(query, target, documentPageState, nextPage);
+    refresh('', target, documentPageState, nextPage);
   }
 
   function selectDirectorySource(source: DirectorySource) {
@@ -222,16 +301,16 @@ export function DirectoryView({
   }
 
   function showDirectoryRoot() {
+    preserveDirectoryContextRef.current = true;
     setSelectedSource(null);
     setProfileAnalysis(null);
     setProfileCollections([]);
     setProfileGraph(null);
     setActiveProfileTab('profile');
     setDocumentsPage(emptyPage<Document>());
-    setQuery('');
     onDirectoryRoot();
     if (directoryPage.items.length === 0) {
-      refresh('', null, documentPageState, { ...directoryPageState, offset: 0 });
+      refresh('', null, documentPageState, directoryPageState);
     }
   }
 
@@ -240,19 +319,28 @@ export function DirectoryView({
   }
 
   return (
-    <section className="min-h-svh min-w-0 p-4 sm:p-6">
-      {target ? (
-        <Button className="mb-4 size-9 rounded-md border bg-background" uiVariant="plainIcon" type="button" onClick={showDirectoryRoot} aria-label="Back to sources">
-          ←
-        </Button>
-      ) : (
-        <CorpusSearchForm
-          className="mb-5 w-full max-w-xl"
-          value={query}
-          onChange={updateQuery}
-          onSubmit={submit}
-          placeholder={loading ? 'Loading...' : 'Filter sources...'}
-          disabled={loading}
+    <section className={cn(
+      'min-h-svh min-w-0',
+      target && `grid grid-cols-1 ${explorerCollapsed ? 'lg:grid-cols-[3rem_minmax(0,1fr)]' : 'lg:grid-cols-[13.75rem_minmax(0,1fr)]'}`,
+    )}>
+      {target && (
+        <DirectorySourceExplorer
+          page={directoryPage}
+          loading={explorerContextLoading}
+          collapsed={explorerCollapsed}
+          selectedDomain={target.domain}
+          onShowAll={showDirectoryRoot}
+          onSelect={selectDirectorySource}
+          onToggleCollapsed={() => setExplorerCollapsed((collapsed) => !collapsed)}
+        />
+      )}
+      <div className={cn('min-w-0', !target && 'p-4 sm:p-6')}>
+      {!target && (
+        <FilterBar
+          className="mb-5"
+          context="sources"
+          filters={directoryFilters}
+          onChange={setDirectoryFilters}
         />
       )}
 
@@ -260,19 +348,19 @@ export function DirectoryView({
       {loading && !target && <TableSkeleton rows={10} />}
 
       {!loading && !target && (
-        <div className="overflow-x-auto border-y">
-          <div className={`min-w-[880px] transition-opacity ${refreshing ? 'opacity-60' : 'opacity-100'}`}>
-            <div className="grid grid-cols-[minmax(12rem,1.2fr)_minmax(16rem,2fr)_repeat(4,5.5rem)_7rem] items-center gap-3 border-b bg-muted/40 px-4 py-2 text-xs font-semibold uppercase text-muted-foreground" role="row">
-              <Button uiVariant="rowAction" type="button" onClick={() => updateDirectorySort('source')}>{directorySortLabel('Source', 'source', directorySort, directorySortDirection)}</Button>
+        <DenseTableViewport>
+          <div className={`min-w-[880px] transition-opacity ${refreshing ? 'opacity-60' : 'opacity-100'}`} role="table" aria-label="Sources">
+            <div className={`${denseTableHeaderClass} grid-cols-[minmax(8rem,0.8fr)_minmax(16rem,2fr)_repeat(4,5.5rem)_7rem]`} role="row">
+              <Button className={cn(directoryHeaderSortButtonClass, 'justify-start')} uiVariant="rowAction" type="button" onClick={() => updateDirectorySort('source')}>{directorySortLabel('Source', 'source', directorySort, directorySortDirection)}</Button>
               <span>About</span>
-              <Button uiVariant="rowAction" type="button" onClick={() => updateDirectorySort('essays')}>{directorySortLabel('Essays', 'essays', directorySort, directorySortDirection)}</Button>
-              <Button uiVariant="rowAction" type="button" onClick={() => updateDirectorySort('essay_references')} data-tooltip="Distinct indexed essays referenced by this source">{directorySortLabel('Essay refs', 'essay_references', directorySort, directorySortDirection)}</Button>
-              <Button uiVariant="rowAction" type="button" onClick={() => updateDirectorySort('external_sources')} data-tooltip="Distinct external indexed sources referenced by this source">{directorySortLabel('Sources', 'external_sources', directorySort, directorySortDirection)}</Button>
-              <Button uiVariant="rowAction" type="button" onClick={() => updateDirectorySort('documents')}>{directorySortLabel('Docs', 'documents', directorySort, directorySortDirection)}</Button>
-              <Button uiVariant="rowAction" type="button" onClick={() => updateDirectorySort('recent')}>{directorySortLabel('Updated', 'recent', directorySort, directorySortDirection)}</Button>
+              <Button className={directoryHeaderSortButtonClass} uiVariant="rowAction" type="button" onClick={() => updateDirectorySort('essays')}>{directorySortLabel('Essays', 'essays', directorySort, directorySortDirection)}</Button>
+              <Button className={directoryHeaderSortButtonClass} uiVariant="rowAction" type="button" onClick={() => updateDirectorySort('essay_references')} data-tooltip="Distinct indexed essays referenced by this source">{directorySortLabel('Essay refs', 'essay_references', directorySort, directorySortDirection)}</Button>
+              <Button className={directoryHeaderSortButtonClass} uiVariant="rowAction" type="button" onClick={() => updateDirectorySort('external_sources')} data-tooltip="Distinct external indexed sources referenced by this source">{directorySortLabel('Sources', 'external_sources', directorySort, directorySortDirection)}</Button>
+              <Button className={directoryHeaderSortButtonClass} uiVariant="rowAction" type="button" onClick={() => updateDirectorySort('documents')}>{directorySortLabel('Docs', 'documents', directorySort, directorySortDirection)}</Button>
+              <Button className={directoryHeaderSortButtonClass} uiVariant="rowAction" type="button" onClick={() => updateDirectorySort('recent')}>{directorySortLabel('Updated', 'recent', directorySort, directorySortDirection)}</Button>
             </div>
             {directoryPage.items.map((source) => (
-              <div key={source.id} className="grid cursor-pointer grid-cols-[minmax(12rem,1.2fr)_minmax(16rem,2fr)_repeat(4,5.5rem)_7rem] items-center gap-3 border-b px-4 py-3 text-sm last:border-0 hover:bg-muted/50" role="button" tabIndex={0} onClick={() => selectDirectorySource(source)} onKeyDown={(event) => {
+              <div key={source.id} className={`${denseTableRowClass} cursor-pointer grid-cols-[minmax(8rem,0.8fr)_minmax(16rem,2fr)_repeat(4,5.5rem)_7rem] hover:bg-muted/50`} role="row" tabIndex={0} onClick={() => selectDirectorySource(source)} onKeyDown={(event) => {
                 if (event.key === 'Enter' || event.key === ' ') selectDirectorySource(source);
               }}>
                 <span className="flex min-w-0 items-center gap-1.5" data-label="Source">
@@ -301,17 +389,27 @@ export function DirectoryView({
                 </span>
               </div>
             ))}
+            {directoryPage.items.length === 0 && (
+              <div className="border-b px-4 py-12 text-center text-sm text-muted-foreground">
+                No sources match these filters.
+              </div>
+            )}
           </div>
           <ProfilePagination page={directoryPage} onChange={pageDirectory} />
-        </div>
+        </DenseTableViewport>
       )}
 
       {target && (
         <div className="min-h-[calc(100svh-5rem)]" aria-busy={profileLoading}>
           <div className="flex h-16 items-center border-b px-5">
-            <div>
+            <Button className="mr-3 -ml-2 h-8 gap-1.5 px-2 text-muted-foreground lg:hidden" uiVariant="ghost" size="sm" type="button" onClick={showDirectoryRoot}>
+              <ArrowLeft size={14} />
+              Sources
+            </Button>
+            <div className="h-5 border-l lg:hidden" />
+            <div className="ml-4 min-w-0 lg:ml-0">
               <h3 className="flex items-center gap-2 text-lg font-semibold">
-                <span>{activeSelectedSource?.canonical_domain || target.domain}</span>
+                <span className="truncate">{activeSelectedSource?.canonical_domain || target.domain}</span>
                 <a className="text-muted-foreground hover:text-foreground" href={activeSelectedSource?.url ?? `https://${target.domain}`} target="_blank" rel="noreferrer" aria-label="Open source">
                   <ArrowUpRight size={16} />
                 </a>
@@ -329,22 +427,18 @@ export function DirectoryView({
               active={activeProfileTab === 'essays'}
               icon={<FileText size={14} />}
               label="Essays"
-              count={profileLoading ? null : documentsPage.total}
+              count={activeDirectorySource?.essay_count ?? (profileLoading ? null : documentsPage.total)}
               onClick={() => setActiveProfileTab('essays')}
             />
-            <SourceViewButton
-              active={activeProfileTab === 'collections'}
-              icon={<Folder size={14} />}
-              label="Collections"
-              count={profileLoading ? null : profileCollectionGroups.length}
-              onClick={() => setActiveProfileTab('collections')}
-            />
-            <SourceViewButton
-              active={activeProfileTab === 'explore'}
-              icon={<Orbit size={14} />}
-              label="Explore"
-              onClick={() => setActiveProfileTab('explore')}
-            />
+            {showProfileCollections && (
+              <SourceViewButton
+                active={activeProfileTab === 'collections'}
+                icon={<Folder size={14} />}
+                label="Collections"
+                count={profileCollectionCount}
+                onClick={() => setActiveProfileTab('collections')}
+              />
+            )}
             <SourceViewButton
               active={activeProfileTab === 'graph'}
               icon={<GitFork size={14} />}
@@ -362,8 +456,19 @@ export function DirectoryView({
             )}
             {!profileLoading && activeProfileTab === 'essays' && (
               <>
-                <div className="overflow-x-auto">
+                <FilterBar
+                  className="mb-4"
+                  context="documents"
+                  filters={documentFilters}
+                  onChange={updateDocumentFilters}
+                />
+                <div className={`overflow-x-auto transition-opacity ${documentsRefreshing ? 'opacity-60' : 'opacity-100'}`} aria-busy={documentsRefreshing}>
                   <DirectoryDocumentTable documents={documentsPage.items} onOpenDocument={openDirectoryDrawer} />
+                  {documentsPage.items.length === 0 && (
+                    <div className="min-w-[760px] border-b px-4 py-12 text-center text-sm text-muted-foreground">
+                      No documents match these filters.
+                    </div>
+                  )}
                 </div>
                 <ProfilePagination page={documentsPage} onChange={pageProfileDocuments} />
               </>
@@ -371,18 +476,10 @@ export function DirectoryView({
             {!profileLoading && activeProfileTab === 'collections' && (
               <SourceCollectionsTab groups={profileCollectionGroups} onOpenDocument={openDirectoryDrawer} />
             )}
-            {!profileLoading && activeProfileTab === 'explore' && activeSelectedSource && (
-              <div className="min-h-[calc(100svh-15rem)] overflow-hidden rounded-xl border">
-                <Suspense fallback={<SourceVisualSkeleton />}>
-                  <EmbeddingExplorer key={activeSelectedSource.id} sourceId={activeSelectedSource.id} />
-                </Suspense>
-              </div>
-            )}
             {!profileLoading && activeProfileTab === 'graph' && (
-              <div className="min-h-[calc(100svh-15rem)] overflow-hidden rounded-xl border">
+              <div className="h-[calc(100svh-9.5rem)] min-h-0 overflow-hidden rounded-xl border">
                 <GraphExplorer
                   key={target.domain}
-                  onOpenProfile={onOpenProfile}
                   initialDomain={target.domain}
                 />
               </div>
@@ -390,7 +487,153 @@ export function DirectoryView({
           </div>
         </div>
       )}
+      </div>
     </section>
+  );
+}
+
+function DirectorySourceExplorer({
+  page,
+  loading,
+  collapsed,
+  selectedDomain,
+  onShowAll,
+  onSelect,
+  onToggleCollapsed,
+}: {
+  page: Page<DirectorySource>;
+  loading: boolean;
+  collapsed: boolean;
+  selectedDomain: string | null;
+  onShowAll: () => void;
+  onSelect: (source: DirectorySource) => void;
+  onToggleCollapsed: () => void;
+}) {
+  const [query, setQuery] = useState('');
+  const normalizedQuery = query.trim().toLowerCase();
+  const visibleSources = useMemo(
+    () => normalizedQuery
+      ? page.items.filter((source) => `${source.canonical_domain} ${source.name ?? ''} ${source.description ?? ''}`.toLowerCase().includes(normalizedQuery))
+      : page.items,
+    [normalizedQuery, page.items],
+  );
+  const selectedIndex = visibleSources.findIndex((source) => source.canonical_domain === selectedDomain);
+
+  function moveSelection(direction: -1 | 1) {
+    if (!visibleSources.length) return;
+    const nextIndex = selectedIndex < 0
+      ? direction === 1 ? 0 : visibleSources.length - 1
+      : selectedIndex + direction;
+    const nextSource = visibleSources[nextIndex];
+    if (nextSource) onSelect(nextSource);
+  }
+
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey || isEditableTarget(event.target)) return;
+      const key = event.key.toLowerCase();
+      if (key !== 'j' && key !== 'k') return;
+      event.preventDefault();
+      moveSelection(key === 'j' ? 1 : -1);
+    }
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [selectedDomain, visibleSources]);
+
+  if (collapsed) {
+    return (
+      <aside className="sticky top-0 hidden h-svh self-start overflow-hidden border-r bg-muted/20 lg:flex lg:flex-col lg:items-center" aria-label="Collapsed source explorer">
+        <Button className="mt-3 size-8" uiVariant="plainIcon" type="button" onClick={onToggleCollapsed} aria-label="Open source explorer" data-tooltip="Open source explorer">
+          <LayoutPanelLeft size={15} />
+        </Button>
+        <Button className="mt-1 size-8" uiVariant="plainIcon" type="button" onClick={onShowAll} aria-label="Back to sources" data-tooltip="Back to sources">
+          <ArrowLeft size={15} />
+        </Button>
+      </aside>
+    );
+  }
+
+  return (
+    <aside className="sticky top-0 hidden h-svh min-w-0 self-start overflow-hidden border-r bg-muted/20 lg:flex lg:flex-col" aria-label="Source explorer">
+      <div className="flex h-14 shrink-0 items-center justify-between gap-2 px-4">
+        <button className="flex h-8 min-w-0 items-center gap-1.5 rounded-md px-1.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground" type="button" onClick={onShowAll}>
+          <ArrowLeft size={14} />
+          <span>Sources</span>
+        </button>
+        <Button className="size-7" uiVariant="plainIcon" type="button" onClick={onToggleCollapsed} aria-label="Collapse source explorer" data-tooltip="Collapse explorer">
+          <PanelLeftClose size={14} />
+        </Button>
+      </div>
+      <div className="px-2 pb-2">
+        <SearchInput
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          placeholder="Search this page"
+          aria-label="Search sources on this page"
+          wrapperClassName="min-h-8 px-2"
+          className="min-h-7 text-xs"
+        />
+      </div>
+      <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
+        {loading && explorerSkeleton()}
+        {!loading && page.items.length === 0 && (
+          <p className="px-2 py-5 text-center text-xs text-muted-foreground">No table context.</p>
+        )}
+        {!loading && page.items.length > 0 && visibleSources.length === 0 && (
+          <p className="px-2 py-5 text-center text-xs text-muted-foreground">No sources found.</p>
+        )}
+        {!loading && visibleSources.map((source) => (
+          <button
+            className={`flex h-8 w-full min-w-0 items-center rounded-md px-2 text-left text-xs ${selectedDomain === source.canonical_domain ? 'bg-accent text-accent-foreground' : 'text-muted-foreground hover:bg-accent/70 hover:text-accent-foreground'}`}
+            type="button"
+            key={source.id}
+            title={source.canonical_domain}
+            onClick={() => onSelect(source)}
+          >
+            <span className="min-w-0 truncate">{source.canonical_domain}</span>
+          </button>
+        ))}
+      </div>
+      <div className="grid shrink-0 grid-cols-2 gap-1 border-t p-2 text-xs">
+        <button
+          className="flex h-8 min-w-0 items-center justify-center gap-1 rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-35"
+          type="button"
+          onClick={() => moveSelection(-1)}
+          disabled={!visibleSources.length || selectedIndex === 0}
+          aria-label="Previous source (K)"
+        >
+          <ChevronUp size={13} />
+          <span>Previous</span>
+          <kbd className="text-[10px] opacity-60">K</kbd>
+        </button>
+        <button
+          className="flex h-8 min-w-0 items-center justify-center gap-1 rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-35"
+          type="button"
+          onClick={() => moveSelection(1)}
+          disabled={!visibleSources.length || selectedIndex === visibleSources.length - 1}
+          aria-label="Next source (J)"
+        >
+          <span>Next</span>
+          <kbd className="text-[10px] opacity-60">J</kbd>
+          <ChevronDown size={13} />
+        </button>
+      </div>
+    </aside>
+  );
+}
+
+function isEditableTarget(target: EventTarget | null) {
+  if (!(target instanceof HTMLElement)) return false;
+  return target.isContentEditable || Boolean(target.closest('input, textarea, select, [contenteditable="true"]'));
+}
+
+function explorerSkeleton() {
+  return (
+    <div className="grid gap-2 px-2 py-1" aria-label="Loading sources">
+      {Array.from({ length: 8 }).map((_, index) => (
+        <span className="h-6 animate-pulse rounded bg-muted" key={index} />
+      ))}
+    </div>
   );
 }
 
@@ -585,16 +828,22 @@ function sourceNetworkWeightLabel(weight: number) {
 }
 
 function TableSkeleton({ rows }: { rows: number }) {
+  const columns = 'grid-cols-[minmax(8rem,0.8fr)_minmax(16rem,2fr)_repeat(4,5.5rem)_7rem]';
   return (
-    <div className="overflow-hidden border-y" aria-label="Loading rows">
-      {Array.from({ length: rows }).map((_, row) => (
-        <div className="grid grid-cols-[minmax(160px,1fr)_repeat(6,92px)] gap-3 border-b px-4 py-3 last:border-0" key={row}>
-          {Array.from({ length: 7 }).map((__, column) => (
-            <span className="h-4 animate-pulse rounded bg-muted" key={column} />
-          ))}
+    <DenseTableViewport aria-label="Loading rows">
+      <div className="min-w-[880px]">
+        <div className={`${denseTableHeaderClass} ${columns}`} aria-hidden="true">
+          {['Source', 'About', 'Essays', 'Essay refs', 'Sources', 'Docs', 'Updated'].map((label) => <span key={label}>{label}</span>)}
         </div>
-      ))}
-    </div>
+        {Array.from({ length: rows }).map((_, row) => (
+          <div className={`${denseTableRowClass} ${columns}`} key={row}>
+            {Array.from({ length: 7 }).map((__, column) => (
+              <span className="h-4 animate-pulse rounded bg-muted" key={column} />
+            ))}
+          </div>
+        ))}
+      </div>
+    </DenseTableViewport>
   );
 }
 
@@ -611,14 +860,6 @@ function SourceProfileSkeleton() {
         <span className="h-12 w-full animate-pulse rounded bg-muted" />
         <span className="h-12 w-full animate-pulse rounded bg-muted" />
       </div>
-    </div>
-  );
-}
-
-function SourceVisualSkeleton() {
-  return (
-    <div className="grid min-h-[30rem] place-items-center" aria-label="Loading visualization">
-      <span className="size-10 animate-pulse rounded-full bg-muted" />
     </div>
   );
 }

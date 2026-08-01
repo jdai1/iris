@@ -18,6 +18,23 @@ def database_url() -> str:
     return os.getenv("DATABASE_URL") or os.getenv("DEV_DATABASE_URL") or f"sqlite:///{BACKEND_DIR / 'iris.db'}"
 
 
+DEFAULT_CORS_ORIGINS = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:5175",
+    "http://localhost:5180",
+]
+
+
+def cors_origins() -> list[str]:
+    configured = [
+        origin.strip().rstrip("/")
+        for origin in os.getenv("IRIS_CORS_ORIGINS", "").split(",")
+        if origin.strip()
+    ]
+    return list(dict.fromkeys([*DEFAULT_CORS_ORIGINS, *configured]))
+
+
 USER_AGENT = os.getenv(
     "IRIS_USER_AGENT",
     "IrisBot/0.1 (+local personal research crawler)",

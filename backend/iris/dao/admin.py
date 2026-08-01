@@ -6,7 +6,7 @@ import json
 from collections import Counter
 from collections import defaultdict
 
-from sqlalchemy import desc, func, select
+from sqlalchemy import String, cast, desc, func, select
 from sqlalchemy.orm import joinedload, load_only
 
 from iris.dao import db
@@ -63,6 +63,8 @@ def get_documents_page(
     document_type: str | None = None,
     crawl_job_id: int | None = None,
     index_run_id: int | None = None,
+    text_filters: list[str] | None = None,
+    tag_filters: list[str] | None = None,
 ) -> tuple[list[Document], int]:
     """Return a filtered page of documents and total count."""
     session = db.current_session()
@@ -71,6 +73,17 @@ def get_documents_page(
         statement = statement.where(Document.source_id == source_id)
     if document_type and document_type != "all":
         statement = statement.where(Document.document_type == document_type)
+    for value in (item.strip() for item in text_filters or [] if item.strip()):
+        pattern = f"%{value}%"
+        statement = statement.where(
+            Document.title.ilike(pattern)
+            | Document.author.ilike(pattern)
+            | Document.one_liner.ilike(pattern)
+            | Document.summary.ilike(pattern)
+            | Document.extracted_text.ilike(pattern)
+        )
+    for value in (item.strip().lower() for item in tag_filters or [] if item.strip()):
+        statement = statement.where(func.lower(cast(Document.topics, String)).like(f'%"{value}"%'))
     if crawl_job_id:
         job = session.get(CrawlJob, crawl_job_id)
         if not job:

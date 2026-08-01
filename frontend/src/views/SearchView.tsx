@@ -1,8 +1,10 @@
 import { FormEvent, ReactNode, useEffect, useRef, useState } from 'react';
-import { ArrowUpRight, BrainCircuit, FileSearch, Hash, Search, Tags } from 'lucide-react';
+import { ArrowUpRight, BrainCircuit, ChevronDown, FileSearch, Hash, Search, Tags } from 'lucide-react';
 import { getAgentConversation, getAgentConversations, streamChatSearch } from '../api';
 import { CorpusSearchForm } from '../CorpusSearchForm';
-import type { AgentConversation, AgentConversationSummary, AgentInspectedDocument, AgentStep, SearchResult } from '../types';
+import { DocumentActionsMenu } from '../components/DocumentActionsMenu';
+import { ResizableSidebarLayout } from '../components/ResizableSidebarLayout';
+import type { AgentConversation, AgentConversationSummary, AgentInspectedDocument, AgentStep, BookshelfEntry, SearchResult } from '../types';
 
 type ChatMessage = {
   id: string;
@@ -13,6 +15,12 @@ type ChatMessage = {
   pending?: boolean;
 };
 
+type ConversationTurn = {
+  id: string;
+  query: string;
+  response: string;
+};
+
 const ACTIVE_CHAT_STORAGE_KEY = 'iris.activeChatUuid';
 const SEARCH_RELOAD_STORAGE_KEY = 'iris.searchReloading';
 const HISTORY_PAGE_SIZE = 15;
@@ -20,9 +28,13 @@ const HISTORY_PAGE_SIZE = 15;
 export function SearchView({
   selectedDocumentUuid,
   onOpenDocument,
+  artifactOpen = false,
+  greetingName,
 }: {
   selectedDocumentUuid: string | null;
   onOpenDocument: (documentUuid: string, reason: string) => void;
+  artifactOpen?: boolean;
+  greetingName?: string | null;
 }) {
   const [query, setQuery] = useState('');
   const [conversationId, setConversationId] = useState<string | undefined>();
@@ -33,14 +45,26 @@ export function SearchView({
   const [historyLoadingMore, setHistoryLoadingMore] = useState(false);
   const [historyHasMore, setHistoryHasMore] = useState(false);
   const [startedNewChat, setStartedNewChat] = useState(false);
-  const [loading, setLoading] = useState(false);
+  const [activeChatKey, setActiveChatKey] = useState('new:initial');
+  const [inFlightChatKeys, setInFlightChatKeys] = useState<Set<string>>(() => new Set());
   const [error, setError] = useState<string | null>(null);
+  const [activeTurnId, setActiveTurnId] = useState<string | null>(null);
   const transcriptRef = useRef<HTMLDivElement | null>(null);
+  const turnRefs = useRef(new Map<string, HTMLDivElement>());
   const historyRef = useRef<HTMLDivElement | null>(null);
+  const activeChatKeyRef = useRef(activeChatKey);
+  const newChatSequence = useRef(0);
+  const conversationLoadSequence = useRef(0);
   const didLoadInitialConversation = useRef(false);
   const shouldRestoreConversation = useRef(
     typeof window !== 'undefined' && window.sessionStorage.getItem(SEARCH_RELOAD_STORAGE_KEY) === '1',
   );
+  const loading = inFlightChatKeys.has(activeChatKey);
+
+  function activateChat(key: string) {
+    activeChatKeyRef.current = key;
+    setActiveChatKey(key);
+  }
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -72,6 +96,8 @@ export function SearchView({
 
   useEffect(() => {
     transcriptRef.current?.scrollTo({ top: transcriptRef.current.scrollHeight, behavior: 'smooth' });
+    const latestTurn = [...messages].reverse().find((message) => message.role === 'user');
+    if (latestTurn) setActiveTurnId(latestTurn.id);
   }, [messages]);
 
   useEffect(() => {
@@ -83,6 +109,22 @@ export function SearchView({
 
   function openResultDrawer(result: SearchResult) {
     onOpenDocument(result.document.uuid, naturalRelevance(result));
+  }
+
+  function updateResultBookshelf(entry: BookshelfEntry) {
+    setMessages((current) => current.map((message) => ({
+      ...message,
+      results: message.results?.map((result) => result.document.uuid === entry.document.uuid
+        ? {
+            ...result,
+            document: {
+              ...result.document,
+              bookshelf_status: entry.status,
+              bookshelf_favorited: entry.favorited,
+            },
+          }
+        : result),
+    })));
   }
 
   async function refreshHistory(nextQuery = historyQuery) {
@@ -132,20 +174,26 @@ export function SearchView({
   }
 
   async function loadConversation(id: string) {
-    if (loading) return;
+    const chatKey = `conversation:${id}`;
+    const requestSequence = ++conversationLoadSequence.current;
+    activateChat(chatKey);
     setError(null);
     try {
       const conversation = await getAgentConversation(id);
+      if (requestSequence !== conversationLoadSequence.current || activeChatKeyRef.current !== chatKey) return;
       setConversationId(conversation.uuid);
       setStartedNewChat(false);
       setMessages(messagesFromConversation(conversation));
     } catch (err) {
+      if (requestSequence !== conversationLoadSequence.current || activeChatKeyRef.current !== chatKey) return;
       setError(err instanceof Error ? err.message : 'Could not load chat');
     }
   }
 
   function startNewChat() {
-    if (loading) return;
+    conversationLoadSequence.current += 1;
+    newChatSequence.current += 1;
+    activateChat(`new:${newChatSequence.current}`);
     setStartedNewChat(true);
     setConversationId(undefined);
     setMessages([]);
@@ -160,31 +208,73 @@ export function SearchView({
     }
   }
 
+  function handleTranscriptScroll() {
+    const transcript = transcriptRef.current;
+    if (!transcript) return;
+    const anchor = transcript.getBoundingClientRect().top + Math.min(160, transcript.clientHeight * 0.3);
+    let nextActive = conversationTurns(messages)[0]?.id ?? null;
+    for (const turn of conversationTurns(messages)) {
+      const element = turnRefs.current.get(turn.id);
+      if (!element || element.getBoundingClientRect().top > anchor) break;
+      nextActive = turn.id;
+    }
+    setActiveTurnId(nextActive);
+  }
+
+  function jumpToTurn(turnId: string) {
+    const transcript = transcriptRef.current;
+    const turn = turnRefs.current.get(turnId);
+    if (!transcript || !turn) return;
+    const top = turn.getBoundingClientRect().top - transcript.getBoundingClientRect().top + transcript.scrollTop - 24;
+    setActiveTurnId(turnId);
+    transcript.scrollTo({ top, behavior: 'smooth' });
+  }
+
   async function submit(event: FormEvent) {
     event.preventDefault();
     const message = query.trim();
     if (!message || loading) return;
     const turnId = Date.now().toString();
     const assistantId = `assistant-${turnId}`;
+    let streamKey = activeChatKeyRef.current;
+    let streamConversationId = conversationId;
     setMessages((current) => [
       ...current,
       { id: `user-${turnId}`, role: 'user', content: message },
       { id: assistantId, role: 'assistant', content: '', steps: [], pending: true },
     ]);
     setQuery('');
-    setLoading(true);
+    setInFlightChatKeys((current) => new Set(current).add(streamKey));
     setError(null);
     try {
       await streamChatSearch(message, conversationId, (event) => {
         if (event.event === 'conversation') {
-          setConversationId(event.data.conversation_uuid);
+          const nextStreamKey = `conversation:${event.data.conversation_uuid}`;
+          const streamIsVisible = activeChatKeyRef.current === streamKey;
+          streamConversationId = event.data.conversation_uuid;
+          if (nextStreamKey !== streamKey) {
+            const previousStreamKey = streamKey;
+            streamKey = nextStreamKey;
+            setInFlightChatKeys((current) => {
+              const next = new Set(current);
+              next.delete(previousStreamKey);
+              next.add(nextStreamKey);
+              return next;
+            });
+          }
+          if (streamIsVisible) {
+            activateChat(nextStreamKey);
+            setConversationId(event.data.conversation_uuid);
+          }
           return;
         }
         if (event.event === 'step') {
+          if (activeChatKeyRef.current !== streamKey) return;
           appendAssistantStep(assistantId, event.data.step);
           return;
         }
         if (event.event === 'tool_result') {
+          if (activeChatKeyRef.current !== streamKey) return;
           replaceOrAppendAssistantStep(assistantId, {
             ...event.data.step,
             documents: event.data.step.documents?.length
@@ -194,18 +284,25 @@ export function SearchView({
           return;
         }
         if (event.event === 'final') {
-          setMessages((current) =>
-            current.map((item) =>
-              item.id === assistantId
-                ? {
-                    ...item,
-                    content: event.data.answer,
-                    results: event.data.results,
-                    pending: false,
-                  }
-                : item,
-            ),
-          );
+          if (activeChatKeyRef.current === streamKey) {
+            setMessages((current) =>
+              current.map((item) =>
+                item.id === assistantId
+                  ? {
+                      ...item,
+                      content: event.data.answer,
+                      results: event.data.results,
+                      pending: false,
+                    }
+                  : item,
+              ),
+            );
+            void getAgentConversation(event.data.conversation_uuid).then((conversation) => {
+              if (activeChatKeyRef.current !== streamKey) return;
+              setConversationId(conversation.uuid);
+              setMessages(messagesFromConversation(conversation));
+            });
+          }
           refreshHistory();
         }
         if (event.event === 'error') {
@@ -213,14 +310,23 @@ export function SearchView({
         }
       });
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Search failed');
-      setMessages((current) =>
-        current.map((item) =>
-          item.id === assistantId ? { ...item, content: 'Search failed before the agent could finish.', pending: false } : item,
-        ),
-      );
+      if (activeChatKeyRef.current === streamKey) {
+        setError(err instanceof Error ? err.message : 'Search failed');
+        setMessages((current) =>
+          current.map((item) =>
+            item.id === assistantId ? { ...item, content: 'Search failed before the agent could finish.', pending: false } : item,
+          ),
+        );
+      }
     } finally {
-      setLoading(false);
+      setInFlightChatKeys((current) => {
+        const next = new Set(current);
+        next.delete(streamKey);
+        return next;
+      });
+      if (streamConversationId && activeChatKeyRef.current === streamKey) {
+        setConversationId(streamConversationId);
+      }
     }
   }
 
@@ -250,8 +356,10 @@ export function SearchView({
 
   return (
     <section className="min-h-svh flex-1">
-      <div className="grid min-h-svh grid-cols-1 lg:grid-cols-[15rem_minmax(0,1fr)]">
-        <aside className="hidden min-h-svh border-r bg-muted/20 lg:flex lg:flex-col">
+      <ResizableSidebarLayout
+        className="min-h-svh"
+        storageKey="iris.chatHistoryWidth"
+        sidebar={<aside className="hidden min-h-svh border-r bg-muted/20 lg:flex lg:flex-col">
           <div className="flex h-14 items-center justify-between px-4 text-sm font-semibold">
             <span>Chats</span>
             <button className="grid size-8 place-items-center rounded-md text-lg text-muted-foreground hover:bg-accent hover:text-accent-foreground" type="button" onClick={startNewChat} aria-label="New chat" title="New chat">
@@ -287,7 +395,8 @@ export function SearchView({
               ))}
             {!historyLoading && historyLoadingMore && <HistorySkeleton rows={2} />}
           </div>
-        </aside>
+        </aside>}
+      >
 
         <div className="relative flex min-h-svh min-w-0 flex-col">
 
@@ -295,53 +404,76 @@ export function SearchView({
 
       {messages.length === 0 && (
         <div className="mx-auto grid min-h-svh w-full max-w-3xl place-items-center px-6">
-          <CorpusSearchForm
-            className="w-full"
-            value={query}
-            onChange={setQuery}
-            onSubmit={submit}
-            placeholder={loading ? 'Iris is working...' : 'Message Iris...'}
-            disabled={loading || !query.trim()}
-            autoFocus
-          />
+          <div className="relative w-full">
+            <h1 className="absolute inset-x-0 bottom-full mb-5 text-center text-2xl font-medium tracking-tight">
+              {greetingName ? `Hey, ${greetingName}. What are you curious about?` : 'What are you curious about?'}
+            </h1>
+            <CorpusSearchForm
+              className="w-full"
+              value={query}
+              onChange={setQuery}
+              onSubmit={submit}
+              placeholder={loading ? 'Iris is working...' : 'Message Iris...'}
+              disabled={loading || !query.trim()}
+              autoFocus
+              multiline
+            />
+          </div>
         </div>
       )}
 
       <div className="flex min-h-svh min-w-0 flex-1 flex-col">
         <div className="min-h-0 flex-1">
-          <div className="mx-auto h-[calc(100svh-6rem)] w-full max-w-3xl space-y-8 overflow-y-auto px-6 py-10" ref={transcriptRef}>
-            {messages.map((message) => (
-              <div
-                key={message.id}
-                className={`grid gap-2 ${
-                  message.role === 'user'
-                    ? 'ml-auto max-w-[85%] rounded-xl bg-muted px-4 py-3'
-                    : 'w-full'
-                }`}
-              >
-                <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{message.role === 'user' ? 'You' : 'Iris'}</div>
-                {message.pending && !message.content ? (
-                  <ThinkingState />
-                ) : (
-                  <MessageContent content={message.content} />
-                )}
-                {message.steps && message.steps.length > 0 && (
-                  <SearchTrace
-                    steps={message.steps}
-                    onOpenDocument={(document) =>
-                      onOpenDocument(document.uuid, traceDocumentReason(document))
-                    }
-                  />
-                )}
-                {message.role === 'assistant' && message.results && message.results.length > 0 && (
-                  <SearchResultsTable
-                    results={message.results}
-                    selectedDocumentUuid={selectedDocumentUuid}
-                    onOpenResult={openResultDrawer}
-                  />
-                )}
+          <div className="relative h-[calc(100svh-6rem)] w-full">
+            <div className="pointer-events-none absolute inset-y-0 left-0 z-30">
+              <ConversationMinimap
+                turns={artifactOpen ? [] : conversationTurns(messages)}
+                activeTurnId={activeTurnId}
+                onSelect={jumpToTurn}
+              />
+            </div>
+            <div className="h-full w-full overflow-y-auto" ref={transcriptRef} onScroll={handleTranscriptScroll}>
+              <div className="mx-auto w-full max-w-3xl space-y-8 px-6 py-10">
+                {messages.map((message) => (
+                  <div
+                    key={message.id}
+                    ref={(element) => {
+                      if (message.role !== 'user') return;
+                      if (element) turnRefs.current.set(message.id, element);
+                      else turnRefs.current.delete(message.id);
+                    }}
+                    className={`grid gap-2 ${
+                      message.role === 'user'
+                        ? 'ml-auto max-w-[85%] rounded-xl bg-muted px-4 py-3'
+                        : 'w-full'
+                    }`}
+                  >
+                    <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{message.role === 'user' ? 'You' : 'Iris'}</div>
+                    {message.pending && !message.content ? (
+                      <ThinkingState />
+                    ) : (
+                      <MessageContent content={message.content} />
+                    )}
+                    {message.steps && message.steps.length > 0 && (
+                      <SearchTrace
+                        steps={message.steps}
+                        onOpenDocument={(document) =>
+                          onOpenDocument(document.uuid, traceDocumentReason(document))
+                        }
+                      />
+                    )}
+                    {message.role === 'assistant' && message.results && message.results.length > 0 && (
+                      <SearchResultsTable
+                        results={message.results}
+                        selectedDocumentUuid={selectedDocumentUuid}
+                        onOpenResult={openResultDrawer}
+                        onBookshelfChange={updateResultBookshelf}
+                      />
+                    )}
+                  </div>
+                ))}
               </div>
-            ))}
+            </div>
           </div>
         </div>
         {messages.length > 0 && (
@@ -354,13 +486,67 @@ export function SearchView({
               placeholder={loading ? 'Iris is working...' : conversationId ? 'Follow up...' : 'Message Iris...'}
               disabled={loading || !query.trim()}
               autoFocus
+              multiline
             />
           </div>
         )}
       </div>
         </div>
-      </div>
+      </ResizableSidebarLayout>
     </section>
+  );
+}
+
+function ConversationMinimap({
+  turns,
+  activeTurnId,
+  onSelect,
+}: {
+  turns: ConversationTurn[];
+  activeTurnId: string | null;
+  onSelect: (turnId: string) => void;
+}) {
+  if (turns.length < 3) return null;
+
+  return (
+    <nav
+      className="pointer-events-auto absolute top-1/2 left-3 z-30 hidden max-h-[58vh] -translate-y-1/2 overflow-visible xl:block"
+      aria-label="Conversation turns"
+    >
+      <ol className="grid gap-0.5 py-1.5">
+        {turns.map((turn, index) => {
+          const active = turn.id === activeTurnId;
+          return (
+            <li className="group/turn relative flex h-2 items-center" key={turn.id}>
+              <button
+                className="flex h-3.5 w-7 origin-left items-center transition-transform duration-200 ease-out group-hover/turn:translate-x-0.5 group-focus-within/turn:translate-x-0.5 motion-reduce:transition-none focus-visible:outline-none"
+                type="button"
+                onClick={() => onSelect(turn.id)}
+                aria-current={active ? 'step' : undefined}
+                aria-label={`Jump to query ${index + 1}: ${turn.query}`}
+              >
+                <span
+                  className={`h-0.5 origin-left rounded-full transition-[width,background-color,opacity] duration-200 ease-out group-hover/turn:w-6 group-hover/turn:bg-foreground/80 group-hover/turn:opacity-100 group-focus-within/turn:w-6 group-focus-within/turn:bg-foreground/80 group-focus-within/turn:opacity-100 motion-reduce:transition-none ${
+                    active ? 'w-4 bg-foreground/80 opacity-100' : 'w-2 bg-muted-foreground/45 opacity-70'
+                  }`}
+                  aria-hidden="true"
+                />
+                <span className="pointer-events-none invisible absolute top-1/2 left-8 w-72 origin-left -translate-y-1/2 translate-x-1 scale-95 rounded-lg border bg-popover p-2.5 text-left text-xs text-popover-foreground opacity-0 shadow-lg transition-[opacity,transform,visibility] duration-200 ease-out group-hover/turn:visible group-hover/turn:translate-x-0 group-hover/turn:scale-100 group-hover/turn:opacity-100 group-focus-within/turn:visible group-focus-within/turn:translate-x-0 group-focus-within/turn:scale-100 group-focus-within/turn:opacity-100 motion-reduce:transition-none">
+                  <span className="block max-h-24 overflow-y-auto whitespace-pre-wrap font-medium leading-4">
+                    {turn.query}
+                  </span>
+                  {turn.response && (
+                    <span className="mt-2 line-clamp-2 block text-muted-foreground">
+                      {turn.response}
+                    </span>
+                  )}
+                </span>
+              </button>
+            </li>
+          );
+        })}
+      </ol>
+    </nav>
   );
 }
 
@@ -410,10 +596,12 @@ function SearchResultsTable({
   results,
   selectedDocumentUuid,
   onOpenResult,
+  onBookshelfChange,
 }: {
   results: SearchResult[];
   selectedDocumentUuid: string | null;
   onOpenResult: (result: SearchResult) => void;
+  onBookshelfChange: (entry: BookshelfEntry) => void;
 }) {
   return (
     <div className="mt-5 overflow-hidden rounded-lg border">
@@ -422,9 +610,10 @@ function SearchResultsTable({
         <small className="text-muted-foreground">{results.length}</small>
       </div>
       <div role="table" aria-label="Search results">
-        <div className="grid grid-cols-[minmax(0,2fr)_minmax(0,3fr)] gap-4 border-b bg-muted/20 px-4 py-2 text-xs font-semibold uppercase text-muted-foreground" role="row">
+        <div className="grid grid-cols-[minmax(0,2fr)_minmax(0,3fr)_1.75rem] gap-4 border-b bg-muted/20 px-4 py-2 text-xs font-semibold uppercase text-muted-foreground" role="row">
           <span>Title</span>
           <span>One-liner</span>
+          <span />
         </div>
         {results.map((result) => {
           const { document } = result;
@@ -432,7 +621,7 @@ function SearchResultsTable({
           return (
             <div
               key={document.uuid}
-              className={`grid cursor-pointer grid-cols-[minmax(0,2fr)_minmax(0,3fr)] gap-4 border-b px-4 py-3 text-sm last:border-0 hover:bg-muted/50 ${
+              className={`group grid cursor-pointer grid-cols-[minmax(0,2fr)_minmax(0,3fr)_1.75rem] items-center gap-4 border-b px-4 py-3 text-sm last:border-0 hover:bg-muted/50 ${
                 selected ? 'bg-accent/60' : ''
               }`}
               role="row"
@@ -444,6 +633,7 @@ function SearchResultsTable({
                 onOpenResult(result);
               }}
               onKeyDown={(event) => {
+                if (event.target !== event.currentTarget) return;
                 if (event.key === 'Enter' || event.key === ' ') {
                   event.preventDefault();
                   onOpenResult(result);
@@ -461,6 +651,12 @@ function SearchResultsTable({
               <span className="min-w-0 truncate text-muted-foreground" data-label="One-liner" title={resultOneLiner(result)}>
                 {resultOneLiner(result)}
               </span>
+              <DocumentActionsMenu
+                documentUuid={document.uuid}
+                status={document.bookshelf_status}
+                revealOnHover
+                onBookshelfChange={onBookshelfChange}
+              />
             </div>
           );
         })}
@@ -495,6 +691,14 @@ function cleanTechnicalReason(reason: string): string {
 function truncate(text: string, maxLength: number): string {
   if (text.length <= maxLength) return text;
   return `${text.slice(0, maxLength - 3).trimEnd()}...`;
+}
+
+function conversationTurns(messages: ChatMessage[]): ConversationTurn[] {
+  return messages.flatMap((message, index) => {
+    if (message.role !== 'user') return [];
+    const response = messages[index + 1]?.role === 'assistant' ? messages[index + 1].content : '';
+    return [{ id: message.id, query: message.content, response }];
+  });
 }
 
 function messagesFromConversation(conversation: AgentConversation): ChatMessage[] {
@@ -558,40 +762,42 @@ function SearchTrace({
   steps: AgentStep[];
   onOpenDocument: (document: AgentInspectedDocument) => void;
 }) {
-  const [traceOpen, setTraceOpen] = useState(true);
+  const [traceOpen, setTraceOpen] = useState(false);
   const inspectedCount = steps.reduce((total, step) => total + (step.documents?.length ?? 0), 0);
   return (
-    <details className="mt-4 overflow-hidden rounded-lg border bg-card" open={traceOpen} onToggle={(event) => setTraceOpen(event.currentTarget.open)}>
-      <summary className="flex cursor-pointer list-none items-center justify-between gap-4 bg-muted/30 px-4 py-3 text-sm font-medium">
+    <details className="mt-4 text-muted-foreground" open={traceOpen} onToggle={(event) => setTraceOpen(event.currentTarget.open)}>
+      <summary className="flex w-fit cursor-pointer list-none items-center gap-2 text-xs hover:text-foreground">
+        <Search size={13} />
         <span>Search process</span>
-        <small className="text-muted-foreground">{steps.length} {steps.length === 1 ? 'query' : 'queries'} · {inspectedCount} inspected</small>
+        <span className="text-muted-foreground/70">{steps.length} {steps.length === 1 ? 'step' : 'steps'} · {inspectedCount} inspected</span>
+        <ChevronDown className={`size-3 transition-transform ${traceOpen ? 'rotate-180' : ''}`} aria-hidden="true" />
       </summary>
-      <div className="divide-y">
+      <div className="mt-2 ml-1 border-l pl-4">
         {steps.map((step, index) => (
-          <details className="group" key={`${step.kind}-${step.title}-${step.query}-${index}`}>
-            <summary className="grid cursor-pointer list-none grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 px-4 py-3 text-sm hover:bg-muted/40">
-              <span className="text-muted-foreground">{traceIcon(step)}</span>
-              <span className="min-w-0">
-                <strong className="block font-medium">{traceTitle(step)}</strong>
-                {step.query && !isInternalDocumentQuery(step) && <small className="block truncate text-muted-foreground">{step.query}</small>}
+          <details className="py-1" key={`${step.kind}-${step.title}-${step.query}-${index}`}>
+            <summary className="grid cursor-pointer list-none grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 py-1 text-xs hover:text-foreground">
+              <span className="text-muted-foreground/80">{traceIcon(step)}</span>
+              <span className="min-w-0 truncate">
+                <strong className="font-medium text-foreground/75">{traceTitle(step)}</strong>
+                {step.query && !isInternalDocumentQuery(step) && <span className="ml-1.5 text-muted-foreground/80">{step.query}</span>}
               </span>
-              {typeof step.hits === 'number' && <small className="text-muted-foreground">{step.hits} found</small>}
+              {typeof step.hits === 'number' && <span className="text-muted-foreground/70">{step.hits} found</span>}
             </summary>
-            <div className="grid gap-3 border-t bg-muted/20 px-4 py-3">
+            <div className="grid gap-2 py-2 pl-5">
               {step.query && !isInternalDocumentQuery(step) && (
-                <code className="overflow-x-auto rounded-md bg-muted px-3 py-2 text-xs">{step.query}</code>
+                <code className="overflow-x-auto text-xs text-muted-foreground">{step.query}</code>
               )}
               {step.documents?.length > 0 && (
-                <div className="grid gap-2">
+                <div className="grid gap-1">
                   {step.documents.map((document, documentIndex) => (
                     <button
-                      className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-4 rounded-md border bg-background px-3 py-2 text-left text-xs hover:bg-accent"
+                      className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-4 rounded-md px-2 py-1.5 text-left text-xs hover:bg-muted hover:text-foreground"
                       key={`${document.uuid}-${documentIndex}`}
                       type="button"
                       onClick={() => onOpenDocument(document)}
                     >
                       <span className="min-w-0">
-                        <strong className="block truncate font-medium">{document.title}</strong>
+                        <strong className="block truncate font-medium text-foreground/80">{document.title}</strong>
                         <small className="block truncate text-muted-foreground">{document.source_domain}</small>
                       </span>
                       <em className="line-clamp-2 not-italic text-muted-foreground">{document.reason}</em>

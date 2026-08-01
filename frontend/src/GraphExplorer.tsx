@@ -1,10 +1,10 @@
-import { FormEvent, PointerEvent, useEffect, useMemo, useRef, useState } from 'react';
+import { PointerEvent, useEffect, useMemo, useRef, useState } from 'react';
 import * as d3 from 'd3-force';
-import { ArrowUpRight, FileText, Loader2, LocateFixed, Users } from 'lucide-react';
-import { getGraph, searchGraphSources } from './api';
-import { CorpusSearchForm } from './CorpusSearchForm';
+import { Loader2 } from 'lucide-react';
+import { getGraph } from './api';
 import { StateMessage } from './components/ui';
-import type { AdminSource, GraphEdge, GraphNode, GraphResponse } from './types';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './components/ui/select';
+import type { GraphEdge, GraphNode, GraphResponse } from './types';
 
 type GraphMode = 'sources' | 'documents';
 type LayoutNode = GraphNode & d3.SimulationNodeDatum & { x: number; y: number; r: number; color: string };
@@ -18,18 +18,14 @@ const WIDTH = 1800;
 const HEIGHT = 1000;
 
 export function GraphExplorer({
-  onOpenProfile,
   initialDomain = '',
 }: {
-  onOpenProfile?: (sourceId: number, domain: string) => void;
   initialDomain?: string;
 }) {
   const [mode, setMode] = useState<GraphMode>('sources');
   const [depth, setDepth] = useState(1);
   const [domain, setDomain] = useState(initialDomain);
   const [graph, setGraph] = useState<GraphResponse>({ nodes: [], edges: [] });
-  const [sourceMatches, setSourceMatches] = useState<AdminSource[]>([]);
-  const [searchOpen, setSearchOpen] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [layout, setLayout] = useState<LayoutNode[]>([]);
@@ -40,7 +36,6 @@ export function GraphExplorer({
   const dragRef = useRef<DragState | null>(null);
   const simulationRef = useRef<d3.Simulation<LayoutNode, undefined> | null>(null);
   const nodesRef = useRef<Map<string, LayoutNode>>(new Map());
-  const searchWrapRef = useRef<HTMLDivElement | null>(null);
   const suppressClickRef = useRef(false);
 
   async function refresh(nextMode = mode, nextDomain = domain, focusId?: string, nextDepth = depth) {
@@ -88,16 +83,6 @@ export function GraphExplorer({
   }, []);
 
   useEffect(() => {
-    function handlePointerDown(event: globalThis.PointerEvent) {
-      const target = event.target as Node | null;
-      if (!target || searchWrapRef.current?.contains(target)) return;
-      setSearchOpen(false);
-    }
-    window.addEventListener('pointerdown', handlePointerDown);
-    return () => window.removeEventListener('pointerdown', handlePointerDown);
-  }, []);
-
-  useEffect(() => {
     simulationRef.current?.stop();
     const nodes = initialLayout(graph.nodes, graph.edges, mode);
     nodesRef.current = new Map(nodes.map((node) => [node.id, node]));
@@ -140,60 +125,9 @@ export function GraphExplorer({
   const visibleEdges = graph.edges.filter((edge) => nodeById.has(edge.source) && nodeById.has(edge.target));
   const inboundReferences = rankedGraphReferences(selectedId, visibleEdges, nodeById, 'inbound');
   const outboundReferences = rankedGraphReferences(selectedId, visibleEdges, nodeById, 'outbound');
-  const matches = domain.trim()
-    ? layout.filter((node) => node.label.toLowerCase().includes(domain.trim().toLowerCase()) || node.domain.toLowerCase().includes(domain.trim().toLowerCase())).slice(0, 8)
-    : [];
-  const visibleMatches = mode === 'sources' && domain.trim() ? sourceMatches : matches;
-  const showMatches = searchOpen && visibleMatches.length > 0;
-
-  useEffect(() => {
-    if (mode !== 'sources') {
-      setSourceMatches([]);
-      return;
-    }
-    const query = domain.trim();
-    if (!query) {
-      setSourceMatches([]);
-      return;
-    }
-    let cancelled = false;
-    const timeout = window.setTimeout(() => {
-      searchGraphSources(query)
-        .then((items) => {
-          if (!cancelled) setSourceMatches(items);
-        })
-        .catch(() => {
-          if (!cancelled) setSourceMatches([]);
-        });
-    }, 140);
-    return () => {
-      cancelled = true;
-      window.clearTimeout(timeout);
-    };
-  }, [domain, mode]);
-
-  function updateMode(nextMode: GraphMode) {
-    setMode(nextMode);
-    refresh(nextMode, domain);
-  }
-
   function updateDepth(nextDepth: number) {
     setDepth(nextDepth);
     if (mode === 'sources') refresh(mode, domain, selectedId ?? undefined, nextDepth);
-  }
-
-  function submit(event: FormEvent) {
-    event.preventDefault();
-    setSearchOpen(false);
-    const query = domain.trim();
-    const match = exactSearchMatch(domain, layout);
-    if (match) {
-      openNodeGraph(match);
-    } else if (mode === 'sources' && isSpecificDomainQuery(query)) {
-      refresh(mode, normalizeDomainQuery(query));
-    } else if (mode === 'sources' && sourceMatches[0]) {
-      selectSourceSearchMatch(sourceMatches[0]);
-    }
   }
 
   function openNodeGraph(node: LayoutNode) {
@@ -201,27 +135,9 @@ export function GraphExplorer({
     refresh(mode, mode === 'sources' ? node.domain : domain, node.id);
   }
 
-  function openProfile(node: LayoutNode) {
-    const sourceId = numericNodeId(node.id);
-    if (sourceId === undefined) return;
-    onOpenProfile?.(sourceId, node.domain);
-  }
-
   function selectGraphNode(nodeId: string) {
     setSelectedId(nodeId);
     setPanelOpen(true);
-  }
-
-  function selectSearchMatch(node: LayoutNode) {
-    setSearchOpen(false);
-    setDomain(node.domain);
-    openNodeGraph(node);
-  }
-
-  function selectSourceSearchMatch(source: AdminSource) {
-    setSearchOpen(false);
-    setDomain(source.canonical_domain);
-    refresh('sources', source.canonical_domain, `source:${source.id}`);
   }
 
   function pointerDown(event: PointerEvent<SVGSVGElement>) {
@@ -283,59 +199,28 @@ export function GraphExplorer({
   }
 
   return (
-    <section className="flex min-h-[calc(100svh-15rem)] flex-col bg-background">
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b bg-card px-4 py-3">
-        <div className="relative w-full max-w-md" ref={searchWrapRef} onFocusCapture={() => setSearchOpen(true)}>
-          <CorpusSearchForm
-            className="min-h-10 w-full"
-            value={domain}
-            onChange={(value) => {
-              setDomain(value);
-              setSearchOpen(true);
-            }}
-            onSubmit={submit}
-            placeholder={mode === 'sources' ? 'focus domain, e.g. example.com' : 'filter title/domain'}
-          />
-          {showMatches && (
-            <div className="absolute inset-x-0 top-12 z-30 grid gap-1 rounded-lg border bg-popover p-1 shadow-lg">
-              {mode === 'sources'
-                ? sourceMatches.map((source) => (
-                    <button className="rounded-md px-3 py-2 text-left text-sm hover:bg-accent" key={source.id} type="button" onClick={() => selectSourceSearchMatch(source)}>
-                      <span className="block font-medium">{source.canonical_domain}</span>
-                      <small className="block text-muted-foreground">{source.canonical_domain}</small>
-                    </button>
-                  ))
-                : matches.map((node) => (
-                    <button className="rounded-md px-3 py-2 text-left text-sm hover:bg-accent" key={node.id} type="button" onClick={() => selectSearchMatch(node)}>
-                      <span className="block font-medium">{node.label}</span>
-                      <small className="block text-muted-foreground">{node.domain}</small>
-                    </button>
-                  ))}
-            </div>
-          )}
-        </div>
-        <div className="flex items-center gap-1 rounded-lg bg-muted p-1 text-sm">
+    <section className="flex h-full min-h-0 flex-col overflow-hidden bg-background">
+      <div className="flex shrink-0 items-center justify-end border-b bg-card px-4 py-3">
+        <div className="flex items-center gap-2 text-sm">
           {mode === 'sources' && (
-            <div className="mr-1 flex items-center gap-0.5 border-r pr-2" aria-label="Graph depth">
-              {[1, 2, 3].map((value) => (
-                <button key={value} type="button" className={`grid size-8 place-items-center rounded-md text-xs ${depth === value ? 'bg-background shadow-xs' : 'text-muted-foreground hover:bg-accent'}`} onClick={() => updateDepth(value)}>
-                  {value}
-                </button>
-              ))}
-            </div>
+            <Select value={String(depth)} onValueChange={(value) => updateDepth(Number(value))}>
+              <SelectTrigger className="bg-background" aria-label="Graph depth">
+                <span className="text-muted-foreground">Depth</span>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent align="end">
+                <SelectItem value="1">1</SelectItem>
+                <SelectItem value="2">2</SelectItem>
+                <SelectItem value="3">3</SelectItem>
+              </SelectContent>
+            </Select>
           )}
-          <button type="button" className={`inline-flex h-8 items-center gap-1.5 rounded-md px-2 ${mode === 'sources' ? 'bg-background shadow-xs' : 'text-muted-foreground hover:bg-accent'}`} onClick={() => updateMode('sources')}>
-            <Users size={16} /> People
-          </button>
-          <button type="button" className={`inline-flex h-8 items-center gap-1.5 rounded-md px-2 ${mode === 'documents' ? 'bg-background shadow-xs' : 'text-muted-foreground hover:bg-accent'}`} onClick={() => updateMode('documents')}>
-            <FileText size={16} /> Docs
-          </button>
         </div>
       </div>
 
       {error && <StateMessage className="m-4" tone="error">{error}</StateMessage>}
       <div className="relative grid min-h-0 flex-1 lg:grid-cols-[minmax(0,1fr)_20rem]">
-        <div className="relative min-h-[34rem] overflow-hidden bg-muted/10">
+        <div className="relative min-h-0 overflow-hidden bg-muted/10">
           {loading && (
             <div className="absolute inset-0 z-10 grid place-items-center bg-background/70 text-sm text-muted-foreground backdrop-blur-sm" aria-live="polite">
               <span className="flex items-center gap-2"><Loader2 className="animate-spin" size={22} />
@@ -345,7 +230,7 @@ export function GraphExplorer({
           )}
           {!loading && graph.nodes.length === 0 && <StateMessage className="absolute inset-x-4 top-4">No graph neighbors found.</StateMessage>}
           <svg
-            className="h-full min-h-[34rem] w-full touch-none select-none"
+            className="h-full min-h-0 w-full touch-none select-none"
             viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
             role="img"
             onPointerDown={pointerDown}
@@ -418,24 +303,7 @@ export function GraphExplorer({
         <aside className="min-h-0 overflow-y-auto border-l bg-card p-4">
           {selected ? (
             <>
-              <div className="flex items-start justify-between gap-3">
-                <h3 className="font-semibold leading-snug">{selected.label}</h3>
-                <div className="flex items-center gap-1 [&_a]:grid [&_a]:size-8 [&_a]:place-items-center [&_a]:rounded-md [&_a]:hover:bg-accent [&_button]:grid [&_button]:size-8 [&_button]:place-items-center [&_button]:rounded-md [&_button]:hover:bg-accent" aria-label="Graph actions">
-                  {mode === 'sources' && (
-                    <button type="button" onClick={() => openProfile(selected)} aria-label="Open profile" data-tooltip="Open profile" data-tooltip-placement="left">
-                      <Users size={16} />
-                    </button>
-                  )}
-                  <button type="button" onClick={() => openNodeGraph(selected)} aria-label="Open this graph" data-tooltip="Open this graph" data-tooltip-placement="left">
-                    <LocateFixed size={16} />
-                  </button>
-                  {selected.url && (
-                    <a href={selected.url} target="_blank" rel="noreferrer" aria-label="Open source" data-tooltip="Open source" data-tooltip-placement="left">
-                      <ArrowUpRight size={16} />
-                    </a>
-                  )}
-                </div>
-              </div>
+              <h3 className="font-semibold leading-snug">{selected.label}</h3>
               <p className="mt-2 text-xs text-muted-foreground">{selected.subtitle || selected.domain}</p>
               {selected.summary && <p className="mt-3 text-sm leading-6 text-muted-foreground">{selected.summary}</p>}
               <div className="my-4 grid grid-cols-2 gap-2 text-xs">
@@ -519,26 +387,6 @@ function graphReferenceWeightLabel(edge: GraphEdge, mode: GraphMode) {
   if (mode === 'documents') return edge.weight > 1 ? `${edge.weight} refs` : '1 ref';
   const count = Math.round(edge.weight);
   return `${count} link${count === 1 ? '' : 's'}`;
-}
-
-function exactSearchMatch(query: string, nodes: LayoutNode[]): LayoutNode | null {
-  const normalized = normalizeDomainQuery(query);
-  if (!normalized) return null;
-  return nodes.find((node) => node.domain.toLowerCase() === normalized || node.label.toLowerCase() === normalized) ?? null;
-}
-
-function isSpecificDomainQuery(query: string): boolean {
-  const normalized = normalizeDomainQuery(query);
-  return /^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(normalized);
-}
-
-function normalizeDomainQuery(query: string): string {
-  return query
-    .trim()
-    .toLowerCase()
-    .replace(/^https?:\/\//, '')
-    .replace(/^www\./, '')
-    .replace(/\/.*$/, '');
 }
 
 function initialLayout(nodes: GraphNode[], edges: GraphEdge[], mode: GraphMode): LayoutNode[] {

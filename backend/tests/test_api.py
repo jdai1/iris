@@ -225,6 +225,85 @@ def test_directory_sources_default_to_most_referenced(session):
     assert body["items"][0]["external_source_count"] == 1
 
 
+def test_directory_and_document_filters_are_anded_and_paginated(session, monkeypatch):
+    alpha = get_or_create_source("https://alpha-filter.test", status="indexed")
+    beta = get_or_create_source("https://beta-filter.test", status="indexed")
+    gamma = get_or_create_source("https://gamma-filter.test", status="indexed")
+    alpha.name = "Alpha Workshop"
+    alpha.description = "Playful tools and small software experiments"
+    beta.description = "Practical database engineering"
+    gamma.description = "Visual design notes"
+    upsert_document(
+        source=alpha, url="https://alpha-filter.test/compiler", document_type="essay", crawl_status="fetched",
+        title="Tiny Weekend Compiler", author=None, published_at=None,
+        extracted_text="Build a tiny compiler over a weekend", summary="A playful compiler project.",
+        topics=["python", "design"], embedding=None, content_hash="filter-alpha",
+    )
+    upsert_document(
+        source=beta, url="https://beta-filter.test/database", document_type="essay", crawl_status="fetched",
+        title="Python Database Notes", author=None, published_at=None,
+        extracted_text="Practical database internals", summary="Database engineering.",
+        topics=["python"], embedding=None, content_hash="filter-beta",
+    )
+    upsert_document(
+        source=gamma, url="https://gamma-filter.test/design", document_type="essay", crawl_status="fetched",
+        title="Interface Sketches", author=None, published_at=None,
+        extracted_text="Visual interface design", summary="Design observations.",
+        topics=["design"], embedding=None, content_hash="filter-gamma",
+    )
+    session.commit()
+    client = TestClient(app)
+
+    source_filters = client.get(
+        "/api/directory/sources",
+        params=[("text_filter", "Alpha"), ("text_filter", "playful"), ("tag", "python"), ("tag", "design")],
+    )
+    assert source_filters.status_code == 200
+    assert source_filters.json()["total"] == 1
+    assert source_filters.json()["items"][0]["canonical_domain"] == "alpha-filter.test"
+
+    first_page = client.get("/api/directory/sources", params={"tag": "python", "limit": 1, "offset": 0}).json()
+    second_page = client.get("/api/directory/sources", params={"tag": "python", "limit": 1, "offset": 1}).json()
+    assert first_page["total"] == second_page["total"] == 2
+    assert first_page["items"][0]["id"] != second_page["items"][0]["id"]
+
+    document_filters = client.get(
+        "/api/documents",
+        params=[
+            ("source_id", str(alpha.id)),
+            ("document_type", "essay"),
+            ("text_filter", "Tiny"),
+            ("text_filter", "weekend"),
+            ("tag", "design"),
+        ],
+    )
+    assert document_filters.status_code == 200
+    assert document_filters.json()["total"] == 1
+    assert document_filters.json()["items"][0]["title"] == "Tiny Weekend Compiler"
+
+    headers = _bookshelf_auth(monkeypatch)
+    collection = client.post(
+        "/api/bookshelf/collections",
+        json={"name": "Project ideas", "visibility": "private"},
+        headers=headers,
+    ).json()
+    added = client.post(
+        f"/api/bookshelf/collections/{collection['id']}/items",
+        json={"document_uuid": document_filters.json()["items"][0]["uuid"]},
+        headers=headers,
+    )
+    assert added.status_code == 200
+
+    counted_sources = client.get(
+        "/api/directory/sources",
+        params={"text_filter": "alpha-filter.test"},
+        headers=headers,
+    )
+    assert counted_sources.status_code == 200
+    assert counted_sources.json()["items"][0]["essay_count"] == 1
+    assert counted_sources.json()["items"][0]["collection_count"] == 1
+
+
 def test_me_maps_firebase_identity_to_user(session, monkeypatch):
     from iris.routes import api as api_routes
 
@@ -247,6 +326,37 @@ def test_me_maps_firebase_identity_to_user(session, monkeypatch):
     assert body["firebase_uid"] == "firebase-user-1"
     assert body["email"] == "jane@example.com"
     assert body["display_name"] == "Jane Example"
+    assert body["onboarding_completed_at"] is None
+
+
+def test_onboarding_sets_username_optional_website_and_completion(session, monkeypatch):
+    from iris.routes import api as api_routes
+
+    monkeypatch.setattr(
+        api_routes,
+        "verify_firebase_token",
+        lambda token: FirebaseIdentity(
+            uid="firebase-onboarding-user",
+            email="new-reader@example.com",
+            display_name="New Reader",
+        ),
+    )
+    client = TestClient(app)
+    headers = {"Authorization": "Bearer onboarding-token"}
+
+    completed = client.post(
+        "/api/onboarding",
+        json={"username": "new-reader", "website_url": "https://reader.example.com/writing"},
+        headers=headers,
+    )
+
+    assert completed.status_code == 200
+    assert completed.json()["username"] == "new-reader"
+    assert completed.json()["onboarding_completed_at"] is not None
+    profile = client.get("/api/profile", headers=headers)
+    assert profile.status_code == 200
+    assert profile.json()["username"] == "new-reader"
+    assert profile.json()["websites"][0]["canonical_domain"] == "reader.example.com"
 
 
 def test_private_profiles_websites_and_friend_request_lifecycle(session, monkeypatch):
@@ -277,7 +387,13 @@ def test_private_profiles_websites_and_friend_request_lifecycle(session, monkeyp
     assert website.json()["source_status"] == "queued"
 
     hidden = client.get("/api/users/alice", headers=auth["bob"])
-    assert hidden.status_code == 404
+    assert hidden.status_code == 200
+    assert hidden.json()["username"] == "alice"
+    assert hidden.json()["relationship"] == "none"
+    assert hidden.json()["bio"] is None
+    assert hidden.json()["websites"] == []
+    assert hidden.json()["display_name"] is None
+    assert hidden.json()["photo_url"] is None
 
     people = client.get("/api/users", params={"q": "Alice"}, headers=auth["bob"])
     assert people.status_code == 200
@@ -293,6 +409,12 @@ def test_private_profiles_websites_and_friend_request_lifecycle(session, monkeyp
     friendship_id = requested.json()["id"]
     assert requested.json()["status"] == "requested"
     assert requested.json()["person"]["username"] == "alice"
+
+    requested_profile = client.get("/api/users/alice", headers=auth["bob"])
+    assert requested_profile.status_code == 200
+    assert requested_profile.json()["relationship"] == "requested_outgoing"
+    assert requested_profile.json()["bio"] is None
+    assert requested_profile.json()["websites"] == []
 
     alice_requests = client.get("/api/friends/requests", headers=auth["alice"]).json()
     assert alice_requests["incoming"][0]["id"] == friendship_id
@@ -317,7 +439,11 @@ def test_private_profiles_websites_and_friend_request_lifecycle(session, monkeyp
 
     disconnected = client.delete(f"/api/friends/{friendship_id}", headers=auth["bob"])
     assert disconnected.status_code == 204
-    assert client.get("/api/users/alice", headers=auth["bob"]).status_code == 404
+    disconnected_profile = client.get("/api/users/alice", headers=auth["bob"])
+    assert disconnected_profile.status_code == 200
+    assert disconnected_profile.json()["relationship"] == "none"
+    assert disconnected_profile.json()["bio"] is None
+    assert disconnected_profile.json()["websites"] == []
 
 
 def test_friend_request_pair_is_unique_in_both_directions(session, monkeypatch):
@@ -342,8 +468,10 @@ def test_friend_request_pair_is_unique_in_both_directions(session, monkeypatch):
     assert inverse.json()["detail"] == "A friend request already exists"
 
 
-def test_friends_feed_only_returns_connected_reading_without_notes(session, monkeypatch):
+def test_connected_activity_and_friend_lists_remain_private(session, monkeypatch):
     from iris.dao import bookshelf as bookshelf_dao
+    from iris.dao import highlights as highlights_dao
+    from iris.dao import social as social_dao
     from iris.models import BookshelfStatus, User
 
     client = TestClient(app)
@@ -385,13 +513,16 @@ def test_friends_feed_only_returns_connected_reading_without_notes(session, monk
         embedding=dumps_embedding(embed_text("stranger reading")),
         content_hash="friend-feed-hidden",
     )
-    bookshelf_dao.update_entry(
+    friend_mapping = bookshelf_dao.update_entry(
         bob,
         friend_document,
         status=BookshelfStatus.READ,
+        favorited=True,
         note="This note must remain private.",
         update_note=True,
     )
+    highlights_dao.create(friend_mapping, quote="A friend-visible highlighted section.")
+    highlights_dao.create(friend_mapping, quote="A second friend-visible highlighted section.")
     bookshelf_dao.save_document(stranger, stranger_document)
     session.flush()
 
@@ -404,16 +535,70 @@ def test_friends_feed_only_returns_connected_reading_without_notes(session, monk
         f"/api/friends/requests/{request['id']}/accept",
         headers=auth["bob"],
     ).status_code == 200
+    assert client.get("/api/friends", headers=auth["alice"]).json()[0]["requested_by_me"] is True
+    assert client.get("/api/friends", headers=auth["bob"]).json()[0]["requested_by_me"] is False
 
     response = client.get("/api/friends/feed", headers=auth["alice"])
 
     assert response.status_code == 200
     body = response.json()
-    assert body["total"] == 1
-    assert body["items"][0]["person"]["user_id"] == bob.id
-    assert body["items"][0]["document"]["title"] == "Friend reading"
-    assert body["items"][0]["status"] == "read"
-    assert "note" not in body["items"][0]
+    assert body["total"] == 4
+    assert {item["activity_type"] for item in body["items"]} == {
+        "favorited",
+        "read_later",
+        "noted",
+        "highlighted",
+    }
+    assert all(item["person"]["user_id"] == bob.id for item in body["items"])
+    assert all(item["document"]["title"] == "Friend reading" for item in body["items"])
+    highlight_item = next(item for item in body["items"] if item["activity_type"] == "highlighted")
+    assert highlight_item["highlight_count"] == 2
+    assert set(highlight_item["highlight_quotes"]) == {
+        "A friend-visible highlighted section.",
+        "A second friend-visible highlighted section.",
+    }
+    assert all("note" not in item for item in body["items"])
+
+    bob_username = client.get("/api/profile", headers=auth["bob"]).json()["username"]
+    filtered = client.get(
+        "/api/friends/feed",
+        params={"username": bob_username},
+        headers=auth["alice"],
+    )
+    assert filtered.status_code == 200
+    assert filtered.json()["total"] == 4
+    assert all(item["person"]["user_id"] == bob.id for item in filtered.json()["items"])
+
+    bob_stranger_friendship = social_dao.request_friendship(bob, stranger)
+    assert social_dao.accept_friendship(stranger, bob_stranger_friendship.id) is not None
+    bob_friends = client.get(
+        f"/api/users/{bob_username}/friends",
+        headers=auth["alice"],
+    )
+    assert bob_friends.status_code == 200
+    assert {person["user_id"] for person in bob_friends.json()} == {alice.id, stranger.id}
+
+    stranger_username = social_dao.get_or_create_profile(stranger).username
+    stranger_profile = client.get(
+        f"/api/users/{stranger_username}",
+        headers=auth["alice"],
+    )
+    assert stranger_profile.status_code == 200
+    assert stranger_profile.json()["relationship"] == "none"
+    assert stranger_profile.json()["bio"] is None
+    assert stranger_profile.json()["websites"] == []
+    assert stranger_profile.json()["display_name"] is None
+    assert stranger_profile.json()["photo_url"] is None
+    hidden = client.get(
+        "/api/friends/feed",
+        params={"username": stranger_username},
+        headers=auth["alice"],
+    )
+    assert hidden.status_code == 404
+    assert client.get(
+        f"/api/users/{stranger_username}/friends",
+        headers=auth["alice"],
+    ).status_code == 404
 
 
 def test_agent_chat_persists_conversation_and_results(session, monkeypatch):

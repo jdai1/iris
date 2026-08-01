@@ -104,6 +104,14 @@ export function getMe(): Promise<User> {
   return request<User>('/api/me');
 }
 
+export function completeOnboarding(payload: { username: string; website_url?: string | null }): Promise<User> {
+  clearApiCache();
+  return request<User>('/api/onboarding', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
 export function getMyProfile(): Promise<UserProfile> {
   return request<UserProfile>('/api/profile');
 }
@@ -142,6 +150,10 @@ export function getUserProfile(username: string): Promise<UserProfile> {
   return request<UserProfile>(`/api/users/${encodeURIComponent(username)}`);
 }
 
+export function getUserFriends(username: string): Promise<Person[]> {
+  return request<Person[]>(`/api/users/${encodeURIComponent(username)}/friends`);
+}
+
 export function getFriends(): Promise<Friendship[]> {
   return request<Friendship[]>('/api/friends');
 }
@@ -173,11 +185,12 @@ export function disconnectFriend(friendshipId: number): Promise<void> {
   return request<void>(`/api/friends/${friendshipId}`, { method: 'DELETE' });
 }
 
-export function getFriendsFeed(params: { limit?: number; offset?: number } = {}): Promise<Page<FriendFeedItem>> {
+export function getFriendsFeed(params: { limit?: number; offset?: number; username?: string } = {}): Promise<Page<FriendFeedItem>> {
   const search = new URLSearchParams({
     limit: String(params.limit ?? 50),
     offset: String(params.offset ?? 0),
   });
+  if (params.username) search.set('username', params.username);
   return request<Page<FriendFeedItem>>(`/api/friends/feed?${search.toString()}`);
 }
 
@@ -405,7 +418,7 @@ export function getAdminSources(params: { status?: string; q?: string; limit?: n
   return request<Page<AdminSource>>(`/api/admin/sources?${search.toString()}`);
 }
 
-export function getDirectorySources(params: { status?: string; q?: string; sort?: DirectorySourceSort; direction?: SortDirection; limit?: number; offset?: number } = {}): Promise<Page<DirectorySource>> {
+export function getDirectorySources(params: { status?: string; q?: string; textFilters?: string[]; tags?: string[]; sort?: DirectorySourceSort; direction?: SortDirection; limit?: number; offset?: number } = {}): Promise<Page<DirectorySource>> {
   const search = new URLSearchParams();
   search.set('limit', String(params.limit ?? 50));
   search.set('offset', String(params.offset ?? 0));
@@ -413,10 +426,12 @@ export function getDirectorySources(params: { status?: string; q?: string; sort?
   search.set('direction', params.direction ?? 'desc');
   if (params.status && params.status !== 'all') search.set('status', params.status);
   if (params.q) search.set('q', params.q);
+  params.textFilters?.forEach((value) => search.append('text_filter', value));
+  params.tags?.forEach((value) => search.append('tag', value));
   return request<Page<DirectorySource>>(`/api/directory/sources?${search.toString()}`);
 }
 
-export function getAdminDocuments(params: { limit?: number; offset?: number; sourceId?: number; documentType?: string; crawlJobId?: number; indexRunId?: number } = {}): Promise<Page<Document>> {
+export function getAdminDocuments(params: { limit?: number; offset?: number; sourceId?: number; documentType?: string; crawlJobId?: number; indexRunId?: number; textFilters?: string[]; tags?: string[] } = {}): Promise<Page<Document>> {
   const search = new URLSearchParams();
   search.set('limit', String(params.limit ?? 100));
   search.set('offset', String(params.offset ?? 0));
@@ -424,6 +439,8 @@ export function getAdminDocuments(params: { limit?: number; offset?: number; sou
   if (params.documentType && params.documentType !== 'all') search.set('document_type', params.documentType);
   if (params.crawlJobId) search.set('crawl_job_id', String(params.crawlJobId));
   if (params.indexRunId) search.set('index_run_id', String(params.indexRunId));
+  params.textFilters?.forEach((value) => search.append('text_filter', value));
+  params.tags?.forEach((value) => search.append('tag', value));
   return request<Page<Document>>(`/api/documents?${search.toString()}`);
 }
 

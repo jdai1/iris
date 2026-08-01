@@ -3,6 +3,7 @@ import { ArrowUpRight, MoreVertical, Trash2 } from 'lucide-react';
 import { OverflowText } from './OverflowText';
 import type { Document } from '../types';
 import { cn } from '../lib/utils';
+import { DenseTableViewport, denseTableHeaderClass, denseTableRowClass } from './ui/dense-table';
 
 export type DenseDocumentTableRow = {
   document: Document;
@@ -22,6 +23,8 @@ export function DenseDocumentTable({
   showActions = false,
   showSource = true,
   sourceAsTitle = false,
+  metadataColumn = 'tags',
+  compact = false,
   noteHeader = 'Notes',
   emptyNoteLabel = '—',
   onPrimaryClick,
@@ -38,6 +41,8 @@ export function DenseDocumentTable({
   showActions?: boolean;
   showSource?: boolean;
   sourceAsTitle?: boolean;
+  metadataColumn?: 'tags' | 'source';
+  compact?: boolean;
   noteHeader?: string;
   emptyNoteLabel?: string;
   onPrimaryClick: (row: DenseDocumentTableRow, event: MouseEvent<HTMLDivElement> | KeyboardEvent<HTMLDivElement>) => void;
@@ -67,8 +72,9 @@ export function DenseDocumentTable({
   }, [allSelected, someSelected]);
 
   return (
-    <div className="w-full min-w-[760px]" role="table" aria-label={ariaLabel}>
-      <div className={cn('grid items-center gap-3 border-b bg-muted/40 px-4 py-2 text-xs font-semibold uppercase text-muted-foreground', columnClassName)} role="row">
+    <DenseTableViewport>
+      <div className="w-full min-w-[760px]" role="table" aria-label={ariaLabel}>
+      <div className={cn(denseTableHeaderClass, columnClassName)} role="row">
         {selectionEnabled && (
           <span className="grid place-items-center">
             <input
@@ -82,7 +88,7 @@ export function DenseDocumentTable({
           </span>
         )}
         <span>Title</span>
-        <span>Tags</span>
+        <span>{metadataColumn === 'source' ? 'Source' : 'Tags'}</span>
         {showNote && <span>{noteHeader}</span>}
         <span>Date</span>
         {showFavorite && <span />}
@@ -95,7 +101,9 @@ export function DenseDocumentTable({
           <div
             key={document.uuid}
             className={cn(
-              'grid cursor-pointer items-center gap-3 border-b px-4 py-3 text-sm last:border-0 hover:bg-muted/50',
+              denseTableRowClass,
+              'cursor-pointer hover:bg-muted/50',
+              compact && 'py-2',
               columnClassName,
               row.selected && 'bg-accent/60',
             )}
@@ -139,8 +147,8 @@ export function DenseDocumentTable({
               </strong>
               {showSource && <OverflowText className="block truncate text-xs text-muted-foreground">{document.source_domain}</OverflowText>}
             </span>
-            <span className="min-w-0 text-muted-foreground" data-label="Tags">
-              <OverflowText>{row.tags.join(', ') || '-'}</OverflowText>
+            <span className="min-w-0 text-muted-foreground" data-label={metadataColumn === 'source' ? 'Source' : 'Tags'}>
+              <OverflowText>{metadataColumn === 'source' ? document.source_domain : row.tags.join(', ') || '-'}</OverflowText>
             </span>
             {showNote && (
               <span className={`min-w-0 ${row.note ? 'text-foreground' : 'text-muted-foreground'}`} data-label={noteHeader}>
@@ -178,7 +186,7 @@ export function DenseDocumentTable({
                   <MoreVertical size={14} />
                 </button>
                 {openActionDocumentUuid === document.uuid && (
-                  <div className={`absolute right-0 z-30 min-w-32 rounded-lg border bg-popover p-1 shadow-lg ${menuOpensUp ? 'bottom-9' : 'top-9'}`}>
+                  <div className={`absolute right-0 z-30 min-w-32 animate-in rounded-lg border bg-popover p-1 shadow-lg fade-in-0 zoom-in-95 duration-100 motion-reduce:animate-none ${menuOpensUp ? 'bottom-9 slide-in-from-bottom-1' : 'top-9 slide-in-from-top-1'}`}>
                     <button
                       className="flex h-8 w-full items-center gap-2 rounded-md px-2 text-sm text-destructive hover:bg-destructive/10"
                       type="button"
@@ -198,6 +206,7 @@ export function DenseDocumentTable({
           </div>
         );
       })}
-    </div>
+      </div>
+    </DenseTableViewport>
   );
 }

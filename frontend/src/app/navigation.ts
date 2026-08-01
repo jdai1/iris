@@ -1,12 +1,13 @@
-export type View = 'search' | 'bookshelf' | 'people' | 'profile' | 'directory' | 'admin';
+export type View = 'search' | 'bookshelf' | 'people' | 'explore' | 'profile' | 'directory' | 'admin';
 export type ProfileTarget = { sourceId: number; domain: string } | null;
 
 export const VIEW_STORAGE_KEY = 'iris.activeView';
-export const views: View[] = ['search', 'bookshelf', 'people', 'profile', 'directory', 'admin'];
+export const views: View[] = ['search', 'bookshelf', 'people', 'explore', 'profile', 'directory', 'admin'];
 export const viewPaths: Record<View, string> = {
   search: '/search',
   bookshelf: '/bookshelf',
   people: '/people',
+  explore: '/explore',
   profile: '/profile',
   directory: '/directory',
   admin: '/admin',
@@ -27,6 +28,20 @@ export function collectionIdFromSearch(search: string): number | null {
   if (!value) return null;
   const collectionId = Number(value);
   return Number.isSafeInteger(collectionId) && collectionId > 0 ? collectionId : null;
+}
+
+export function peopleUsernameFromPath(pathname: string): string | null {
+  const match = pathname.replace(/\/+$/, '').match(/^\/people\/([^/]+)$/);
+  if (!match) return null;
+  try {
+    return decodeURIComponent(match[1]);
+  } catch {
+    return null;
+  }
+}
+
+export function peopleProfilePath(username: string) {
+  return `/people/${encodeURIComponent(username)}`;
 }
 
 export function navigateTo(path: string, { replace = false, state = null }: { replace?: boolean; state?: unknown } = {}) {
@@ -62,7 +77,6 @@ export function initialView(): View {
 export function viewFromPath(pathname: string): View | null {
   const normalized = pathname.replace(/\/+$/, '') || '/';
   if (normalized === '/') return null;
-  if (normalized === '/explore' || normalized.startsWith('/explore/')) return 'directory';
   if (normalized === '/graph' || normalized.startsWith('/graph/')) return 'directory';
   const match = views.find((view) => normalized === viewPaths[view] || normalized.startsWith(`${viewPaths[view]}/`));
   return match ?? null;
@@ -72,9 +86,7 @@ export function profileTargetFromPath(pathname: string, search = ''): ProfileTar
   const normalized = pathname.replace(/\/+$/, '');
   const supportsDomainQuery = normalized === '/directory'
     || normalized === '/graph'
-    || normalized.startsWith('/graph/')
-    || normalized === '/explore'
-    || normalized.startsWith('/explore/');
+    || normalized.startsWith('/graph/');
   const domain = normalized.startsWith('/directory/')
     ? decodeURIComponent(normalized.slice('/directory/'.length).split('/documents/')[0]).trim()
     : supportsDomainQuery

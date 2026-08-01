@@ -16,6 +16,7 @@ export interface User {
   display_name: string | null;
   photo_url: string | null;
   username?: string | null;
+  onboarding_completed_at: string | null;
   is_admin: boolean;
 }
 
@@ -52,6 +53,7 @@ export interface UserProfile extends Person {
 export interface Friendship {
   id: number;
   status: 'requested' | 'connected';
+  requested_by_me: boolean;
   created_at: string;
   updated_at: string;
   person: Person;
@@ -236,10 +238,15 @@ export interface BookshelfEntry {
 }
 
 export interface FriendFeedItem {
+  activity_id: string;
   person: Person;
   document: Document;
-  status: BookshelfStatus;
+  activity_type: 'favorited' | 'read_later' | 'noted' | 'highlighted';
+  status: BookshelfStatus | null;
   favorited: boolean;
+  highlight_quote: string | null;
+  highlight_count: number;
+  highlight_quotes: string[];
   activity_at: string;
 }
 
@@ -400,6 +407,7 @@ export interface DirectorySource {
   last_checked_at: string | null;
   document_count: number;
   essay_count: number;
+  collection_count: number;
   inbound_count: number;
   outbound_count: number;
   essay_reference_count: number;

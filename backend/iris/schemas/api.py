@@ -45,7 +45,13 @@ class UserSchema(BaseModel):
     display_name: str | None = None
     photo_url: str | None = None
     username: str | None = None
+    onboarding_completed_at: datetime | None = None
     is_admin: bool = False
+
+
+class OnboardingCompleteSchema(BaseModel):
+    username: str
+    website_url: str | None = None
 
 
 class UserWebsiteSchema(BaseModel):
@@ -94,6 +100,7 @@ class FriendRequestCreateSchema(BaseModel):
 class FriendshipSchema(BaseModel):
     id: int
     status: FriendshipStatus
+    requested_by_me: bool
     created_at: datetime
     updated_at: datetime
     person: PersonSchema
@@ -134,6 +141,7 @@ class DirectorySourceSchema(BaseModel):
     last_checked_at: datetime | None
     document_count: int
     essay_count: int
+    collection_count: int
     inbound_count: int
     outbound_count: int
     essay_reference_count: int
@@ -161,10 +169,15 @@ class DocumentSchema(BaseModel):
 
 
 class FriendFeedItemSchema(BaseModel):
+    activity_id: str
     person: PersonSchema
     document: DocumentSchema
-    status: BookshelfStatus
-    favorited: bool
+    activity_type: str
+    status: BookshelfStatus | None = None
+    favorited: bool = False
+    highlight_quote: str | None = None
+    highlight_count: int = 0
+    highlight_quotes: list[str] = Field(default_factory=list)
     activity_at: datetime
 
 

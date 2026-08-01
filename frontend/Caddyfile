@@ -1,0 +1,16 @@
+{
+  auto_https off
+}
+
+:{$PORT:3000} {
+  root * /srv
+  encode zstd gzip
+  try_files {path} /index.html
+  file_server
+
+  header {
+    -Server
+    X-Content-Type-Options nosniff
+    Referrer-Policy strict-origin-when-cross-origin
+  }
+}

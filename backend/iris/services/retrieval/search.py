@@ -30,8 +30,10 @@ AGENT_INSTRUCTIONS = (
     "You are the search intelligence for Iris, a personal corpus search engine for indexed blogs and essays. "
     "You have retrieval tools plus metadata tools: keyword_search, semantic_search, tag_search, category_search, "
     "get_document_metadata, and get_source_metadata. "
-    "Do not call retrieval tools for greetings, small talk, vague fragments, or messages where the user's search intent is unclear. "
+    "Do not call retrieval tools for greetings, small talk, vague fragments, or messages where there is no workable search intent. "
     "In those cases, answer conversationally and ask one concise clarifying question. "
+    "Open-ended inspiration and discovery requests are workable search intents even when the user has not chosen a precise direction yet. "
+    "For those requests, retrieve a deliberately diverse set of strong seed results rather than blocking on clarification. "
     "Use the supplied conversation context to resolve follow-ups, references like 'that post', and requests about links you already recommended. "
     "When the current message is a follow-up or instruction to proceed, infer the intended search from the conversation transcript. "
     "Before calling a retrieval tool, rewrite the user's request into a standalone search query in your head. "
@@ -42,9 +44,16 @@ AGENT_INSTRUCTIONS = (
     "When a candidate document is only broadly related, inspect its metadata before citing it; title, summary, topics, or excerpt must directly support the requested subtype and angle. "
     "If inspection shows only adjacent or broadly related documents, say the corpus does not appear to contain a good match and return no document_ids. "
     "Use the resolved standalone intent as the tool query, not necessarily the literal latest message. "
-    "When recall matters or initial hits are thin or noisy, try 2-4 distinct standalone query formulations before answering. "
-    "Keep alternate queries narrow and anchored to the user's intent rather than using generic category searches as filler. "
-    "Ask a clarifying question only when the full conversation still does not contain a workable search intent. "
+    "Treat a clear nontrivial corpus request as research, not a one-shot lookup. For a normal exploratory request, run at least three distinct core retrieval queries across keyword_search and semantic_search, including at least one of each. "
+    "Category and tag searches are supplementary filters and do not count as distinct core query formulations. "
+    "After the first retrieval wave, study the candidate titles, summaries, topics, people, and terminology, then run at least one follow-up query derived from what the evidence revealed. "
+    "Keep follow-up queries narrow and anchored to the user's intent rather than using generic category searches as filler. Do not repeat equivalent query wording. "
+    "Before returning several result cards, inspect metadata for at least two of the strongest plausible candidates so relevance is based on document evidence rather than retrieval scores alone. "
+    "You may stop earlier for an exact URL/title lookup, a direct request about one known document or source, or a narrow factual follow-up whose target is already unambiguous. "
+    "For open-ended discovery, use the retrieved evidence to identify a few meaningful directions, return relevant document_ids across those directions, and end the brief answer with one concise guiding question. "
+    "When useful, put two to four concrete alternatives directly in that question, such as useful versus playful, software versus physical, or weekend-sized versus ambitious. Do not withhold useful seed results merely because the user's taste is still forming. "
+    "If initial evidence instead reveals two or more materially incompatible interpretations where mixing results would be misleading, ask one concise blocking contrastive question and return no document_ids. "
+    "Ground that blocking question in the distinction the results exposed. This rule is for incompatible meanings, not broad inspiration requests, and does not apply when one interpretation clearly dominates. "
     "If the user asks about a previously recommended document, use its internal ref from context and call get_document_metadata before answering. "
     "Use get_source_metadata when the user asks about a blog/source rather than one post. "
     "When the user gives a clear corpus search request, call at least one retrieval tool before answering. "
@@ -68,6 +77,80 @@ AGENT_INSTRUCTIONS = (
 
 def _terms(text: str) -> set[str]:
     return {word.lower() for word in re.findall(r"[a-zA-Z][a-zA-Z0-9\-]{2,}", text)}
+
+
+CORE_RETRIEVAL_TOOLS = {AgentToolName.KEYWORD, AgentToolName.SEMANTIC}
+RETRIEVAL_TOOLS = CORE_RETRIEVAL_TOOLS | {AgentToolName.TAGS, AgentToolName.CATEGORIES}
+
+
+def _needs_research_refinement(tool_runs: list[AgentToolRun], chosen_ids: list[int], answer: str) -> bool:
+    retrieval_runs = [run for run in tool_runs if run.tool in RETRIEVAL_TOOLS]
+    if not retrieval_runs:
+        return False
+    if not chosen_ids and answer.strip().endswith("?"):
+        return False
+
+    core_runs = [run for run in retrieval_runs if run.tool in CORE_RETRIEVAL_TOOLS]
+    unique_core_queries = {" ".join(run.query.lower().split()) for run in core_runs}
+    core_tools = {run.tool for run in core_runs}
+    inspected_ids = {
+        row.document.id
+        for run in tool_runs
+        if run.tool == AgentToolName.DOCUMENT_METADATA
+        for row in run.rows
+    }
+    candidate_ids = {row.document.id for run in retrieval_runs for row in run.rows}
+
+    required_inspections = min(2, len(candidate_ids))
+    return (
+        len(unique_core_queries) < 3
+        or core_tools != CORE_RETRIEVAL_TOOLS
+        or len(inspected_ids) < required_inspections
+    )
+
+
+def _research_refinement_input(
+    original_input: str,
+    tool_runs: list[AgentToolRun],
+    answer: str,
+    chosen_ids: list[int],
+) -> str:
+    evidence = [
+        {
+            "tool": run.tool.value,
+            "query": run.query,
+            "hits": [
+                {
+                    "document_id": row.document.id,
+                    "title": row.document.title,
+                    "source": row.document.source.canonical_domain,
+                    "summary": row.document.summary,
+                    "topics": row.document.topics or [],
+                }
+                for row in run.rows[:4]
+            ],
+        }
+        for run in tool_runs
+    ]
+    first_pass = {"answer": answer, "document_ids": chosen_ids, "evidence": evidence}
+    return (
+        f"{original_input}\n\n"
+        "The first research pass below stopped before it established enough search depth or inspected enough evidence. "
+        "Continue the research instead of merely restating its answer. Do not repeat equivalent queries. "
+        "Run new keyword or semantic formulations based on terminology, distinctions, names, or gaps visible in the evidence. "
+        "Inspect metadata for the strongest plausible candidates before choosing result cards. "
+        "If this is open-ended discovery, return diverse useful seed results and end with one concise guiding question offering concrete directions. "
+        "Only when the evidence exposes materially incompatible meanings whose results would be misleading together should you ask a blocking clarification and return no document_ids. "
+        "Otherwise return the best well-supported results.\n\n"
+        "First-pass research:\n"
+        f"{json.dumps(first_pass, ensure_ascii=False)}"
+    )
+
+
+def _agent_output_values(output: object) -> tuple[str, list[int]]:
+    if isinstance(output, AgentSearchOutput):
+        return output.answer, output.document_ids
+    return str(output or ""), []
 
 
 def _keyword_score(query_terms: set[str], document: Document) -> float:
@@ -280,35 +363,39 @@ async def stream_openai_agentic_chat(
         agent_input=agent_input,
         instructions=AGENT_INSTRUCTIONS,
         model=AGENT_SEARCH_MODEL,
-        max_turns=AGENT_SEARCH_MAX_TURNS,
+        max_turns=AGENT_SEARCH_MAX_TURNS * 2,
         session_id=session_id,
         user_id=user_id,
         trace_metadata=trace_metadata,
     ) as langfuse_observation:
-        run = Runner.run_streamed(agent, agent_input, max_turns=AGENT_SEARCH_MAX_TURNS)
         emitted_tool_runs = 0
-        async for sdk_event in run.stream_events():
-            event_name = getattr(sdk_event, "name", "")
-            if event_name in {"tool_output", "tool_search_output_created"} and len(tool_runs) > emitted_tool_runs:
+        next_input = agent_input
+        answer = ""
+        chosen_ids: list[int] = []
+        for pass_index in range(2):
+            run = Runner.run_streamed(agent, next_input, max_turns=AGENT_SEARCH_MAX_TURNS)
+            async for sdk_event in run.stream_events():
+                event_name = getattr(sdk_event, "name", "")
+                if event_name not in {"tool_output", "tool_search_output_created"} or len(tool_runs) <= emitted_tool_runs:
+                    continue
                 for run_item in tool_runs[emitted_tool_runs:]:
                     step = _tool_step(run_item.tool, run_item.query, run_item.rows)
                     steps.append(step)
                     yield AgentChatStreamEvent(event="tool_result", step=step, rows=run_item.rows)
                 emitted_tool_runs = len(tool_runs)
 
-        if len(tool_runs) > emitted_tool_runs:
-            for run_item in tool_runs[emitted_tool_runs:]:
-                step = _tool_step(run_item.tool, run_item.query, run_item.rows)
-                steps.append(step)
-                yield AgentChatStreamEvent(event="tool_result", step=step, rows=run_item.rows)
+            if len(tool_runs) > emitted_tool_runs:
+                for run_item in tool_runs[emitted_tool_runs:]:
+                    step = _tool_step(run_item.tool, run_item.query, run_item.rows)
+                    steps.append(step)
+                    yield AgentChatStreamEvent(event="tool_result", step=step, rows=run_item.rows)
+                emitted_tool_runs = len(tool_runs)
 
-        output = run.final_output
-        if isinstance(output, AgentSearchOutput):
-            answer = output.answer
-            chosen_ids = output.document_ids
-        else:
-            answer = str(output or "")
-            chosen_ids = []
+            answer, chosen_ids = _agent_output_values(run.final_output)
+            if pass_index == 0 and _needs_research_refinement(tool_runs, chosen_ids, answer):
+                next_input = _research_refinement_input(agent_input, list(tool_runs), answer, chosen_ids)
+                continue
+            break
 
         ranked = _rank_agent_documents(tool_runs, chosen_ids, message, max_result_cards)
         finish_agent_search_observation(
@@ -433,19 +520,21 @@ def _openai_agentic_chat(
         agent_input=agent_input,
         instructions=AGENT_INSTRUCTIONS,
         model=AGENT_SEARCH_MODEL,
-        max_turns=AGENT_SEARCH_MAX_TURNS,
+        max_turns=AGENT_SEARCH_MAX_TURNS * 2,
         session_id=session_id,
         user_id=user_id,
         trace_metadata=trace_metadata,
     ) as langfuse_observation:
-        result = Runner.run_sync(agent, agent_input, max_turns=AGENT_SEARCH_MAX_TURNS)
-        output = result.final_output
-        if isinstance(output, AgentSearchOutput):
-            answer = output.answer
-            chosen_ids = output.document_ids
-        else:
-            answer = str(output)
-            chosen_ids = []
+        next_input = agent_input
+        answer = ""
+        chosen_ids: list[int] = []
+        for pass_index in range(2):
+            result = Runner.run_sync(agent, next_input, max_turns=AGENT_SEARCH_MAX_TURNS)
+            answer, chosen_ids = _agent_output_values(result.final_output)
+            if pass_index == 0 and _needs_research_refinement(tool_runs, chosen_ids, answer):
+                next_input = _research_refinement_input(agent_input, list(tool_runs), answer, chosen_ids)
+                continue
+            break
 
         ranked = _rank_agent_documents(tool_runs, chosen_ids, message, limit)
         finish_agent_search_observation(

@@ -289,6 +289,7 @@ export function EmbeddingExplorer({ sourceId }: { sourceId?: number }) {
     sceneRef.current = scene;
 
     const camera = new THREE.PerspectiveCamera(58, 1, 0.1, 1000);
+    camera.rotation.set(pitchRef.current, yawRef.current, 0, 'YXZ');
     cameraRef.current = camera;
 
     const geometry = new THREE.BufferGeometry();
@@ -299,6 +300,12 @@ export function EmbeddingExplorer({ sourceId }: { sourceId?: number }) {
     renderPositionsRef.current = new Map(
       mapPoints.map((point, index) => [point.document.uuid, renderPositions[index].clone()]),
     );
+    if (selectedRef.current) {
+      const direction = new THREE.Vector3();
+      camera.getWorldDirection(direction);
+      const selectedPosition = renderPositionsRef.current.get(selectedRef.current.document.uuid) ?? scenePosition(selectedRef.current);
+      cameraPositionRef.current.copy(selectedPosition).addScaledVector(direction, -42);
+    }
     mapPoints.forEach((point, index) => {
       positions[index * 3] = renderPositions[index].x;
       positions[index * 3 + 1] = renderPositions[index].y;
@@ -457,10 +464,11 @@ export function EmbeddingExplorer({ sourceId }: { sourceId?: number }) {
       if (key === 'q') {
         event.preventDefault();
         document.exitPointerLock?.();
-        if (documentUuidFromPath(window.location.pathname)) {
+        const openDocumentUuid = documentUuidFromPath(window.location.pathname);
+        if (focusedDocument && focusedDocument.document.uuid !== openDocumentUuid) {
+          navigateTo(explorerDocumentPath(focusedDocument.document.uuid), { replace: openDocumentUuid !== null });
+        } else if (openDocumentUuid) {
           navigateTo(`${documentParentPath(window.location.pathname)}${window.location.search}`, { replace: true });
-        } else if (focusedDocument) {
-          navigateTo(documentPath(focusedDocument.document.uuid));
         }
         return;
       }
@@ -515,6 +523,9 @@ export function EmbeddingExplorer({ sourceId }: { sourceId?: number }) {
 
   function selectPoint(point: EmbeddingMapPoint, options: { teleport?: boolean } = {}) {
     selectedRef.current = point;
+    if (documentUuidFromPath(window.location.pathname)) {
+      navigateTo(explorerDocumentPath(point.document.uuid), { replace: true });
+    }
     if (!options.teleport) return;
     const camera = cameraRef.current;
     const direction = new THREE.Vector3();
@@ -536,7 +547,7 @@ export function EmbeddingExplorer({ sourceId }: { sourceId?: number }) {
   }
 
   return (
-    <section className="relative flex min-h-[calc(100svh-15rem)] flex-col overflow-hidden bg-background">
+    <section className="relative flex min-h-svh flex-col overflow-hidden bg-background">
       <div className="absolute left-4 top-4 z-20 w-[min(26rem,calc(100%-2rem))]">
         <CorpusSearchForm
           className="relative min-h-10 w-full bg-background/90 backdrop-blur"
@@ -650,6 +661,14 @@ export function EmbeddingExplorer({ sourceId }: { sourceId?: number }) {
       )}
     </section>
   );
+}
+
+function explorerDocumentPath(documentUuid: string) {
+  const path = documentPath(documentUuid);
+  if (typeof window === 'undefined' || !window.location.pathname.startsWith('/explore')) return path;
+  const url = new URL(path, window.location.origin);
+  url.searchParams.set('document', documentUuid);
+  return `${url.pathname}${url.search}`;
 }
 
 function normalizeUrlForLookup(value: string) {

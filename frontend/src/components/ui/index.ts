@@ -9,3 +9,4 @@ export * from './SideRail';
 export * from './StateMessage';
 export * from './StatusBadge';
 export * from './Toolbar';
+export * from './toast';

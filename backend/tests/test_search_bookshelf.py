@@ -18,7 +18,9 @@ from iris.services.retrieval.search import (
     AGENT_INSTRUCTIONS,
     _document_search_payload,
     _keyword_score,
+    _needs_research_refinement,
     _rank_agent_documents,
+    _research_refinement_input,
     _serialize_document_metadata,
     _tool_step,
     search_documents,
@@ -205,7 +207,12 @@ def test_agent_result_harness_dedupes_repeated_results_by_content_hash(session):
 
 
 def test_agent_instructions_cover_multi_query_precision_and_no_duplicate_cards():
-    assert "try 2-4 distinct standalone query formulations" in AGENT_INSTRUCTIONS
+    assert "at least three distinct core retrieval queries" in AGENT_INSTRUCTIONS
+    assert "at least one follow-up query derived from what the evidence revealed" in AGENT_INSTRUCTIONS
+    assert "inspect metadata for at least two" in AGENT_INSTRUCTIONS
+    assert "Open-ended inspiration and discovery requests are workable search intents" in AGENT_INSTRUCTIONS
+    assert "end the brief answer with one concise guiding question" in AGENT_INSTRUCTIONS
+    assert "materially incompatible interpretations" in AGENT_INSTRUCTIONS
     assert "Returning no document_ids is better" in AGENT_INSTRUCTIONS
     assert "Do not repeat the same document" in AGENT_INSTRUCTIONS
     assert "Treat explicit modifiers, subtypes, roles, audiences, and requested angles as hard constraints" in AGENT_INSTRUCTIONS
@@ -213,6 +220,64 @@ def test_agent_instructions_cover_multi_query_precision_and_no_duplicate_cards()
     assert "inspect its metadata before citing it" in AGENT_INSTRUCTIONS
     assert "Your final document_ids are the relevance filter" in AGENT_INSTRUCTIONS
     assert "I did not find a strong direct match" in AGENT_INSTRUCTIONS
+
+
+def test_shallow_agent_research_triggers_a_refinement_pass():
+    runs = [
+        AgentToolRun(tool=AgentToolName.KEYWORD, query="startup hiring", rows=[]),
+        AgentToolRun(tool=AgentToolName.SEMANTIC, query="how founders build early teams", rows=[]),
+        AgentToolRun(tool=AgentToolName.CATEGORIES, query="startups", rows=[]),
+    ]
+
+    assert _needs_research_refinement(runs, [123], "I found a few results.")
+
+
+def test_reusing_the_same_query_across_tools_still_triggers_refinement():
+    runs = [
+        AgentToolRun(tool=AgentToolName.KEYWORD, query="startup hiring", rows=[]),
+        AgentToolRun(tool=AgentToolName.SEMANTIC, query="startup hiring", rows=[]),
+        AgentToolRun(tool=AgentToolName.SEMANTIC, query="founder recruiting", rows=[]),
+    ]
+
+    assert _needs_research_refinement(runs, [], "I found a few results.")
+
+
+def test_contrastive_clarifying_question_does_not_force_more_retrieval():
+    runs = [AgentToolRun(tool=AgentToolName.SEMANTIC, query="leaving a startup", rows=[])]
+
+    assert not _needs_research_refinement(
+        runs,
+        [],
+        "Are you deciding whether to leave as a founder, or evaluating an employee job change?",
+    )
+
+
+def test_deep_agent_research_does_not_trigger_a_refinement_pass(session):
+    source = get_or_create_source("https://research-depth.test", status="indexed")
+    first = add_doc(session, source, "Early hiring", "founder startup hiring leadership")
+    second = add_doc(session, source, "Team formation", "small startup team formation incentives")
+    first_row = RankedDocument(document=first, score=0.8, reason="keyword overlap")
+    second_row = RankedDocument(document=second, score=0.78, reason="semantic match")
+    runs = [
+        AgentToolRun(tool=AgentToolName.KEYWORD, query="startup early hiring", rows=[first_row, second_row]),
+        AgentToolRun(tool=AgentToolName.SEMANTIC, query="how founders assemble initial teams", rows=[second_row, first_row]),
+        AgentToolRun(tool=AgentToolName.SEMANTIC, query="founder recruiting trust and incentives", rows=[first_row]),
+        AgentToolRun(tool=AgentToolName.DOCUMENT_METADATA, query=str(first.id), rows=[first_row]),
+        AgentToolRun(tool=AgentToolName.DOCUMENT_METADATA, query=str(second.id), rows=[second_row]),
+    ]
+
+    assert not _needs_research_refinement(runs, [first.id, second.id], "These are strong direct matches.")
+
+
+def test_research_refinement_input_exposes_first_pass_queries():
+    runs = [AgentToolRun(tool=AgentToolName.KEYWORD, query="startup hiring", rows=[])]
+
+    refinement = _research_refinement_input("Find startup hiring advice", runs, "A few results.", [123])
+
+    assert "Continue the research" in refinement
+    assert '"query": "startup hiring"' in refinement
+    assert "return diverse useful seed results" in refinement
+    assert "materially incompatible meanings" in refinement
 
 
 def test_bookshelf_lists_saved_entries_and_excludes_archived(session):
