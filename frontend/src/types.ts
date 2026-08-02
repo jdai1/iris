@@ -350,12 +350,6 @@ export interface SourceProfileAnalysis {
   error: string | null;
 }
 
-export interface AdminOverview {
-  totals: Record<string, number>;
-  source_statuses: Record<string, number>;
-  document_types: Record<string, number>;
-}
-
 export interface Page<T> {
   items: T[];
   total: number;
@@ -412,44 +406,4 @@ export interface DirectorySource {
   outbound_count: number;
   essay_reference_count: number;
   external_source_count: number;
-}
-
-export interface AdminCrawlJob {
-  id: number;
-  source_id: number;
-  source_domain: string;
-  index_run_id: number | null;
-  status: string;
-  outcome: string;
-  pages_fetched: number;
-  pages_failed: number;
-  documents_indexed: number;
-  current_document_count: number;
-  links_seen: number;
-  sources_discovered: number;
-  started_at: string;
-  finished_at: string | null;
-  error: string | null;
-}
-
-export interface AdminIndexRun {
-  id: number;
-  status: string;
-  mode: string;
-  dry_run: boolean;
-  started_at: string;
-  finished_at: string | null;
-  budget_sources: number;
-  max_pages: number;
-  max_depth: number;
-  planned_sources: number;
-  attempted_sources: number;
-  crawled_sources: number;
-  ignored_sources: number;
-  documents_indexed: number;
-  current_document_count: number;
-  links_seen: number;
-  sources_discovered: number;
-  errors: number;
-  stop_reason: string | null;
 }

@@ -579,6 +579,7 @@ def admin_sources(
     limit: int = 200,
     offset: int = 0,
     _bound_session=Depends(get_session),
+    _admin_user: User = Depends(require_admin),
 ) -> PageSchema[AdminSourceSchema]:
     items, total = admin.get_admin_sources_page(status=status, q=q, limit=limit, offset=offset)
     return _page_response(items, total, limit, offset)

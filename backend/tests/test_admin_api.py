@@ -50,6 +50,7 @@ def test_admin_query_and_user_inspection_are_admin_only(session, monkeypatch):
 
     assert client.get("/api/admin/queries", headers=reader_headers).status_code == 403
     assert client.get("/api/admin/users", headers=reader_headers).status_code == 403
+    assert client.get("/api/admin/sources", headers=reader_headers).status_code == 403
 
     queries = client.get("/api/admin/queries", headers=admin_headers)
     assert queries.status_code == 200

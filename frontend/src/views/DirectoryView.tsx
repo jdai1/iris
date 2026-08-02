@@ -1,6 +1,6 @@
 import { ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowLeft, ArrowUpRight, ChevronDown, ChevronUp, FileText, Folder, GitFork, LayoutPanelLeft, LayoutTemplate, PanelLeftClose } from 'lucide-react';
-import { getAdminDocuments, getAdminSources, getBookshelfCollections, getDirectorySources, getGraph, getSourceProfileAnalysis } from '../api';
+import { getBookshelfCollections, getDirectorySources, getDocuments, getGraph, getSourceProfileAnalysis, searchGraphSources } from '../api';
 import { GraphExplorer } from '../GraphExplorer';
 import { emptyPage } from '../app/paging';
 import { documentPath, navigateTo, type ProfileTarget } from '../app/navigation';
@@ -163,18 +163,18 @@ export function DirectoryView({
         setProfileLoading(false);
         return;
       }
-      const sources = await getAdminSources({ status: 'indexed', q: normalizedQuery, limit: 25 });
+      const sources = await searchGraphSources(normalizedQuery, 25);
       if (requestId !== refreshRequestIdRef.current) return;
       const source =
-        (nextSelected?.sourceId ? sources.items.find((item) => item.id === nextSelected.sourceId) : null) ??
-        sources.items.find((item) => item.canonical_domain === normalizedQuery.toLowerCase()) ??
-        (normalizedQuery ? sources.items[0] : null) ??
+        (nextSelected?.sourceId ? sources.find((item) => item.id === nextSelected.sourceId) : null) ??
+        sources.find((item) => item.canonical_domain === normalizedQuery.toLowerCase()) ??
+        (normalizedQuery ? sources[0] : null) ??
         null;
       const nextProfile = source ? { sourceId: source.id, domain: source.canonical_domain } : null;
       setSelectedSource(source);
       const [documents, analysis, collections, graph] = nextProfile
         ? await Promise.all([
-            getAdminDocuments({
+            getDocuments({
               ...nextPage,
               sourceId: nextProfile.sourceId,
               documentType: 'essay',
@@ -210,7 +210,7 @@ export function DirectoryView({
     setDocumentsRefreshing(true);
     setError(null);
     try {
-      const documents = await getAdminDocuments({
+      const documents = await getDocuments({
         ...nextPage,
         sourceId: resolvedSourceId,
         documentType: 'essay',

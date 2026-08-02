@@ -1,7 +1,4 @@
 import type {
-  AdminCrawlJob,
-  AdminIndexRun,
-  AdminOverview,
   AdminSource,
   AgentChatResponse,
   AgentConversation,
@@ -405,19 +402,6 @@ export function searchGraphSources(q: string, limit = 12): Promise<AdminSource[]
   return request<AdminSource[]>(`/api/graph/sources/search?${search.toString()}`);
 }
 
-export function getAdminOverview(): Promise<AdminOverview> {
-  return request<AdminOverview>('/api/admin/overview');
-}
-
-export function getAdminSources(params: { status?: string; q?: string; limit?: number; offset?: number } = {}): Promise<Page<AdminSource>> {
-  const search = new URLSearchParams();
-  search.set('limit', String(params.limit ?? 50));
-  search.set('offset', String(params.offset ?? 0));
-  if (params.status && params.status !== 'all') search.set('status', params.status);
-  if (params.q) search.set('q', params.q);
-  return request<Page<AdminSource>>(`/api/admin/sources?${search.toString()}`);
-}
-
 export function getDirectorySources(params: { status?: string; q?: string; textFilters?: string[]; tags?: string[]; sort?: DirectorySourceSort; direction?: SortDirection; limit?: number; offset?: number } = {}): Promise<Page<DirectorySource>> {
   const search = new URLSearchParams();
   search.set('limit', String(params.limit ?? 50));
@@ -431,7 +415,7 @@ export function getDirectorySources(params: { status?: string; q?: string; textF
   return request<Page<DirectorySource>>(`/api/directory/sources?${search.toString()}`);
 }
 
-export function getAdminDocuments(params: { limit?: number; offset?: number; sourceId?: number; documentType?: string; crawlJobId?: number; indexRunId?: number; textFilters?: string[]; tags?: string[] } = {}): Promise<Page<Document>> {
+export function getDocuments(params: { limit?: number; offset?: number; sourceId?: number; documentType?: string; crawlJobId?: number; indexRunId?: number; textFilters?: string[]; tags?: string[] } = {}): Promise<Page<Document>> {
   const search = new URLSearchParams();
   search.set('limit', String(params.limit ?? 100));
   search.set('offset', String(params.offset ?? 0));
@@ -450,22 +434,4 @@ export function getSourceProfileAnalysis(sourceId: number): Promise<SourceProfil
 
 export function generateSourceProfileAnalysis(sourceId: number, force = false): Promise<SourceProfileAnalysis> {
   return request<SourceProfileAnalysis>(`/api/sources/${sourceId}/profile-analysis?force=${force ? 'true' : 'false'}`, { method: 'POST' });
-}
-
-export function getAdminCrawlJobs(params: { limit?: number; offset?: number; status?: string; sourceId?: number; indexRunId?: number } = {}): Promise<Page<AdminCrawlJob>> {
-  const search = new URLSearchParams();
-  search.set('limit', String(params.limit ?? 50));
-  search.set('offset', String(params.offset ?? 0));
-  if (params.status && params.status !== 'all') search.set('status', params.status);
-  if (params.sourceId) search.set('source_id', String(params.sourceId));
-  if (params.indexRunId) search.set('index_run_id', String(params.indexRunId));
-  return request<Page<AdminCrawlJob>>(`/api/admin/crawl-jobs?${search.toString()}`);
-}
-
-export function getAdminIndexRuns(params: { limit?: number; offset?: number; status?: string } = {}): Promise<Page<AdminIndexRun>> {
-  const search = new URLSearchParams();
-  search.set('limit', String(params.limit ?? 50));
-  search.set('offset', String(params.offset ?? 0));
-  if (params.status && params.status !== 'all') search.set('status', params.status);
-  return request<Page<AdminIndexRun>>(`/api/admin/index-runs?${search.toString()}`);
 }

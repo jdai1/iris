@@ -1,8 +1,8 @@
-export type View = 'search' | 'bookshelf' | 'people' | 'explore' | 'profile' | 'directory' | 'admin';
+export type View = 'search' | 'bookshelf' | 'people' | 'explore' | 'profile' | 'directory';
 export type ProfileTarget = { sourceId: number; domain: string } | null;
 
 export const VIEW_STORAGE_KEY = 'iris.activeView';
-export const views: View[] = ['search', 'bookshelf', 'people', 'explore', 'profile', 'directory', 'admin'];
+export const views: View[] = ['search', 'bookshelf', 'people', 'explore', 'profile', 'directory'];
 export const viewPaths: Record<View, string> = {
   search: '/search',
   bookshelf: '/bookshelf',
@@ -10,7 +10,6 @@ export const viewPaths: Record<View, string> = {
   explore: '/explore',
   profile: '/profile',
   directory: '/directory',
-  admin: '/admin',
 };
 
 export function documentUuidFromPath(pathname: string): string | null {

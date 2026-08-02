@@ -1,7 +1,6 @@
 import { ReactNode, useEffect, useRef, useState } from 'react';
-import { BookOpen, LayoutDashboard, LibraryBig, LogOut, Moon, Orbit, PanelLeftClose, Search, Settings, Sun, UserCircle, Users } from 'lucide-react';
+import { BookOpen, LibraryBig, LogOut, Moon, Orbit, PanelLeftClose, Search, Settings, Sun, UserCircle, Users } from 'lucide-react';
 import { AuthGate } from './auth';
-import { AdminView } from './views/AdminView';
 import { BookshelfView } from './views/BookshelfView';
 import { DirectoryHub } from './views/DirectoryHub';
 import { ExploreView } from './views/ExploreView';
@@ -105,12 +104,6 @@ function IrisApp({ currentUser, onSignOut }: { currentUser: IrisUser | null; onS
   }, []);
 
   useEffect(() => {
-    if (view === 'admin' && !currentUser?.is_admin) {
-      setView('search');
-    }
-  }, [currentUser?.is_admin, view]);
-
-  useEffect(() => {
     setProfileUsername(currentUser?.username ?? null);
   }, [currentUser?.username]);
 
@@ -186,15 +179,13 @@ function IrisApp({ currentUser, onSignOut }: { currentUser: IrisUser | null; onS
     navigateTo(documentPath(documentUuid), { state: { documentReason: reason } });
   }
 
-  const navItems: Array<{ view: View; label: string; icon: ReactNode; adminOnly?: boolean }> = [
+  const navItems: Array<{ view: View; label: string; icon: ReactNode }> = [
     { view: 'search', label: 'Search', icon: <Search size={15} /> },
     { view: 'bookshelf', label: 'Bookshelf', icon: <BookOpen size={15} /> },
     { view: 'people', label: 'People', icon: <Users size={15} /> },
     { view: 'explore', label: 'Explore', icon: <Orbit size={15} /> },
     { view: 'directory', label: 'Directory', icon: <LibraryBig size={15} /> },
-    { view: 'admin', label: 'Admin', icon: <LayoutDashboard size={15} />, adminOnly: true },
   ];
-  const visibleNavItems = navItems.filter((item) => !item.adminOnly || currentUser?.is_admin);
   const documentArtifactOpen = documentUuid !== null && wideWorkspace;
   const focusedDirectory = view === 'directory' && profileTarget !== null;
   const navigationCollapsed = documentArtifactOpen ? !navigationDrawerOpen : sidebarCollapsed;
@@ -256,7 +247,7 @@ function IrisApp({ currentUser, onSignOut }: { currentUser: IrisUser | null; onS
           )}
         </div>
         <nav className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto px-2 pb-2 md:block md:space-y-1 md:overflow-visible">
-          {visibleNavItems.map((item) => (
+          {navItems.map((item) => (
             <Button
               key={item.view}
               type="button"
@@ -341,7 +332,6 @@ function IrisApp({ currentUser, onSignOut }: { currentUser: IrisUser | null; onS
             onDirectoryRoot={openDirectoryRoot}
           />
         )}
-        {view === 'admin' && currentUser?.is_admin && <AdminView />}
       </Workspace>
       {documentArtifactOpen && documentUuid !== null && (
         <DocumentRouteArtifact key={documentUuid} documentUuid={documentUuid} reason={documentReason} friendHighlights={friendHighlights} onClose={closeDocumentDrawer} />
