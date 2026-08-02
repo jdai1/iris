@@ -1,5 +1,11 @@
-import { Box, type BoxProps } from '@chakra-ui/react';
+import type { ComponentProps } from 'react';
+import { cn } from '@/lib/utils';
 
-export function AppShell(props: BoxProps) {
-  return <Box as="main" className="app-shell" bg="bg.canvas" {...props} />;
+export function AppShell({ className, ...props }: ComponentProps<'main'>) {
+  return (
+    <main
+      className={cn('grid min-h-svh grid-cols-1 bg-background transition-[grid-template-columns] duration-200 ease-out motion-reduce:transition-none md:grid-cols-[13rem_minmax(0,1fr)]', className)}
+      {...props}
+    />
+  );
 }

@@ -1,22 +1,23 @@
-import { Badge, HStack, type BadgeProps, type StackProps } from '@chakra-ui/react';
+import type { ComponentProps } from 'react';
+import { cn } from '@/lib/utils';
 
-export function Chip(props: BadgeProps) {
+export function Chip({ className, ...props }: ComponentProps<'span'>) {
   return (
-    <Badge
-      variant="outline"
-      borderColor="border.strong"
-      color="fg.default"
-      bg="bg.subtle"
-      borderRadius="0"
-      fontWeight="500"
-      px="2"
-      py="0.5"
+    <span
+      className={cn(
+        'inline-flex items-center whitespace-nowrap rounded-full border border-border bg-secondary px-2 py-0.5 text-xs font-medium text-secondary-foreground',
+        className,
+      )}
       {...props}
     />
   );
 }
 
-export function ChipList(props: StackProps) {
-  const className = props.className ? `chip-list-scroll ${props.className}` : 'chip-list-scroll';
-  return <HStack gap="1.5" flexWrap="nowrap" overflowX="auto" maxW="100%" {...props} className={className} />;
+export function ChipList({ className, ...props }: ComponentProps<'div'>) {
+  return (
+    <div
+      className={cn('chip-list-scroll flex max-w-full flex-nowrap items-center gap-1.5 overflow-x-auto', className)}
+      {...props}
+    />
+  );
 }

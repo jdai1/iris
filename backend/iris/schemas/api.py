@@ -45,7 +45,13 @@ class UserSchema(BaseModel):
     display_name: str | None = None
     photo_url: str | None = None
     username: str | None = None
+    onboarding_completed_at: datetime | None = None
     is_admin: bool = False
+
+
+class OnboardingCompleteSchema(BaseModel):
+    username: str
+    website_url: str | None = None
 
 
 class UserWebsiteSchema(BaseModel):
@@ -94,6 +100,7 @@ class FriendRequestCreateSchema(BaseModel):
 class FriendshipSchema(BaseModel):
     id: int
     status: FriendshipStatus
+    requested_by_me: bool
     created_at: datetime
     updated_at: datetime
     person: PersonSchema
@@ -134,6 +141,7 @@ class DirectorySourceSchema(BaseModel):
     last_checked_at: datetime | None
     document_count: int
     essay_count: int
+    collection_count: int
     inbound_count: int
     outbound_count: int
     essay_reference_count: int
@@ -161,10 +169,15 @@ class DocumentSchema(BaseModel):
 
 
 class FriendFeedItemSchema(BaseModel):
+    activity_id: str
     person: PersonSchema
     document: DocumentSchema
-    status: BookshelfStatus
-    favorited: bool
+    activity_type: str
+    status: BookshelfStatus | None = None
+    favorited: bool = False
+    highlight_quote: str | None = None
+    highlight_count: int = 0
+    highlight_quotes: list[str] = Field(default_factory=list)
     activity_at: datetime
 
 
@@ -209,6 +222,15 @@ class AgentStepSchema(BaseModel):
     tool: str | None = None
     query: str | None = None
     hits: int | None = None
+    documents: list["AgentInspectedDocumentSchema"] = Field(default_factory=list)
+
+
+class AgentInspectedDocumentSchema(BaseModel):
+    uuid: str
+    title: str
+    source_domain: str
+    url: str
+    reason: str
 
 
 class SearchSchema(BaseModel):
@@ -396,6 +418,62 @@ class AdminOverviewSchema(BaseModel):
     totals: dict[str, int]
     source_statuses: dict[str, int]
     document_types: dict[str, int]
+
+
+class AdminQuerySchema(BaseModel):
+    id: int
+    conversation_uuid: str
+    conversation_title: str | None
+    user_id: int
+    email: str
+    username: str | None
+    content: str
+    created_at: datetime
+    answer_preview: str | None
+    step_count: int
+    result_count: int
+
+
+class AdminUserSchema(BaseModel):
+    id: int
+    email: str
+    username: str | None
+    created_at: datetime
+    onboarding_completed_at: datetime | None
+    conversation_count: int
+    query_count: int
+    saved_document_count: int
+
+
+class AdminQueryResultSchema(BaseModel):
+    rank: int
+    score: float
+    reason: str
+    document_uuid: str
+    title: str | None
+    url: str
+    source_domain: str
+
+
+class AdminConversationMessageSchema(BaseModel):
+    id: int
+    role: AgentMessageRole
+    content: str
+    created_at: datetime
+    steps: list[dict] = Field(default_factory=list)
+    results: list[AdminQueryResultSchema] = Field(default_factory=list)
+
+
+class AdminConversationSchema(BaseModel):
+    id: int
+    uuid: str
+    title: str | None
+    created_at: datetime
+    updated_at: datetime
+    user_id: int
+    email: str
+    username: str | None
+    messages: list[AdminConversationMessageSchema] = Field(default_factory=list)
 
 
 class AdminLatestJobSchema(BaseModel):

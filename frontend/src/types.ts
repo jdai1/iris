@@ -16,6 +16,7 @@ export interface User {
   display_name: string | null;
   photo_url: string | null;
   username?: string | null;
+  onboarding_completed_at: string | null;
   is_admin: boolean;
 }
 
@@ -52,6 +53,7 @@ export interface UserProfile extends Person {
 export interface Friendship {
   id: number;
   status: 'requested' | 'connected';
+  requested_by_me: boolean;
   created_at: string;
   updated_at: string;
   person: Person;
@@ -122,6 +124,15 @@ export interface AgentStep {
   tool: string | null;
   query: string | null;
   hits: number | null;
+  documents: AgentInspectedDocument[];
+}
+
+export interface AgentInspectedDocument {
+  uuid: string;
+  title: string;
+  source_domain: string;
+  url: string;
+  reason: string;
 }
 
 export interface AgentChatResponse {
@@ -156,8 +167,10 @@ export type AgentStreamEvent =
       data: {
         step: AgentStep;
         hits: Array<{
+          uuid: string;
           title: string;
           source_domain: string;
+          url: string;
           reason: string;
         }>;
       };
@@ -225,10 +238,15 @@ export interface BookshelfEntry {
 }
 
 export interface FriendFeedItem {
+  activity_id: string;
   person: Person;
   document: Document;
-  status: BookshelfStatus;
+  activity_type: 'favorited' | 'read_later' | 'noted' | 'highlighted';
+  status: BookshelfStatus | null;
   favorited: boolean;
+  highlight_quote: string | null;
+  highlight_count: number;
+  highlight_quotes: string[];
   activity_at: string;
 }
 
@@ -332,12 +350,6 @@ export interface SourceProfileAnalysis {
   error: string | null;
 }
 
-export interface AdminOverview {
-  totals: Record<string, number>;
-  source_statuses: Record<string, number>;
-  document_types: Record<string, number>;
-}
-
 export interface Page<T> {
   items: T[];
   total: number;
@@ -389,48 +401,9 @@ export interface DirectorySource {
   last_checked_at: string | null;
   document_count: number;
   essay_count: number;
+  collection_count: number;
   inbound_count: number;
   outbound_count: number;
   essay_reference_count: number;
   external_source_count: number;
-}
-
-export interface AdminCrawlJob {
-  id: number;
-  source_id: number;
-  source_domain: string;
-  index_run_id: number | null;
-  status: string;
-  outcome: string;
-  pages_fetched: number;
-  pages_failed: number;
-  documents_indexed: number;
-  current_document_count: number;
-  links_seen: number;
-  sources_discovered: number;
-  started_at: string;
-  finished_at: string | null;
-  error: string | null;
-}
-
-export interface AdminIndexRun {
-  id: number;
-  status: string;
-  mode: string;
-  dry_run: boolean;
-  started_at: string;
-  finished_at: string | null;
-  budget_sources: number;
-  max_pages: number;
-  max_depth: number;
-  planned_sources: number;
-  attempted_sources: number;
-  crawled_sources: number;
-  ignored_sources: number;
-  documents_indexed: number;
-  current_document_count: number;
-  links_seen: number;
-  sources_discovered: number;
-  errors: number;
-  stop_reason: string | null;
 }

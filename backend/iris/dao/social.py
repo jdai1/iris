@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
+from datetime import datetime
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import joinedload
 
 from iris.dao import db
@@ -12,6 +14,7 @@ from iris.dao.sources import get_or_create_source
 from iris.models import (
     BookshelfStatus,
     Document,
+    DocumentHighlight,
     Friendship,
     FriendshipStatus,
     User,
@@ -23,6 +26,18 @@ from iris.services.common.url_utils import is_valid_http_url, normalize_url
 
 
 USERNAME_RE = re.compile(r"[^a-z0-9]+")
+
+
+@dataclass(frozen=True)
+class FriendFeedEvent:
+    mapping: UserDocumentMapping
+    person: User
+    activity_type: str
+    activity_at: datetime
+    sort_id: int
+    activity_id: str
+    highlight_quote: str | None = None
+    highlight_quotes: tuple[str, ...] = ()
 
 
 def normalize_username(value: str) -> str:
@@ -266,8 +281,8 @@ def search_people(user: User, *, query: str, limit: int = 20) -> list[User]:
     )
 
 
-def get_visible_profile(viewer: User, username: str) -> UserProfile | None:
-    profile = db.current_session().scalar(
+def get_profile(username: str) -> UserProfile | None:
+    return db.current_session().scalar(
         select(UserProfile)
         .options(
             joinedload(UserProfile.user),
@@ -275,6 +290,10 @@ def get_visible_profile(viewer: User, username: str) -> UserProfile | None:
         )
         .where(UserProfile.username == username.lower())
     )
+
+
+def get_visible_profile(viewer: User, username: str) -> UserProfile | None:
+    profile = get_profile(username)
     if profile is None:
         return None
     if profile.user_id == viewer.id or are_connected(viewer.id, profile.user_id):
@@ -287,44 +306,87 @@ def friend_feed(
     *,
     limit: int = 50,
     offset: int = 0,
-) -> tuple[list[tuple[UserDocumentMapping, User]], int]:
-    """Return accepted friends' saved/read activity without private annotations."""
+    friend_user_id: int | None = None,
+) -> tuple[list[FriendFeedEvent], int]:
+    """Return connected users' shareable reading activity."""
     session = db.current_session()
     friend_ids = _connected_user_ids(user)
+    if friend_user_id is not None:
+        if friend_user_id != user.id and friend_user_id not in friend_ids:
+            return [], 0
+        friend_ids = [friend_user_id]
     if not friend_ids:
         return [], 0
-    filters = (
-        UserDocumentMapping.user_id.in_(friend_ids),
-        UserDocumentMapping.bookshelf_status.in_(
-            [BookshelfStatus.SAVED.value, BookshelfStatus.READ.value]
-        ),
-        UserDocumentMapping.dismissed_at.is_(None),
-    )
-    total = int(
-        session.scalar(
-            select(func.count(UserDocumentMapping.id)).where(*filters)
-        )
-        or 0
-    )
-    rows = session.execute(
+    mappings = session.execute(
         select(UserDocumentMapping, User)
         .join(User, User.id == UserDocumentMapping.user_id)
         .options(
             joinedload(UserDocumentMapping.document).joinedload(Document.source)
         )
-        .where(*filters)
-        .order_by(
-            func.coalesce(
-                UserDocumentMapping.read_at,
-                UserDocumentMapping.first_seen_at,
-                UserDocumentMapping.updated_at,
-            ).desc(),
-            UserDocumentMapping.id.desc(),
+        .where(
+            UserDocumentMapping.user_id.in_(friend_ids),
+            UserDocumentMapping.dismissed_at.is_(None),
+            or_(
+                UserDocumentMapping.bookshelf_status.in_(
+                    [BookshelfStatus.SAVED.value, BookshelfStatus.READ.value]
+                ),
+                UserDocumentMapping.favorited_at.is_not(None),
+                UserDocumentMapping.note.is_not(None),
+            ),
         )
-        .limit(max(1, min(limit, 100)))
-        .offset(max(offset, 0))
     ).all()
-    return [(mapping, friend) for mapping, friend in rows], total
+    events: list[FriendFeedEvent] = []
+    for mapping, person in mappings:
+        if mapping.first_seen_at and mapping.bookshelf_status in {
+            BookshelfStatus.SAVED,
+            BookshelfStatus.READ,
+        }:
+            events.append(FriendFeedEvent(mapping, person, "read_later", mapping.first_seen_at, mapping.id, f"mapping:{mapping.id}:read_later"))
+        if mapping.favorited_at:
+            events.append(FriendFeedEvent(mapping, person, "favorited", mapping.favorited_at, mapping.id, f"mapping:{mapping.id}:favorited"))
+        if mapping.note and mapping.updated_at:
+            events.append(FriendFeedEvent(mapping, person, "noted", mapping.updated_at, mapping.id, f"mapping:{mapping.id}:noted"))
+
+    highlights = session.execute(
+        select(DocumentHighlight)
+        .join(DocumentHighlight.user_document_mapping)
+        .options(
+            joinedload(DocumentHighlight.user_document_mapping)
+            .joinedload(UserDocumentMapping.document)
+            .joinedload(Document.source),
+            joinedload(DocumentHighlight.user_document_mapping)
+            .joinedload(UserDocumentMapping.user),
+        )
+        .where(
+            UserDocumentMapping.user_id.in_(friend_ids),
+            UserDocumentMapping.dismissed_at.is_(None),
+            DocumentHighlight.deleted_at.is_(None),
+        )
+    ).scalars()
+    highlights_by_mapping: dict[int, list[DocumentHighlight]] = {}
+    for highlight in highlights:
+        highlights_by_mapping.setdefault(highlight.user_document_mapping_id, []).append(highlight)
+    for mapping_highlights in highlights_by_mapping.values():
+        mapping_highlights.sort(key=lambda item: (item.created_at, item.id), reverse=True)
+        newest = mapping_highlights[0]
+        mapping = newest.user_document_mapping
+        events.append(
+            FriendFeedEvent(
+                mapping=mapping,
+                person=mapping.user,
+                activity_type="highlighted",
+                activity_at=newest.created_at,
+                sort_id=newest.id,
+                activity_id=f"mapping:{mapping.id}:highlighted",
+                highlight_quote=newest.quote,
+                highlight_quotes=tuple(item.quote for item in mapping_highlights),
+            )
+        )
+
+    events.sort(key=lambda event: (event.activity_at, event.sort_id), reverse=True)
+    page_offset = max(offset, 0)
+    page_limit = max(1, min(limit, 100))
+    return events[page_offset : page_offset + page_limit], len(events)
 
 
 def _connected_user_ids(user: User) -> list[int]:

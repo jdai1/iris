@@ -52,6 +52,32 @@ npm run dev
 
 The frontend expects the API at `http://127.0.0.1:8000` unless `VITE_API_BASE` is set.
 
+To run the local frontend against the Railway backend while keeping Vite hot reload:
+
+```bash
+cd frontend
+npm run dev:remote
+```
+
+This uses the committed, non-secret `frontend/.env.remote` API URL and the same Firebase
+configuration as local development. Requests still carry the signed-in user's Firebase
+ID token; the Railway backend already allows the local Vite origin.
+
+## Admin
+
+The admin console is a separate Vite app. In local development it reuses the Firebase
+variables in `frontend/.env` and runs on port 5176:
+
+```bash
+cd admin
+npm install
+npm run dev:remote
+```
+
+Only emails in the backend's `IRIS_ADMIN_EMAILS` setting can load admin data. The app is
+read-only and includes top-level metrics, recent query traces, and compact user reports.
+Impersonation is intentionally out of scope.
+
 ## Browser extension
 
 Load `extension/` as an unpacked Chrome/Arc extension to capture pages, edit bookshelf state, and persist in-page highlights and comments. See `docs/browser-extension.md` for architecture, privacy boundaries, setup, and validation.

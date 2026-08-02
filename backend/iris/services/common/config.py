@@ -15,7 +15,27 @@ load_dotenv(BACKEND_DIR / ".env")
 
 
 def database_url() -> str:
-    return os.getenv("DATABASE_URL") or os.getenv("DEV_DATABASE_URL") or f"sqlite:///{BACKEND_DIR / 'iris.db'}"
+    value = os.getenv("DATABASE_URL") or os.getenv("DEV_DATABASE_URL") or f"sqlite:///{BACKEND_DIR / 'iris.db'}"
+    if value.startswith("postgres://"):
+        return value.replace("postgres://", "postgresql://", 1)
+    return value
+
+
+DEFAULT_CORS_ORIGINS = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:5175",
+    "http://localhost:5180",
+]
+
+
+def cors_origins() -> list[str]:
+    configured = [
+        origin.strip().rstrip("/")
+        for origin in os.getenv("IRIS_CORS_ORIGINS", "").split(",")
+        if origin.strip()
+    ]
+    return list(dict.fromkeys([*DEFAULT_CORS_ORIGINS, *configured]))
 
 
 USER_AGENT = os.getenv(

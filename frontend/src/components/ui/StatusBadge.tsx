@@ -1,23 +1,20 @@
-import type { BadgeProps } from '@chakra-ui/react';
+import type { ComponentProps } from 'react';
+import { cn } from '@/lib/utils';
 import { Chip } from './Chip';
 
-const statusTone: Record<string, BadgeProps> = {
-  failed: { color: 'danger.default', bg: 'danger.subtle', borderColor: 'danger.border' },
-  error: { color: 'danger.default', bg: 'danger.subtle', borderColor: 'danger.border' },
-  complete: { color: 'var(--status-green-text)', bg: 'var(--status-green-bg)', borderColor: 'var(--status-green-border)' },
-  completed: { color: 'var(--status-green-text)', bg: 'var(--status-green-bg)', borderColor: 'var(--status-green-border)' },
-  success: { color: 'var(--status-green-text)', bg: 'var(--status-green-bg)', borderColor: 'var(--status-green-border)' },
-  running: { color: 'var(--status-blue-text)', bg: 'var(--status-blue-bg)', borderColor: 'var(--status-blue-border)' },
-  pending: { color: 'fg.muted', bg: 'bg.subtle', borderColor: 'border.strong' },
+const statusTone: Record<string, string> = {
+  failed: 'border-destructive/30 bg-destructive/10 text-destructive',
+  error: 'border-destructive/30 bg-destructive/10 text-destructive',
+  complete: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400',
+  completed: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400',
+  success: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400',
+  running: 'border-blue-500/30 bg-blue-500/10 text-blue-700 dark:text-blue-400',
+  pending: 'border-border bg-secondary text-muted-foreground',
 };
 
-export function StatusBadge({ value, ...props }: BadgeProps & { value: string }) {
+export function StatusBadge({ className, value, ...props }: ComponentProps<'span'> & { value: string }) {
   return (
-    <Chip
-      textTransform="lowercase"
-      {...(statusTone[value.toLowerCase()] ?? statusTone.pending)}
-      {...props}
-    >
+    <Chip className={cn('lowercase', statusTone[value.toLowerCase()] ?? statusTone.pending, className)} {...props}>
       {value}
     </Chip>
   );

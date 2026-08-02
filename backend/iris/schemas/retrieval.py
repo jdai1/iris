@@ -26,6 +26,16 @@ class AgentStep:
     tool: AgentToolName | None = None
     query: str | None = None
     hits: int | None = None
+    documents: list["AgentInspectedDocument"] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class AgentInspectedDocument:
+    uuid: str
+    title: str
+    source_domain: str
+    url: str
+    reason: str
 
 
 @dataclass(frozen=True)

@@ -1,9 +1,10 @@
 import { ReactNode, useEffect, useState } from 'react';
 import type { User as FirebaseUser } from 'firebase/auth';
 import { getRedirectResult, onAuthStateChanged, signInWithPopup, signInWithRedirect, signOut } from 'firebase/auth';
-import { getMe, setAuthTokenProvider } from '../api';
+import { clearApiCache, getMe } from '../api';
 import { auth, firebaseApiKey, firebaseEnabled, googleProvider } from '../firebase';
 import type { User as IrisUser } from '../types';
+import { OnboardingScreen } from './OnboardingScreen';
 import { AuthScreen } from './AuthScreen';
 
 type AuthGateProps = {
@@ -16,6 +17,7 @@ const localUser: IrisUser = {
   email: 'local-dev@iris',
   display_name: 'Local dev',
   photo_url: null,
+  onboarding_completed_at: new Date(0).toISOString(),
   is_admin: true,
 };
 
@@ -75,25 +77,21 @@ export function AuthGate({ children }: AuthGateProps) {
   }, [firebaseUser]);
 
   useEffect(() => {
-    if (!auth) {
-      setAuthTokenProvider(null);
-      return;
-    }
+    if (!auth) return;
     getRedirectResult(auth).catch((err) => {
       setAuthError(readAuthError(err, 'Sign-in failed'));
       setSigningIn(false);
     });
     const unsubscribe = onAuthStateChanged(auth, (user) => {
+      clearApiCache();
       setFirebaseUser(user);
       setCurrentUser(null);
       if (user) setAuthError(null);
       setAuthReady(true);
       setSigningIn(false);
-      setAuthTokenProvider(user ? () => user.getIdToken() : null);
     });
     return () => {
       unsubscribe();
-      setAuthTokenProvider(null);
     };
   }, []);
 
@@ -134,11 +132,17 @@ export function AuthGate({ children }: AuthGateProps) {
     await signOut(auth);
   }
 
+  const authPreview = import.meta.env.DEV && new URLSearchParams(window.location.search).has('auth_preview');
+
+  if (authPreview) return <AuthScreen error={null} signingIn={false} onSignIn={() => {}} />;
   if (!firebaseEnabled) return <>{children(localUser, () => {})}</>;
-  if (!authReady) return <div className="auth-shell auth-shell-center">Loading...</div>;
+  if (!authReady) return <div className="grid min-h-svh place-items-center text-sm text-muted-foreground">Loading...</div>;
   if (!firebaseUser) return <AuthScreen error={authError} signingIn={signingIn} onSignIn={signIn} />;
-  if (!currentUser && !authError) return <div className="auth-shell auth-shell-center">Loading...</div>;
+  if (!currentUser && !authError) return <div className="grid min-h-svh place-items-center text-sm text-muted-foreground">Loading...</div>;
   if (authError) return <AuthScreen error={authError} signingIn={signingIn} onSignIn={signIn} />;
+  if (currentUser?.onboarding_completed_at === null) {
+    return <OnboardingScreen user={currentUser} onComplete={setCurrentUser} />;
+  }
   return <>{children(currentUser, handleSignOut)}</>;
 }
 

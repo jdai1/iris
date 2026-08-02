@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 
 export function OverflowText({
   children,
-  className = 'tooltip-overflow-text',
+  className = 'block truncate',
   tooltip,
 }: {
   children: string;
@@ -28,7 +28,7 @@ export function OverflowText({
   }, [children]);
 
   return (
-    <span className="overflow-tooltip" data-tooltip={overflowing ? label : undefined}>
+    <span className="block min-w-0" title={overflowing ? label : undefined}>
       <span ref={ref} className={className}>
         {children}
       </span>

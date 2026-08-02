@@ -15,6 +15,10 @@ import {
 import { emptyPage } from '../app/paging';
 import { collectionIdFromSearch, documentPath, navigateTo } from '../app/navigation';
 import { DenseDocumentTable } from '../components/DenseDocumentTable';
+import { DenseTableViewport, denseTableHeaderClass, denseTableRowClass } from '../components/ui/dense-table';
+import { FilterBar, type FilterValue } from '../components/FilterBar';
+import { OverflowText } from '../components/OverflowText';
+import { ResizableSidebarLayout } from '../components/ResizableSidebarLayout';
 import { Button } from '../components/ui';
 import type { BookshelfCollection, BookshelfEntry, BookshelfStatus, SearchResult } from '../types';
 
@@ -38,20 +42,22 @@ export function BookshelfView({ onDiscover }: { onDiscover: () => void }) {
   const [linkUrl, setLinkUrl] = useState('');
   const [linkTitle, setLinkTitle] = useState('');
   const [collectionName, setCollectionName] = useState('');
-  const [filterQuery, setFilterQuery] = useState('');
+  const [bookshelfFilters, setBookshelfFilters] = useState<FilterValue[]>([]);
   const [collectionSearchQuery, setCollectionSearchQuery] = useState('');
   const [collectionSearchResults, setCollectionSearchResults] = useState<SearchResult[]>([]);
   const [collectionSearching, setCollectionSearching] = useState(false);
   const [addDrawerOpen, setAddDrawerOpen] = useState(false);
+  const [addDrawerClosing, setAddDrawerClosing] = useState(false);
   const [addingDocumentUuid, setAddingDocumentUuid] = useState<string | null>(null);
   const [confirmDeleteCollectionId, setConfirmDeleteCollectionId] = useState<number | null>(null);
   const [selectedDocumentUuids, setSelectedDocumentUuids] = useState<Set<string>>(new Set());
   const [bulkActionsOpen, setBulkActionsOpen] = useState(false);
   const collectionDraftRef = useRef<HTMLInputElement | null>(null);
   const bulkActionsRef = useRef<HTMLDivElement | null>(null);
+  const addDrawerCloseTimerRef = useRef<number | null>(null);
 
   const scopedRows = filterBookshelfEntries(entries, collections, activeView);
-  const tableRows = filterVisibleBookshelfEntries(scopedRows, filterQuery);
+  const tableRows = filterVisibleBookshelfEntries(scopedRows, bookshelfFilters);
   const discoverLabel = 'Discover';
   const activeCollection = activeView.startsWith('collection:')
     ? collections.find((collection) => collection.id === Number(activeView.slice('collection:'.length))) ?? null
@@ -89,10 +95,12 @@ export function BookshelfView({ onDiscover }: { onDiscover: () => void }) {
 
   useEffect(() => {
     setConfirmDeleteCollectionId(null);
-    setFilterQuery('');
+    setBookshelfFilters([]);
     setCollectionSearchQuery('');
     setCollectionSearchResults([]);
+    if (addDrawerCloseTimerRef.current !== null) window.clearTimeout(addDrawerCloseTimerRef.current);
     setAddDrawerOpen(false);
+    setAddDrawerClosing(false);
     setSelectedDocumentUuids(new Set());
   }, [activeView]);
 
@@ -129,11 +137,31 @@ export function BookshelfView({ onDiscover }: { onDiscover: () => void }) {
   useEffect(() => {
     if (!addDrawerOpen) return;
     function closeAddDrawerOnEscape(event: KeyboardEvent) {
-      if (event.key === 'Escape') setAddDrawerOpen(false);
+      if (event.key === 'Escape') closeAddDrawer();
     }
     window.addEventListener('keydown', closeAddDrawerOnEscape);
     return () => window.removeEventListener('keydown', closeAddDrawerOnEscape);
-  }, [addDrawerOpen]);
+  }, [addDrawerOpen, addDrawerClosing]);
+
+  useEffect(() => () => {
+    if (addDrawerCloseTimerRef.current !== null) window.clearTimeout(addDrawerCloseTimerRef.current);
+  }, []);
+
+  function openAddDrawer() {
+    if (addDrawerCloseTimerRef.current !== null) window.clearTimeout(addDrawerCloseTimerRef.current);
+    setAddDrawerClosing(false);
+    setAddDrawerOpen(true);
+  }
+
+  function closeAddDrawer() {
+    if (!addDrawerOpen || addDrawerClosing) return;
+    setAddDrawerClosing(true);
+    addDrawerCloseTimerRef.current = window.setTimeout(() => {
+      setAddDrawerOpen(false);
+      setAddDrawerClosing(false);
+      addDrawerCloseTimerRef.current = null;
+    }, 210);
+  }
 
   useEffect(() => {
     const query = collectionSearchQuery.trim();
@@ -387,26 +415,28 @@ export function BookshelfView({ onDiscover }: { onDiscover: () => void }) {
   }
 
   return (
-    <section className="bookshelf-view">
-      <div className="bookshelf-playlist-shell">
-        <aside className="bookshelf-rail">
-          <div className="bookshelf-rail-label">Library</div>
-          <button className={activeView === 'unread' ? 'bookshelf-rail-item bookshelf-rail-item-active' : 'bookshelf-rail-item'} type="button" onClick={() => setActiveView('unread')}>
-            <span>Read next</span>
-            <small>{entries.filter((entry) => entry.status === 'saved').length}</small>
+    <section className="min-h-svh px-2 py-4 sm:px-3 sm:py-6">
+      <ResizableSidebarLayout
+        className="min-h-[calc(100svh-3rem)]"
+        storageKey="iris.bookshelfSidebarWidth"
+        sidebar={<aside className="border-b p-3 lg:border-r lg:border-b-0">
+          <div className="px-2 pb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Library</div>
+          <button className={`flex h-9 w-full items-center justify-between rounded-md px-2 text-sm ${activeView === 'unread' ? 'bg-accent text-accent-foreground' : 'text-muted-foreground hover:bg-accent/60 hover:text-accent-foreground'}`} type="button" onClick={() => setActiveView('unread')}>
+            <span className="truncate">Read next</span>
+            <small className="ml-2 tabular-nums">{entries.filter((entry) => entry.status === 'saved').length}</small>
           </button>
-          <button className={activeView === 'favorites' ? 'bookshelf-rail-item bookshelf-rail-item-active' : 'bookshelf-rail-item'} type="button" onClick={() => setActiveView('favorites')}>
-            <span>Favorites</span>
-            <small>{entries.filter((entry) => entry.favorited).length}</small>
+          <button className={`flex h-9 w-full items-center justify-between rounded-md px-2 text-sm ${activeView === 'favorites' ? 'bg-accent text-accent-foreground' : 'text-muted-foreground hover:bg-accent/60 hover:text-accent-foreground'}`} type="button" onClick={() => setActiveView('favorites')}>
+            <span className="truncate">Favorites</span>
+            <small className="ml-2 tabular-nums">{entries.filter((entry) => entry.favorited).length}</small>
           </button>
-          <button className={activeView === 'reading-log' ? 'bookshelf-rail-item bookshelf-rail-item-active' : 'bookshelf-rail-item'} type="button" onClick={() => setActiveView('reading-log')}>
-            <span>Reading log</span>
-            <small>{entries.filter((entry) => entry.status === 'read').length}</small>
+          <button className={`flex h-9 w-full items-center justify-between rounded-md px-2 text-sm ${activeView === 'reading-log' ? 'bg-accent text-accent-foreground' : 'text-muted-foreground hover:bg-accent/60 hover:text-accent-foreground'}`} type="button" onClick={() => setActiveView('reading-log')}>
+            <span className="truncate">Reading log</span>
+            <small className="ml-2 tabular-nums">{entries.filter((entry) => entry.status === 'read').length}</small>
           </button>
-          <div className="bookshelf-rail-divider" />
-          <div className="bookshelf-rail-section-heading">
+          <div className="my-3 h-px bg-border" />
+          <div className="flex items-center justify-between px-2 pb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
             <span>Collections</span>
-            <button
+            <button className="grid size-6 place-items-center rounded hover:bg-accent hover:text-accent-foreground"
               type="button"
               onClick={() => {
                 setCollectionName('');
@@ -418,8 +448,9 @@ export function BookshelfView({ onDiscover }: { onDiscover: () => void }) {
             </button>
           </div>
           {creatingCollection && (
-            <form className="bookshelf-rail-draft" onSubmit={submitCollection}>
+            <form className="px-1 pb-1" onSubmit={submitCollection}>
               <input
+                className="h-8 w-full rounded-md border bg-background px-2 text-sm outline-none focus:ring-2 focus:ring-ring/20"
                 ref={collectionDraftRef}
                 value={collectionName}
                 onChange={(event) => setCollectionName(event.target.value)}
@@ -440,49 +471,38 @@ export function BookshelfView({ onDiscover }: { onDiscover: () => void }) {
           {collections.map((collection) => (
             <button
               key={collection.id}
-              className={activeView === `collection:${collection.id}` ? 'bookshelf-rail-item bookshelf-rail-item-active' : 'bookshelf-rail-item'}
+              className={`flex h-9 w-full items-center justify-between gap-2 rounded-md px-2 text-sm ${activeView === `collection:${collection.id}` ? 'bg-accent text-accent-foreground' : 'text-muted-foreground hover:bg-accent/60 hover:text-accent-foreground'}`}
               type="button"
               onClick={() => setActiveView(`collection:${collection.id}`)}
             >
-              <span>{collection.name}</span>
-              <small>{collection.items.length}</small>
+              <OverflowText>{collection.name}</OverflowText>
+              <small className="shrink-0 tabular-nums">{collection.items.length}</small>
             </button>
           ))}
-        </aside>
+        </aside>}
+      >
 
-        <div className="bookshelf-table-panel">
-          <div className="bookshelf-toolbar">
-            <form
-              className="bookshelf-toolbar-search"
-              onSubmit={(event) => event.preventDefault()}
-            >
-              <label className="visually-hidden" htmlFor="bookshelf-collection-search">Add documents</label>
-              <Search size={14} />
-              <input
-                id="bookshelf-collection-search"
-                value={filterQuery}
-                onChange={(event) => setFilterQuery(event.target.value)}
-                placeholder={bookshelfFilterPlaceholder(activeView, activeCollection)}
-              />
-            </form>
-            <div className="bookshelf-toolbar-actions">
+        <div className="min-w-0">
+          <div className="mb-5 flex min-h-7 items-center justify-between gap-2 px-4">
+            <FilterBar className="min-w-0 flex-1" context="bookshelf" filters={bookshelfFilters} onChange={setBookshelfFilters} />
+            <div className="flex items-center gap-2">
               <button
-                className="bookshelf-icon-action"
+                className="grid size-7 place-items-center rounded-md border bg-background text-muted-foreground shadow-xs hover:bg-accent hover:text-accent-foreground"
                 type="button"
-                onClick={() => setAddDrawerOpen(true)}
+                onClick={openAddDrawer}
                 aria-label="Add documents"
                 data-tooltip="Add documents"
               >
-                <Plus size={16} />
+                <Plus size={14} />
               </button>
               {selectedDocumentUuids.size > 0 && (
                 <>
-                  <div className="bookshelf-bulk-toolbar" aria-label="Selected documents">
+                  <div className="text-xs text-muted-foreground" aria-label="Selected documents">
                     <span aria-live="polite">{selectedDocumentUuids.size} selected</span>
                   </div>
-                  <div className="bookshelf-bulk-actions" ref={bulkActionsRef}>
+                  <div className="relative" ref={bulkActionsRef}>
                     <button
-                      className="bookshelf-icon-action"
+                      className="grid size-7 place-items-center rounded-md border bg-background text-muted-foreground shadow-xs hover:bg-accent hover:text-accent-foreground"
                       type="button"
                       onClick={() => setBulkActionsOpen((open) => !open)}
                       aria-label="Selected document actions"
@@ -490,12 +510,13 @@ export function BookshelfView({ onDiscover }: { onDiscover: () => void }) {
                       aria-expanded={bulkActionsOpen}
                       data-tooltip="Actions"
                     >
-                      <MoreHorizontal size={16} />
+                      <MoreHorizontal size={14} />
                     </button>
                     {bulkActionsOpen && (
-                      <div className="bookshelf-bulk-action-menu" role="menu">
+                      <div className="absolute right-0 top-9 z-20 grid min-w-48 animate-in gap-1 rounded-lg border bg-popover p-1 text-popover-foreground shadow-lg fade-in-0 zoom-in-95 duration-100 motion-reduce:animate-none" role="menu">
                     {collections.length > (activeCollection ? 1 : 0) && (
                       <select
+                        className="h-8 rounded-md border bg-background px-2 text-xs"
                         value=""
                         onChange={(event) => {
                           const collectionId = Number(event.target.value);
@@ -512,7 +533,7 @@ export function BookshelfView({ onDiscover }: { onDiscover: () => void }) {
                           ))}
                       </select>
                     )}
-                    <button type="button" role="menuitem" onClick={() => {
+                    <button className="flex h-8 items-center gap-2 rounded-md px-2 text-sm text-destructive hover:bg-destructive/10" type="button" role="menuitem" onClick={() => {
                       setBulkActionsOpen(false);
                       void removeSelectedFromActiveCollection();
                     }} disabled={saving}>
@@ -526,28 +547,28 @@ export function BookshelfView({ onDiscover }: { onDiscover: () => void }) {
               )}
               {activeCollection && (
                 <button
-                  className={confirmDeleteCollectionId === activeCollection.id ? 'bookshelf-icon-action bookshelf-icon-action-danger bookshelf-icon-action-confirm' : 'bookshelf-icon-action bookshelf-icon-action-danger'}
+                  className={`grid size-7 place-items-center rounded-md border shadow-xs ${confirmDeleteCollectionId === activeCollection.id ? 'border-destructive bg-destructive text-white' : 'border-destructive/30 bg-background text-destructive hover:bg-destructive/10'}`}
                   type="button"
                   onClick={deleteActiveCollection}
                   disabled={saving}
                   aria-label={confirmDeleteCollectionId === activeCollection.id ? 'Confirm delete collection' : 'Delete collection'}
                   data-tooltip={confirmDeleteCollectionId === activeCollection.id ? 'Confirm delete' : 'Delete collection'}
                 >
-                  {confirmDeleteCollectionId === activeCollection.id ? <Check size={15} /> : <Trash2 size={15} />}
+                  {confirmDeleteCollectionId === activeCollection.id ? <Check size={13} /> : <Trash2 size={13} />}
                 </button>
               )}
             </div>
           </div>
 
           {addingLink && (
-            <form className="bookshelf-add-link bookshelf-add-link-compact" onSubmit={submitLink}>
-              <input value={linkUrl} onChange={(event) => setLinkUrl(event.target.value)} placeholder="Paste a URL..." />
-              <input value={linkTitle} onChange={(event) => setLinkTitle(event.target.value)} placeholder="Title override" />
-              <Button type="submit" disabled={saving || !linkUrl.trim()} borderRadius="0">Save</Button>
+            <form className="grid grid-cols-1 gap-2 border-b p-4 sm:grid-cols-[2fr_1fr_auto]" onSubmit={submitLink}>
+              <input className="h-9 rounded-md border bg-background px-3 text-sm" value={linkUrl} onChange={(event) => setLinkUrl(event.target.value)} placeholder="Paste a URL..." />
+              <input className="h-9 rounded-md border bg-background px-3 text-sm" value={linkTitle} onChange={(event) => setLinkTitle(event.target.value)} placeholder="Title override" />
+              <Button type="submit" disabled={saving || !linkUrl.trim()}>Save</Button>
             </form>
           )}
 
-          {error && <div className="error">{error}</div>}
+          {error && <div className="m-4 rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">{error}</div>}
           {loading ? (
             <BookshelfTableSkeleton />
           ) : (
@@ -564,56 +585,58 @@ export function BookshelfView({ onDiscover }: { onDiscover: () => void }) {
             />
           )}
           {!loading && tableRows.length === 0 && (
-            <div className="bookshelf-empty-cta">
-              <h3>No rows yet</h3>
-              <button className="bookshelf-discover-cta" type="button" onClick={onDiscover}>
+            <div className="grid place-items-center gap-4 px-6 py-20 text-center">
+              <h3 className="text-base font-medium">No rows yet</h3>
+              <button className="inline-flex h-9 items-center gap-2 rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground hover:bg-primary/90" type="button" onClick={onDiscover}>
                 <Search size={15} />
                 {discoverLabel}
               </button>
             </div>
           )}
         </div>
-      </div>
+      </ResizableSidebarLayout>
       {addDrawerOpen && createPortal(
         <>
           <button
-            className="drawer-backdrop"
+            className={`fixed inset-0 z-40 bg-black/35 backdrop-blur-[1px] transition-opacity duration-200 motion-reduce:transition-none ${addDrawerClosing ? 'opacity-0' : 'animate-in fade-in-0 opacity-100'}`}
             type="button"
             aria-label="Close add documents"
-            onClick={() => setAddDrawerOpen(false)}
+            onClick={closeAddDrawer}
           />
-          <aside className="bookshelf-add-drawer" aria-label="Add documents">
-          <header>
-            <div>
-              <strong>Add documents</strong>
-              <small>{activeCollection?.name ?? bookshelfViewLabel(activeView)}</small>
+          <aside className={`fixed inset-y-0 right-0 z-50 flex w-full max-w-md flex-col border-l bg-background shadow-2xl transition-transform duration-200 ease-out motion-reduce:transition-none ${addDrawerClosing ? 'translate-x-full' : 'animate-in slide-in-from-right-full translate-x-0'}`} aria-label="Add documents">
+          <header className="flex items-center justify-between border-b px-5 py-4">
+            <div className="min-w-0">
+              <strong className="block font-medium">Add documents</strong>
+              <small className="block truncate text-muted-foreground">{activeCollection?.name ?? bookshelfViewLabel(activeView)}</small>
             </div>
-            <button className="bookshelf-add-drawer-close" type="button" onClick={() => setAddDrawerOpen(false)} aria-label="Close add documents">
+            <button className="grid size-9 place-items-center rounded-md hover:bg-accent" type="button" onClick={closeAddDrawer} aria-label="Close add documents">
               <X size={18} />
             </button>
           </header>
-          <label className="bookshelf-add-drawer-search">
-            <Search size={15} />
+          <label className="mx-5 mt-4 flex h-10 items-center gap-2 rounded-md border bg-background px-3 focus-within:ring-2 focus-within:ring-ring/20">
+            <Search className="size-4 text-muted-foreground" />
             <input
+              className="min-w-0 flex-1 bg-transparent text-sm outline-none"
               value={collectionSearchQuery}
               onChange={(event) => setCollectionSearchQuery(event.target.value)}
               placeholder="Search the corpus..."
               autoFocus
             />
           </label>
-          <div className="bookshelf-add-drawer-results">
-            {collectionSearching && <p>Searching...</p>}
-            {!collectionSearching && collectionSearchQuery.trim() && collectionSearchResults.length === 0 && <p>No documents found.</p>}
+          <div className="min-h-0 flex-1 space-y-2 overflow-y-auto p-5">
+            {collectionSearching && <p className="py-6 text-center text-sm text-muted-foreground">Searching...</p>}
+            {!collectionSearching && collectionSearchQuery.trim() && collectionSearchResults.length === 0 && <p className="py-6 text-center text-sm text-muted-foreground">No documents found.</p>}
             {collectionSearchResults.map((result) => {
               const alreadyAdded = resultInActiveView(result.document.uuid, activeView, activeCollection, entries);
               return (
-                <div key={result.document.uuid} className="bookshelf-add-drawer-result">
-                  <button type="button" onClick={() => openSearchResultDrawer(result)}>
-                    <strong>{result.document.title ?? result.document.url}</strong>
-                    <small>{result.document.source_domain}</small>
-                    <span>{result.document.summary}</span>
+                <div key={result.document.uuid} className="grid grid-cols-[minmax(0,1fr)_auto] gap-2 rounded-lg border p-3">
+                  <button className="min-w-0 text-left" type="button" onClick={() => openSearchResultDrawer(result)}>
+                    <strong className="block truncate text-sm font-medium">{result.document.title ?? result.document.url}</strong>
+                    <small className="block truncate text-muted-foreground">{result.document.source_domain}</small>
+                    <span className="mt-1 line-clamp-2 block text-xs text-muted-foreground">{result.document.summary}</span>
                   </button>
                   <button
+                    className="grid size-8 place-items-center rounded-md border hover:bg-accent disabled:opacity-50"
                     type="button"
                     onClick={() => void addResultToActiveView(result)}
                     disabled={alreadyAdded || addingDocumentUuid === result.document.uuid}
@@ -648,17 +671,16 @@ function filterBookshelfEntries(entries: BookshelfEntry[], collections: Bookshel
   return scoped;
 }
 
-function filterVisibleBookshelfEntries(entries: BookshelfEntry[], query: string): BookshelfEntry[] {
-  const normalized = query.trim().toLowerCase();
-  if (!normalized) return entries;
-  return entries.filter((entry) =>
-    [entry.document.title, entry.document.url, entry.document.source_domain, entry.document.summary, entry.note, entry.intent_note]
-      .some((value) => value?.toLowerCase().includes(normalized)),
-  );
-}
-
-function bookshelfFilterPlaceholder(activeView: BookshelfViewKey, activeCollection: BookshelfCollection | null) {
-  return `Filter ${activeCollection?.name ?? bookshelfViewLabel(activeView)}...`;
+function filterVisibleBookshelfEntries(entries: BookshelfEntry[], filters: FilterValue[]): BookshelfEntry[] {
+  return entries.filter((entry) => filters.every((filter) => {
+    const normalized = filter.value.trim().toLowerCase();
+    if (!normalized) return true;
+    if (filter.kind === 'tag') {
+      return [...entry.tags, ...entry.document.topics].some((tag) => tag.toLowerCase() === normalized);
+    }
+    return [entry.document.title, entry.document.url, entry.document.source_domain, entry.document.summary, entry.note, entry.intent_note]
+      .some((value) => value?.toLowerCase().includes(normalized));
+  }));
 }
 
 function bookshelfViewLabel(activeView: BookshelfViewKey) {
@@ -734,6 +756,8 @@ function BookshelfTable({
       showActions={collectionMode}
       showSource={false}
       sourceAsTitle
+      metadataColumn="source"
+      compact
       onPrimaryClick={(row, event) => {
         const entry = entriesByDocumentUuid.get(row.document.uuid);
         if (entry) onOpenDetail(entry);
@@ -753,26 +777,29 @@ function BookshelfTable({
 }
 
 function BookshelfTableSkeleton() {
+  const columns = 'grid-cols-[2rem_minmax(14rem,2fr)_minmax(8rem,1fr)_minmax(10rem,1.25fr)_7rem_2.5rem]';
   return (
-    <div className="bookshelf-table bookshelf-table-skeleton" role="table" aria-label="Loading bookshelf rows">
-      <div className="bookshelf-table-row bookshelf-table-head" role="row">
+    <DenseTableViewport>
+      <div className="min-w-[760px]" role="table" aria-label="Loading bookshelf rows">
+      <div className={`${denseTableHeaderClass} ${columns}`} role="row">
+        <span />
         <span>Title</span>
-        <span>Tags</span>
+        <span>Source</span>
         <span>Notes</span>
         <span>Date</span>
         <span />
-        <span />
       </div>
       {Array.from({ length: 8 }).map((_, row) => (
-        <div className="bookshelf-table-row" role="row" key={row}>
-          <span className="skeleton-line" />
-          <span className="skeleton-line" />
-          <span className="skeleton-line" />
-          <span className="skeleton-line" />
+        <div className={`${denseTableRowClass} ${columns} py-2`} role="row" key={row}>
           <span />
+          <span className="h-4 animate-pulse rounded bg-muted" />
+          <span className="h-4 animate-pulse rounded bg-muted" />
+          <span className="h-4 animate-pulse rounded bg-muted" />
+          <span className="h-4 animate-pulse rounded bg-muted" />
           <span />
         </div>
       ))}
-    </div>
+      </div>
+    </DenseTableViewport>
   );
 }

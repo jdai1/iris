@@ -94,6 +94,11 @@ def ensure_user_auth_columns() -> None:
             statements.append("ALTER TABLE users ADD COLUMN firebase_uid VARCHAR(128)")
         if "photo_url" not in columns:
             statements.append("ALTER TABLE users ADD COLUMN photo_url TEXT")
+        if "onboarding_completed_at" not in columns:
+            statements.append("ALTER TABLE users ADD COLUMN onboarding_completed_at DATETIME")
+            statements.append(
+                "UPDATE users SET onboarding_completed_at = CURRENT_TIMESTAMP WHERE onboarding_completed_at IS NULL"
+            )
         if "email" in columns:
             statements.append("CREATE UNIQUE INDEX IF NOT EXISTS ix_users_email ON users (email)")
         statements.append(
@@ -104,6 +109,11 @@ def ensure_user_auth_columns() -> None:
             statements.append("ALTER TABLE users ADD COLUMN IF NOT EXISTS firebase_uid VARCHAR(128)")
         if "photo_url" not in columns:
             statements.append("ALTER TABLE users ADD COLUMN IF NOT EXISTS photo_url TEXT")
+        if "onboarding_completed_at" not in columns:
+            statements.append("ALTER TABLE users ADD COLUMN IF NOT EXISTS onboarding_completed_at TIMESTAMPTZ")
+            statements.append(
+                "UPDATE users SET onboarding_completed_at = CURRENT_TIMESTAMP WHERE onboarding_completed_at IS NULL"
+            )
         if "email" in columns:
             if column_by_name["email"].get("nullable", True):
                 statements.append("ALTER TABLE users ALTER COLUMN email SET NOT NULL")

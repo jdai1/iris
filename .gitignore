@@ -18,6 +18,10 @@ frontend/dist/
 frontend/*.tsbuildinfo
 frontend/vite.config.js
 frontend/vite.config.d.ts
+admin/.env
+admin/node_modules/
+admin/dist/
+admin/*.tsbuildinfo
 
 # Browser extension UI
 extension/ui/node_modules/

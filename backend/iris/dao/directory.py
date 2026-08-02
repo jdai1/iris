@@ -4,13 +4,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from sqlalchemy import Select, func, select
+from sqlalchemy import Select, String, cast, false, func, select
 from sqlalchemy.orm import aliased
 from sqlalchemy.sql.elements import ColumnElement
 
 from iris.dao import db
 from iris.dao.admin import clamped_limit, count_statement
-from iris.models import Document, Link, Source
+from iris.models import BookshelfCollection, BookshelfCollectionItem, Document, Link, Source
 from iris.schemas.api import DirectorySourceSchema
 from iris.schemas.enums import DocumentType, SourceStatus
 
@@ -20,6 +20,9 @@ class SourceDirectoryQuery:
     """Build the source directory table query from filter and sort inputs."""
 
     q: str | None = None
+    user_id: int | None = None
+    text_filters: tuple[str, ...] = ()
+    tag_filters: tuple[str, ...] = ()
     status: str | None = SourceStatus.INDEXED.value
     sort: str = "inbound"
     direction: str = "desc"
@@ -32,6 +35,17 @@ class SourceDirectoryQuery:
                 func.count(Document.id).label("document_count"),
                 func.count(Document.id).filter(Document.document_type == DocumentType.ESSAY.value).label("essay_count"),
             )
+            .group_by(Document.source_id)
+            .subquery()
+        )
+        collection_counts = (
+            select(
+                Document.source_id,
+                func.count(func.distinct(BookshelfCollectionItem.collection_id)).label("collection_count"),
+            )
+            .join(BookshelfCollectionItem, BookshelfCollectionItem.document_id == Document.id)
+            .join(BookshelfCollection, BookshelfCollection.id == BookshelfCollectionItem.collection_id)
+            .where(BookshelfCollection.user_id == self.user_id if self.user_id is not None else false())
             .group_by(Document.source_id)
             .subquery()
         )
@@ -65,6 +79,7 @@ class SourceDirectoryQuery:
         )
         document_count = func.coalesce(doc_counts.c.document_count, 0).label("document_count")
         essay_count = func.coalesce(doc_counts.c.essay_count, 0).label("essay_count")
+        collection_count = func.coalesce(collection_counts.c.collection_count, 0).label("collection_count")
         inbound_count = func.coalesce(inbound_counts.c.inbound_count, 0).label("inbound_count")
         outbound_count = func.coalesce(outbound_counts.c.outbound_count, 0).label("outbound_count")
         essay_reference_count = func.coalesce(essay_reference_counts.c.essay_reference_count, 0).label("essay_reference_count")
@@ -74,12 +89,14 @@ class SourceDirectoryQuery:
                 Source,
                 document_count,
                 essay_count,
+                collection_count,
                 inbound_count,
                 outbound_count,
                 essay_reference_count,
                 external_source_count,
             )
             .outerjoin(doc_counts, doc_counts.c.source_id == Source.id)
+            .outerjoin(collection_counts, collection_counts.c.source_id == Source.id)
             .outerjoin(inbound_counts, inbound_counts.c.source_id == Source.id)
             .outerjoin(outbound_counts, outbound_counts.c.source_id == Source.id)
             .outerjoin(essay_reference_counts, essay_reference_counts.c.source_id == Source.id)
@@ -87,12 +104,20 @@ class SourceDirectoryQuery:
         )
         if self.status and self.status != "all":
             statement = statement.where(Source.status == self.status)
-        if self.q and self.q.strip():
-            pattern = f"%{self.q.strip()}%"
+        text_filters = [value.strip() for value in (self.q, *self.text_filters) if value and value.strip()]
+        for value in text_filters:
+            pattern = f"%{value}%"
             statement = statement.where(
                 Source.canonical_domain.ilike(pattern)
                 | Source.name.ilike(pattern)
                 | Source.description.ilike(pattern)
+            )
+        for value in (tag.strip().lower() for tag in self.tag_filters if tag.strip()):
+            statement = statement.where(
+                select(Document.id)
+                .where(Document.source_id == Source.id)
+                .where(func.lower(cast(Document.topics, String)).like(f'%"{value}"%'))
+                .exists()
             )
         return statement.order_by(*self._order_by(document_count, essay_count, inbound_count, outbound_count, essay_reference_count, external_source_count))
 
@@ -130,10 +155,29 @@ class SourceDirectoryQuery:
         return (ordered, Source.canonical_domain.asc())
 
 
-def get_source_directory_page(*, q: str | None, status: str | None, sort: str, direction: str, limit: int, offset: int) -> tuple[list[DirectorySourceSchema], int]:
+def get_source_directory_page(
+    *,
+    q: str | None,
+    user_id: int | None,
+    text_filters: list[str] | None,
+    tag_filters: list[str] | None,
+    status: str | None,
+    sort: str,
+    direction: str,
+    limit: int,
+    offset: int,
+) -> tuple[list[DirectorySourceSchema], int]:
     """Return source directory rows; default ranking is most referenced sources."""
     session = db.current_session()
-    statement = SourceDirectoryQuery(q=q, status=status, sort=sort, direction=direction).statement()
+    statement = SourceDirectoryQuery(
+        q=q,
+        user_id=user_id,
+        text_filters=tuple(text_filters or []),
+        tag_filters=tuple(tag_filters or []),
+        status=status,
+        sort=sort,
+        direction=direction,
+    ).statement()
     total = count_statement(statement)
     rows = session.execute(statement.limit(clamped_limit(limit)).offset(max(offset, 0))).all()
     items = [
@@ -148,11 +192,12 @@ def get_source_directory_page(*, q: str | None, status: str | None, sort: str, d
             last_checked_at=source.last_checked_at,
             document_count=int(document_count or 0),
             essay_count=int(essay_count or 0),
+            collection_count=int(collection_count or 0),
             inbound_count=int(inbound_count or 0),
             outbound_count=int(outbound_count or 0),
             essay_reference_count=int(essay_reference_count or 0),
             external_source_count=int(external_source_count or 0),
         )
-        for source, document_count, essay_count, inbound_count, outbound_count, essay_reference_count, external_source_count in rows
+        for source, document_count, essay_count, collection_count, inbound_count, outbound_count, essay_reference_count, external_source_count in rows
     ]
     return items, total

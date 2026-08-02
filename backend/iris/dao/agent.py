@@ -78,6 +78,16 @@ def finish_agent_chat(conversation: AgentConversation, result: AgentChatResult) 
                 "tool": _enum_value(step.tool),
                 "query": step.query,
                 "hits": step.hits,
+                "documents": [
+                    {
+                        "uuid": document.uuid,
+                        "title": document.title,
+                        "source_domain": document.source_domain,
+                        "url": document.url,
+                        "reason": document.reason,
+                    }
+                    for document in step.documents
+                ],
             }
             for step in result.steps
         ],

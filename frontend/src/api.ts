@@ -1,7 +1,4 @@
 import type {
-  AdminCrawlJob,
-  AdminIndexRun,
-  AdminOverview,
   AdminSource,
   AgentChatResponse,
   AgentConversation,
@@ -31,19 +28,20 @@ import type {
   UserProfile,
   UserWebsite,
 } from './types';
+import { auth } from './firebase';
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? 'http://127.0.0.1:8000';
 
 const apiCache = new Map<string, Promise<unknown>>();
-let authTokenProvider: (() => Promise<string | null>) | null = null;
 
-export function setAuthTokenProvider(provider: (() => Promise<string | null>) | null) {
-  authTokenProvider = provider;
+export function clearApiCache() {
   apiCache.clear();
 }
 
-async function requestHeaders(headers?: HeadersInit): Promise<HeadersInit> {
-  const token = authTokenProvider ? await authTokenProvider() : null;
+async function requestHeaders(headers?: HeadersInit, forceRefresh = false): Promise<HeadersInit> {
+  const token = auth?.currentUser
+    ? await auth.currentUser.getIdToken(forceRefresh)
+    : null;
   return {
     'Content-Type': 'application/json',
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
@@ -72,6 +70,12 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
       throw new Error(`${message}: ${url}`);
     }
   }
+  if (response.status === 401 && auth?.currentUser) {
+    response = await fetch(url, {
+      ...options,
+      headers: await requestHeaders(options?.headers, true),
+    });
+  }
   if (!response.ok) {
     throw new Error(await responseErrorMessage(response, `Request failed: ${response.status}: ${url}`));
   }
@@ -95,6 +99,14 @@ async function responseErrorMessage(response: Response, fallback: string): Promi
 
 export function getMe(): Promise<User> {
   return request<User>('/api/me');
+}
+
+export function completeOnboarding(payload: { username: string; website_url?: string | null }): Promise<User> {
+  clearApiCache();
+  return request<User>('/api/onboarding', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
 }
 
 export function getMyProfile(): Promise<UserProfile> {
@@ -135,6 +147,10 @@ export function getUserProfile(username: string): Promise<UserProfile> {
   return request<UserProfile>(`/api/users/${encodeURIComponent(username)}`);
 }
 
+export function getUserFriends(username: string): Promise<Person[]> {
+  return request<Person[]>(`/api/users/${encodeURIComponent(username)}/friends`);
+}
+
 export function getFriends(): Promise<Friendship[]> {
   return request<Friendship[]>('/api/friends');
 }
@@ -166,11 +182,12 @@ export function disconnectFriend(friendshipId: number): Promise<void> {
   return request<void>(`/api/friends/${friendshipId}`, { method: 'DELETE' });
 }
 
-export function getFriendsFeed(params: { limit?: number; offset?: number } = {}): Promise<Page<FriendFeedItem>> {
+export function getFriendsFeed(params: { limit?: number; offset?: number; username?: string } = {}): Promise<Page<FriendFeedItem>> {
   const search = new URLSearchParams({
     limit: String(params.limit ?? 50),
     offset: String(params.offset ?? 0),
   });
+  if (params.username) search.set('username', params.username);
   return request<Page<FriendFeedItem>>(`/api/friends/feed?${search.toString()}`);
 }
 
@@ -354,10 +371,15 @@ export function removeBookshelfCollectionItem(collectionId: number, documentUuid
   });
 }
 
-export function getEmbeddingMap(limit = 3000): Promise<EmbeddingMap> {
+export function getEmbeddingMap(limit = 3000, sourceId?: number): Promise<EmbeddingMap> {
+  const search = new URLSearchParams({
+    limit: String(limit),
+    document_type: 'essay',
+  });
+  if (sourceId) search.set('source_id', String(sourceId));
   return cachedRequest<EmbeddingMap>(
-    `embedding-map:${limit}:essay`,
-    `/api/embedding-map?limit=${limit}&document_type=essay`,
+    `embedding-map:${limit}:essay:${sourceId ?? 'all'}`,
+    `/api/embedding-map?${search.toString()}`,
   );
 }
 
@@ -380,20 +402,7 @@ export function searchGraphSources(q: string, limit = 12): Promise<AdminSource[]
   return request<AdminSource[]>(`/api/graph/sources/search?${search.toString()}`);
 }
 
-export function getAdminOverview(): Promise<AdminOverview> {
-  return request<AdminOverview>('/api/admin/overview');
-}
-
-export function getAdminSources(params: { status?: string; q?: string; limit?: number; offset?: number } = {}): Promise<Page<AdminSource>> {
-  const search = new URLSearchParams();
-  search.set('limit', String(params.limit ?? 50));
-  search.set('offset', String(params.offset ?? 0));
-  if (params.status && params.status !== 'all') search.set('status', params.status);
-  if (params.q) search.set('q', params.q);
-  return request<Page<AdminSource>>(`/api/admin/sources?${search.toString()}`);
-}
-
-export function getDirectorySources(params: { status?: string; q?: string; sort?: DirectorySourceSort; direction?: SortDirection; limit?: number; offset?: number } = {}): Promise<Page<DirectorySource>> {
+export function getDirectorySources(params: { status?: string; q?: string; textFilters?: string[]; tags?: string[]; sort?: DirectorySourceSort; direction?: SortDirection; limit?: number; offset?: number } = {}): Promise<Page<DirectorySource>> {
   const search = new URLSearchParams();
   search.set('limit', String(params.limit ?? 50));
   search.set('offset', String(params.offset ?? 0));
@@ -401,10 +410,12 @@ export function getDirectorySources(params: { status?: string; q?: string; sort?
   search.set('direction', params.direction ?? 'desc');
   if (params.status && params.status !== 'all') search.set('status', params.status);
   if (params.q) search.set('q', params.q);
+  params.textFilters?.forEach((value) => search.append('text_filter', value));
+  params.tags?.forEach((value) => search.append('tag', value));
   return request<Page<DirectorySource>>(`/api/directory/sources?${search.toString()}`);
 }
 
-export function getAdminDocuments(params: { limit?: number; offset?: number; sourceId?: number; documentType?: string; crawlJobId?: number; indexRunId?: number } = {}): Promise<Page<Document>> {
+export function getDocuments(params: { limit?: number; offset?: number; sourceId?: number; documentType?: string; crawlJobId?: number; indexRunId?: number; textFilters?: string[]; tags?: string[] } = {}): Promise<Page<Document>> {
   const search = new URLSearchParams();
   search.set('limit', String(params.limit ?? 100));
   search.set('offset', String(params.offset ?? 0));
@@ -412,6 +423,8 @@ export function getAdminDocuments(params: { limit?: number; offset?: number; sou
   if (params.documentType && params.documentType !== 'all') search.set('document_type', params.documentType);
   if (params.crawlJobId) search.set('crawl_job_id', String(params.crawlJobId));
   if (params.indexRunId) search.set('index_run_id', String(params.indexRunId));
+  params.textFilters?.forEach((value) => search.append('text_filter', value));
+  params.tags?.forEach((value) => search.append('tag', value));
   return request<Page<Document>>(`/api/documents?${search.toString()}`);
 }
 
@@ -421,22 +434,4 @@ export function getSourceProfileAnalysis(sourceId: number): Promise<SourceProfil
 
 export function generateSourceProfileAnalysis(sourceId: number, force = false): Promise<SourceProfileAnalysis> {
   return request<SourceProfileAnalysis>(`/api/sources/${sourceId}/profile-analysis?force=${force ? 'true' : 'false'}`, { method: 'POST' });
-}
-
-export function getAdminCrawlJobs(params: { limit?: number; offset?: number; status?: string; sourceId?: number; indexRunId?: number } = {}): Promise<Page<AdminCrawlJob>> {
-  const search = new URLSearchParams();
-  search.set('limit', String(params.limit ?? 50));
-  search.set('offset', String(params.offset ?? 0));
-  if (params.status && params.status !== 'all') search.set('status', params.status);
-  if (params.sourceId) search.set('source_id', String(params.sourceId));
-  if (params.indexRunId) search.set('index_run_id', String(params.indexRunId));
-  return request<Page<AdminCrawlJob>>(`/api/admin/crawl-jobs?${search.toString()}`);
-}
-
-export function getAdminIndexRuns(params: { limit?: number; offset?: number; status?: string } = {}): Promise<Page<AdminIndexRun>> {
-  const search = new URLSearchParams();
-  search.set('limit', String(params.limit ?? 50));
-  search.set('offset', String(params.offset ?? 0));
-  if (params.status && params.status !== 'all') search.set('status', params.status);
-  return request<Page<AdminIndexRun>>(`/api/admin/index-runs?${search.toString()}`);
 }

@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import json
+from contextlib import asynccontextmanager
 from typing import TypeVar
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Response, status
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import StreamingResponse
@@ -39,7 +40,12 @@ from iris.schemas.api import (
     AdminCrawlJobSchema,
     AdminIndexRunSchema,
     AdminOverviewSchema,
+    AdminConversationMessageSchema,
+    AdminConversationSchema,
+    AdminQueryResultSchema,
+    AdminQuerySchema,
     AdminSourceSchema,
+    AdminUserSchema,
     AgentChatRequestSchema,
     AgentChatSchema,
     AgentConversationSchema,
@@ -74,6 +80,7 @@ from iris.schemas.api import (
     HighlightSchema,
     HighlightUpdateSchema,
     PageSchema,
+    OnboardingCompleteSchema,
     PersonSchema,
     SearchResultSchema,
     SearchSchema,
@@ -86,8 +93,8 @@ from iris.schemas.api import (
     UserWebsiteCreateSchema,
     UserWebsiteSchema,
 )
-from iris.services.auth import verify_firebase_token
-from iris.services.common.config import ADMIN_EMAILS, firebase_auth_enabled, openai_api_key
+from iris.services.auth import verify_firebase_token, warm_firebase_token_verifier
+from iris.services.common.config import ADMIN_EMAILS, cors_origins, firebase_auth_enabled, openai_api_key
 from iris.services.common.langfuse_tracing import agent_conversation_session_id, agent_trace_metadata, agent_user_id
 from iris.services.retrieval.search import search_documents, stream_openai_agentic_chat, synthesize_answer
 from iris.services.retrieval.source_profiles import generate_source_profile
@@ -96,21 +103,23 @@ from iris.services.ingestion.source_classifier import classify_source_url
 from iris.services.common.url_utils import normalize_url
 
 
-app = FastAPI(title="Iris", version="0.1.0")
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    warm_firebase_token_verifier()
+    yield
+
+
+app = FastAPI(title="Iris", version="0.1.0", lifespan=lifespan)
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-        "http://localhost:5175",
-        "http://localhost:5180",
-    ],
+    allow_origins=cors_origins(),
     allow_origin_regex=r"http://(localhost|127\.0\.0\.1):517\d",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
 
 T = TypeVar("T")
 
@@ -173,6 +182,7 @@ def dump_user(user: User) -> UserSchema:
         display_name=user.display_name,
         photo_url=user.photo_url,
         username=profile.username,
+        onboarding_completed_at=user.onboarding_completed_at,
         is_admin=is_admin_user(user),
     )
 
@@ -199,21 +209,23 @@ def _dump_person(viewer: User, person: User) -> PersonSchema:
     return PersonSchema(
         user_id=person.id,
         username=profile.username,
-        display_name=person.display_name,
-        photo_url=person.photo_url,
+        display_name=None,
+        photo_url=None,
         relationship=social_dao.relationship_state(viewer, person),
     )
 
 
 def _dump_profile(viewer: User, profile: UserProfile) -> UserProfileSchema:
+    relationship = social_dao.relationship_state(viewer, profile.user)
+    can_view_private_profile = relationship in {"self", "connected"}
     return UserProfileSchema(
         user_id=profile.user_id,
         username=profile.username,
-        display_name=profile.user.display_name,
-        photo_url=profile.user.photo_url,
-        bio=profile.bio,
-        relationship=social_dao.relationship_state(viewer, profile.user),
-        websites=[_dump_website(website) for website in profile.websites],
+        display_name=None,
+        photo_url=None,
+        bio=profile.bio if can_view_private_profile else None,
+        relationship=relationship,
+        websites=[_dump_website(website) for website in profile.websites] if can_view_private_profile else [],
     )
 
 
@@ -221,6 +233,7 @@ def _dump_friendship(viewer: User, friendship: Friendship) -> FriendshipSchema:
     return FriendshipSchema(
         id=friendship.id,
         status=friendship.status,
+        requested_by_me=friendship.requester_id == viewer.id,
         created_at=friendship.created_at,
         updated_at=friendship.updated_at,
         person=_dump_person(viewer, social_dao.other_user(friendship, viewer)),
@@ -235,6 +248,29 @@ def health(_bound_session=Depends(get_session)) -> HealthSchema:
 
 @app.get("/api/me", response_model=UserSchema)
 def me(_bound_session=Depends(get_session), user: User = Depends(get_current_user)) -> UserSchema:
+    return dump_user(user)
+
+
+@app.post("/api/onboarding", response_model=UserSchema)
+def complete_onboarding(
+    payload: OnboardingCompleteSchema,
+    _bound_session=Depends(get_session),
+    user: User = Depends(get_current_user),
+) -> UserSchema:
+    from iris.models.sqla import utcnow
+
+    try:
+        social_dao.update_profile(
+            user,
+            username=payload.username,
+            update_username=True,
+        )
+        if payload.website_url and payload.website_url.strip():
+            social_dao.attach_website(user, url=payload.website_url.strip())
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    user.onboarding_completed_at = user.onboarding_completed_at or utcnow()
+    db.flush()
     return dump_user(user)
 
 
@@ -311,10 +347,25 @@ def get_user_profile(
     _bound_session=Depends(get_session),
     user: User = Depends(get_current_user),
 ) -> UserProfileSchema:
-    profile = social_dao.get_visible_profile(user, username)
+    profile = social_dao.get_profile(username)
     if profile is None:
         raise HTTPException(status_code=404, detail="Profile not found")
     return _dump_profile(user, profile)
+
+
+@app.get("/api/users/{username}/friends", response_model=list[PersonSchema])
+def list_user_friends(
+    username: str,
+    _bound_session=Depends(get_session),
+    user: User = Depends(get_current_user),
+) -> list[PersonSchema]:
+    profile = social_dao.get_visible_profile(user, username)
+    if profile is None:
+        raise HTTPException(status_code=404, detail="Profile not found")
+    return [
+        _dump_person(user, social_dao.other_user(friendship, profile.user))
+        for friendship in social_dao.connected_friendships(profile.user)
+    ]
 
 
 @app.get("/api/friends", response_model=list[FriendshipSchema])
@@ -332,23 +383,36 @@ def list_friends(
 def friends_feed(
     limit: int = 50,
     offset: int = 0,
+    username: str | None = None,
     _bound_session=Depends(get_session),
     user: User = Depends(get_current_user),
 ) -> PageSchema[FriendFeedItemSchema]:
-    rows, total = social_dao.friend_feed(user, limit=limit, offset=offset)
+    friend_user_id = None
+    if username:
+        profile = social_dao.get_visible_profile(user, username)
+        if profile is None:
+            raise HTTPException(status_code=404, detail="Profile not found")
+        friend_user_id = profile.user_id
+    events, total = social_dao.friend_feed(
+        user,
+        limit=limit,
+        offset=offset,
+        friend_user_id=friend_user_id,
+    )
     items = [
         FriendFeedItemSchema(
-            person=_dump_person(user, friend),
-            document=_dump_document_for_user(mapping.document, user),
-            status=mapping.bookshelf_status,
-            favorited=mapping.favorited_at is not None,
-            activity_at=(
-                mapping.read_at
-                or mapping.first_seen_at
-                or mapping.updated_at
-            ),
+            activity_id=event.activity_id,
+            person=_dump_person(user, event.person),
+            document=_dump_document_for_user(event.mapping.document, user),
+            activity_type=event.activity_type,
+            status=event.mapping.bookshelf_status,
+            favorited=event.mapping.favorited_at is not None,
+            highlight_quote=event.highlight_quote,
+            highlight_count=len(event.highlight_quotes),
+            highlight_quotes=list(event.highlight_quotes),
+            activity_at=event.activity_at,
         )
-        for mapping, friend in rows
+        for event in events
     ]
     return _page_response(items, total, limit, offset)
 
@@ -471,6 +535,8 @@ def list_documents(
     document_type: str | None = None,
     crawl_job_id: int | None = None,
     index_run_id: int | None = None,
+    text_filter: list[str] = Query(default=[]),
+    tag: list[str] = Query(default=[]),
     _bound_session=Depends(get_session),
 ) -> PageSchema[DocumentSchema]:
     documents, total = admin.get_documents_page(
@@ -480,6 +546,8 @@ def list_documents(
         document_type=document_type,
         crawl_job_id=crawl_job_id,
         index_run_id=index_run_id,
+        text_filters=text_filter,
+        tag_filters=tag,
     )
     return _page_response([dump_document(document) for document in documents], total, limit, offset)
 
@@ -511,9 +579,81 @@ def admin_sources(
     limit: int = 200,
     offset: int = 0,
     _bound_session=Depends(get_session),
+    _admin_user: User = Depends(require_admin),
 ) -> PageSchema[AdminSourceSchema]:
     items, total = admin.get_admin_sources_page(status=status, q=q, limit=limit, offset=offset)
     return _page_response(items, total, limit, offset)
+
+
+@app.get("/api/admin/queries", response_model=PageSchema[AdminQuerySchema])
+def admin_queries(
+    q: str | None = None,
+    user_id: int | None = None,
+    limit: int = 50,
+    offset: int = 0,
+    _bound_session=Depends(get_session),
+    _admin_user: User = Depends(require_admin),
+) -> PageSchema[AdminQuerySchema]:
+    items, total = admin.get_admin_queries_page(
+        q=q, user_id=user_id, limit=limit, offset=offset
+    )
+    return _page_response(items, total, limit, offset)
+
+
+@app.get("/api/admin/users", response_model=PageSchema[AdminUserSchema])
+def admin_users(
+    q: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+    _bound_session=Depends(get_session),
+    _admin_user: User = Depends(require_admin),
+) -> PageSchema[AdminUserSchema]:
+    items, total = admin.get_admin_users_page(q=q, limit=limit, offset=offset)
+    return _page_response(items, total, limit, offset)
+
+
+@app.get("/api/admin/conversations/{conversation_uuid}", response_model=AdminConversationSchema)
+def admin_conversation(
+    conversation_uuid: str,
+    _bound_session=Depends(get_session),
+    _admin_user: User = Depends(require_admin),
+) -> AdminConversationSchema:
+    conversation = admin.get_admin_conversation(conversation_uuid)
+    if not conversation:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    profile = conversation.user.profile
+    return AdminConversationSchema(
+        id=conversation.id,
+        uuid=conversation.uuid,
+        title=conversation.title,
+        created_at=conversation.created_at,
+        updated_at=conversation.updated_at,
+        user_id=conversation.user.id,
+        email=conversation.user.email,
+        username=profile.username if profile else None,
+        messages=[
+            AdminConversationMessageSchema(
+                id=message.id,
+                role=message.role,
+                content=message.content,
+                created_at=message.created_at,
+                steps=message.steps or [],
+                results=[
+                    AdminQueryResultSchema(
+                        rank=result.rank,
+                        score=result.score,
+                        reason=result.reason,
+                        document_uuid=result.document.uuid,
+                        title=result.document.title,
+                        url=result.document.url,
+                        source_domain=result.document.source.canonical_domain,
+                    )
+                    for result in message.results
+                ],
+            )
+            for message in conversation.messages
+        ],
+    )
 
 
 @app.get("/api/directory/sources", response_model=PageSchema[DirectorySourceSchema])
@@ -524,9 +664,22 @@ def directory_sources(
     direction: str = "desc",
     limit: int = 50,
     offset: int = 0,
+    text_filter: list[str] = Query(default=[]),
+    tag: list[str] = Query(default=[]),
     _bound_session=Depends(get_session),
+    user: User | None = Depends(get_optional_user),
 ) -> PageSchema[DirectorySourceSchema]:
-    items, total = directory_dao.get_source_directory_page(status=status, q=q, sort=sort, direction=direction, limit=limit, offset=offset)
+    items, total = directory_dao.get_source_directory_page(
+        status=status,
+        q=q,
+        user_id=user.id if user else None,
+        text_filters=text_filter,
+        tag_filters=tag,
+        sort=sort,
+        direction=direction,
+        limit=limit,
+        offset=offset,
+    )
     return _page_response(items, total, limit, offset)
 
 
@@ -842,11 +995,13 @@ async def _agent_chat_event_chunks(event, conversation, user_message, payload: A
                 "step": _agent_step_payload(event.step),
                 "hits": [
                     {
+                        "uuid": row.document.uuid,
                         "title": row.document.title or row.document.url,
                         "source_domain": row.document.source.canonical_domain,
+                        "url": row.document.url,
                         "reason": row.reason,
                     }
-                    for row in event.rows[:5]
+                    for row in event.rows
                 ],
             },
         )
@@ -891,6 +1046,16 @@ def _agent_step_payload(step) -> dict[str, object]:
         "tool": tool,
         "query": step.query,
         "hits": step.hits,
+        "documents": [
+            {
+                "uuid": document.uuid,
+                "title": document.title,
+                "source_domain": document.source_domain,
+                "url": document.url,
+                "reason": document.reason,
+            }
+            for document in step.documents
+        ],
     }
 
 
@@ -976,6 +1141,7 @@ def _dump_agent_message(message, user: User) -> AgentMessageSchema:
             tool=step.get("tool"),
             query=step.get("query"),
             hits=step.get("hits"),
+            documents=step.get("documents") or [],
         )
         for step in (message.steps or [])
     ]
@@ -1268,9 +1434,10 @@ def get_shared_bookshelf_collection(
 @app.get("/api/embedding-map", response_model=EmbeddingMapSchema)
 def embedding_map(
     limit: int = 3000,
+    source_id: int | None = None,
     _bound_session=Depends(get_session),
 ) -> EmbeddingMapSchema:
-    return admin.get_embedding_map(limit=limit)
+    return admin.get_embedding_map(limit=limit, source_id=source_id)
 
 
 @app.get("/api/graph", response_model=GraphSchema)
