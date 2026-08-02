@@ -45,6 +45,7 @@ from iris.schemas.api import (
     AdminQueryResultSchema,
     AdminQuerySchema,
     AdminSourceSchema,
+    AdminUserLibrarySchema,
     AdminUserSchema,
     AgentChatRequestSchema,
     AgentChatSchema,
@@ -610,6 +611,33 @@ def admin_users(
 ) -> PageSchema[AdminUserSchema]:
     items, total = admin.get_admin_users_page(q=q, limit=limit, offset=offset)
     return _page_response(items, total, limit, offset)
+
+
+@app.get("/api/admin/users/{user_id}/library", response_model=AdminUserLibrarySchema)
+def admin_user_library(
+    user_id: int,
+    limit: int = 50,
+    offset: int = 0,
+    _bound_session=Depends(get_session),
+    _admin_user: User = Depends(require_admin),
+) -> AdminUserLibrarySchema:
+    user = db.current_session().get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    mappings, total = bookshelf_dao.list_entries(
+        user,
+        limit=_clamped_limit(limit),
+        offset=max(offset, 0),
+    )
+    entries = _dump_bookshelf_entries(user, mappings)
+    collections = [
+        _dump_bookshelf_collection(collection)
+        for collection in bookshelf_dao.list_collections(user)
+    ]
+    return AdminUserLibrarySchema(
+        collections=collections,
+        entries=_page_response(entries, total, limit, offset),
+    )
 
 
 @app.get("/api/admin/conversations/{conversation_uuid}", response_model=AdminConversationSchema)

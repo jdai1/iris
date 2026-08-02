@@ -1,5 +1,5 @@
 import { auth } from './firebase';
-import type { AdminConversation, AdminOverview, AdminQuery, AdminUser, IrisUser, Page } from './types';
+import type { AdminConversation, AdminOverview, AdminQuery, AdminUser, AdminUserLibrary, IrisUser, Page } from './types';
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? 'http://127.0.0.1:8000';
 
@@ -11,7 +11,14 @@ async function request<T>(path: string): Promise<T> {
   }
   if (!response.ok) {
     const payload = await response.text();
-    throw new Error(payload || `Request failed (${response.status})`);
+    let detail = payload;
+    try {
+      const parsed = JSON.parse(payload) as { detail?: string };
+      detail = parsed.detail || payload;
+    } catch {
+      // Keep non-JSON error responses as-is.
+    }
+    throw new Error(detail || `Request failed (${response.status})`);
   }
   return response.json() as Promise<T>;
 }
@@ -26,4 +33,5 @@ export const getMe = () => request<IrisUser>('/api/me');
 export const getQueries = (params: { q?: string; userId?: number; limit: number; offset: number }) => request<Page<AdminQuery>>(pagePath('/api/admin/queries', { q: params.q, user_id: params.userId, limit: params.limit, offset: params.offset }));
 export const getConversation = (uuid: string) => request<AdminConversation>(`/api/admin/conversations/${encodeURIComponent(uuid)}`);
 export const getUsers = (params: { q?: string; limit: number; offset: number }) => request<Page<AdminUser>>(pagePath('/api/admin/users', params));
+export const getUserLibrary = (userId: number, params: { limit: number; offset: number }) => request<AdminUserLibrary>(pagePath(`/api/admin/users/${userId}/library`, params));
 export const getOverview = () => request<AdminOverview>('/api/admin/overview');

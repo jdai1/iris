@@ -376,6 +376,11 @@ class BookshelfCollectionSchema(BaseModel):
     items: list[BookshelfEntrySchema] = []
 
 
+class AdminUserLibrarySchema(BaseModel):
+    collections: list[BookshelfCollectionSchema] = Field(default_factory=list)
+    entries: PageSchema[BookshelfEntrySchema]
+
+
 class EmbeddingMapDocumentSchema(BaseModel):
     uuid: str
     source_domain: str

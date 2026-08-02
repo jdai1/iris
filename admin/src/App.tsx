@@ -1,11 +1,12 @@
 import { type FormEvent, type ReactNode, useEffect, useState } from 'react';
 import { onAuthStateChanged, signInWithPopup, signOut, type User as FirebaseUser } from 'firebase/auth';
-import { ArrowRight, BarChart3, ExternalLink, LogOut, MessageSquareText, RefreshCw, Search, Users, X } from 'lucide-react';
-import { getConversation, getMe, getOverview, getQueries, getUsers } from './api';
+import { ArrowRight, BarChart3, Bookmark, ExternalLink, Folder, Heart, LogOut, MessageSquareText, RefreshCw, Search, StickyNote, Users, X } from 'lucide-react';
+import { getConversation, getMe, getOverview, getQueries, getUserLibrary, getUsers } from './api';
 import { IrisMark } from './components/IrisMark';
 import { Button } from './components/ui/button';
 import { auth, firebaseEnabled, googleProvider } from './firebase';
-import type { AdminConversation, AdminOverview, AdminQuery, AdminUser, IrisUser, Page } from './types';
+import { cn } from './lib/utils';
+import type { AdminConversation, AdminLibraryEntry, AdminOverview, AdminQuery, AdminUser, AdminUserLibrary, IrisUser, Page } from './types';
 
 type View = 'overview' | 'queries' | 'users';
 const emptyPage = <T,>(): Page<T> => ({ items: [], total: 0, limit: 50, offset: 0, has_next: false, has_previous: false });
@@ -207,19 +208,76 @@ function UsersPage({ onViewQueries }: { onViewQueries: (userId: number) => void 
 
 function UserReportPanel({ user, onClose, onViewQueries }: { user: AdminUser; onClose: () => void; onViewQueries: (userId: number) => void }) {
   const [queries, setQueries] = useState<Page<AdminQuery>>(emptyPage);
-  const [error, setError] = useState<string>();
+  const [library, setLibrary] = useState<AdminUserLibrary>();
+  const [queryError, setQueryError] = useState<string>();
+  const [libraryError, setLibraryError] = useState<string>();
   useEffect(() => {
-    getQueries({ userId: user.id, limit: 10, offset: 0 }).then(setQueries).catch((err) => setError(readError(err)));
+    let active = true;
+    setQueries(emptyPage());
+    setLibrary(undefined);
+    setQueryError(undefined);
+    setLibraryError(undefined);
+    Promise.allSettled([
+      getQueries({ userId: user.id, limit: 10, offset: 0 }),
+      getUserLibrary(user.id, { limit: 50, offset: 0 }),
+    ]).then(([queryResult, libraryResult]) => {
+      if (!active) return;
+      if (queryResult.status === 'fulfilled') setQueries(queryResult.value);
+      else setQueryError(readError(queryResult.reason));
+      if (libraryResult.status === 'fulfilled') setLibrary(libraryResult.value);
+      else setLibraryError(readError(libraryResult.reason));
+    });
+    return () => { active = false; };
   }, [user.id]);
+  async function pageLibrary(offset: number) {
+    setLibraryError(undefined);
+    try { setLibrary(await getUserLibrary(user.id, { limit: library?.entries.limit ?? 50, offset })); }
+    catch (err) { setLibraryError(readError(err)); }
+  }
   const metrics = [['Chats', user.conversation_count], ['Queries', user.query_count], ['Saved', user.saved_document_count]] as const;
   return (
     <Drawer onClose={onClose} title={user.username ? `@${user.username}` : user.email} subtitle={user.username ? user.email : 'User report'}>
       <dl className="grid grid-cols-2 border-y text-sm"><div className="p-4"><dt className="text-xs uppercase text-muted-foreground">Joined</dt><dd className="mt-1">{formatDate(user.created_at)}</dd></div><div className="border-l p-4"><dt className="text-xs uppercase text-muted-foreground">Onboarding</dt><dd className="mt-1">{user.onboarding_completed_at ? 'Complete' : 'Incomplete'}</dd></div></dl>
       <div className="mt-6 grid grid-cols-3 border-y">{metrics.map(([label, value], index) => <div key={label} className={`p-4 ${index > 0 ? 'border-l' : ''}`}><p className="text-xs uppercase text-muted-foreground">{label}</p><p className="mt-1 text-2xl font-semibold">{value.toLocaleString()}</p></div>)}</div>
       <div className="mt-8 flex items-end justify-between"><div><p className="text-xs font-semibold uppercase text-muted-foreground">Activity sample</p><h3 className="mt-1 font-semibold">Recent queries</h3></div><Button uiVariant="rowAction" onClick={() => onViewQueries(user.id)}>View all <ArrowRight size={14} /></Button></div>
-      {error && <Notice tone="error">{error}</Notice>}
-      <div className="mt-3 border-y">{queries.items.map((query) => <div key={query.id} className="border-b px-3 py-3 last:border-0"><p className="text-sm font-medium">{query.content}</p><p className="mt-1 text-xs text-muted-foreground">{formatDate(query.created_at)} · {query.step_count} steps · {query.result_count} results</p></div>)}{queries.items.length === 0 && !error && <Notice>No recent queries.</Notice>}</div>
+      {queryError && <Notice tone="error">Recent queries unavailable: {queryError}</Notice>}
+      <div className="mt-3 border-y">{queries.items.map((query) => <div key={query.id} className="border-b px-3 py-3 last:border-0"><p className="text-sm font-medium">{query.content}</p><p className="mt-1 text-xs text-muted-foreground">{formatDate(query.created_at)} · {query.step_count} steps · {query.result_count} results</p></div>)}{queries.items.length === 0 && !queryError && <Notice>No recent queries.</Notice>}</div>
+      <div className="mt-8 flex items-end justify-between gap-4"><div><p className="text-xs font-semibold uppercase text-muted-foreground">Organization</p><h3 className="mt-1 font-semibold">Collections</h3></div><span className="text-xs text-muted-foreground">{library?.collections.length ?? '—'}</span></div>
+      {libraryError && <Notice tone="error">Library data unavailable: {libraryError}</Notice>}
+      <div className="mt-3 border-y">
+        {library?.collections.map((collection) => (
+          <details key={collection.id} className="group border-b last:border-0">
+            <summary className="flex cursor-pointer list-none items-center gap-3 px-3 py-3 hover:bg-muted/30">
+              <Folder size={16} className="shrink-0 text-muted-foreground" />
+              <span className="min-w-0 flex-1"><span className="block truncate text-sm font-medium">{collection.name}</span>{collection.description && <span className="mt-0.5 block truncate text-xs text-muted-foreground">{collection.description}</span>}</span>
+              <span className="text-xs text-muted-foreground">{collection.items.length} {collection.items.length === 1 ? 'item' : 'items'} · {collection.visibility === 'share_link' ? 'Shared' : 'Private'}</span>
+            </summary>
+            <div className="border-t bg-muted/10 px-3">{collection.items.map((entry) => <LibraryEntryRow key={entry.document.uuid} entry={entry} compact />)}{collection.items.length === 0 && <Notice>Nothing in this collection.</Notice>}</div>
+          </details>
+        ))}
+        {library && library.collections.length === 0 && <Notice>No collections.</Notice>}
+        {!library && !libraryError && <Notice>Loading collections…</Notice>}
+      </div>
+      <div className="mt-8"><p className="text-xs font-semibold uppercase text-muted-foreground">Saved state</p><h3 className="mt-1 font-semibold">Library items</h3></div>
+      {library && <Pager page={library.entries} onPage={pageLibrary} />}
+      <div className="border-y">{library?.entries.items.map((entry) => <LibraryEntryRow key={entry.document.uuid} entry={entry} />)}{library && library.entries.items.length === 0 && <Notice>No saved items.</Notice>}{!library && !libraryError && <Notice>Loading library…</Notice>}</div>
     </Drawer>
+  );
+}
+
+function LibraryEntryRow({ entry, compact = false }: { entry: AdminLibraryEntry; compact?: boolean }) {
+  const detail = [entry.status, entry.favorited ? 'favorited' : null, ...entry.tags].filter(Boolean).join(' · ');
+  return (
+    <div className={cn('flex gap-3 border-b py-3 last:border-0', !compact && 'px-3')}>
+      <Bookmark size={16} className="mt-0.5 shrink-0 text-muted-foreground" />
+      <div className="min-w-0 flex-1">
+        <a className="block truncate text-sm font-medium hover:text-primary" href={entry.document.url} target="_blank" rel="noreferrer">{entry.document.title || entry.document.url} <ExternalLink className="inline" size={12} /></a>
+        <p className="mt-0.5 truncate text-xs text-muted-foreground">{entry.document.source_domain} · {detail}</p>
+        {entry.note && <p className="mt-2 flex gap-2 text-xs leading-5"><StickyNote size={13} className="mt-0.5 shrink-0" />{entry.note}</p>}
+        {entry.intent_note && <p className="mt-1 text-xs leading-5 text-muted-foreground">Intent: {entry.intent_note}</p>}
+      </div>
+      {entry.favorited && <Heart size={15} className="mt-0.5 shrink-0" aria-label="Favorited" />}
+    </div>
   );
 }
 
