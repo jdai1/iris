@@ -6,23 +6,38 @@ import json
 from collections import Counter
 from collections import defaultdict
 
-from sqlalchemy import String, cast, desc, func, select
-from sqlalchemy.orm import joinedload, load_only
+from sqlalchemy import String, cast, desc, func, or_, select
+from sqlalchemy.orm import joinedload, load_only, selectinload
 
 from iris.dao import db
-from iris.models import CrawlJob, Document, IndexEvent, IndexRun, Link, Source
+from iris.models import (
+    AgentConversation,
+    AgentMessage,
+    AgentSearchResult,
+    CrawlJob,
+    Document,
+    IndexEvent,
+    IndexRun,
+    Link,
+    Source,
+    User,
+    UserDocumentMapping,
+    UserProfile,
+)
 from iris.schemas.api import (
     AdminCrawlJobSchema,
     AdminIndexRunSchema,
     AdminLatestJobSchema,
     AdminOverviewSchema,
+    AdminQuerySchema,
+    AdminUserSchema,
     AdminSourceSchema,
     EmbeddingMapDocumentSchema,
     EmbeddingMapPointSchema,
     EmbeddingMapSchema,
     HealthCountsSchema,
 )
-from iris.schemas.enums import CrawlJobStatus, DocumentType, IndexEventType
+from iris.schemas.enums import AgentMessageRole, CrawlJobStatus, DocumentType, IndexEventType
 from iris.schemas.enums import SourceStatus
 from iris.schemas.indexing import SourceFinishedEventPayload
 from iris.services.ingestion.embedding import loads_embedding
@@ -112,6 +127,20 @@ def get_admin_overview() -> AdminOverviewSchema:
         ).all()
     }
     totals = {
+        "users": session.scalar(select(func.count(User.id))) or 0,
+        "conversations": session.scalar(select(func.count(AgentConversation.id))) or 0,
+        "queries": session.scalar(
+            select(func.count(AgentMessage.id)).where(AgentMessage.role == AgentMessageRole.USER)
+        ) or 0,
+        "saved_documents": session.scalar(
+            select(func.count(UserDocumentMapping.id)).where(
+                or_(
+                    UserDocumentMapping.bookshelf_status.is_not(None),
+                    UserDocumentMapping.favorited_at.is_not(None),
+                    UserDocumentMapping.note.is_not(None),
+                )
+            )
+        ) or 0,
         "sources": session.scalar(select(func.count(Source.id))) or 0,
         "documents": session.scalar(select(func.count(Document.id))) or 0,
         "essay_documents": session.scalar(select(func.count(Document.id)).where(Document.document_type == DocumentType.ESSAY.value)) or 0,
@@ -121,6 +150,154 @@ def get_admin_overview() -> AdminOverviewSchema:
         "index_runs": session.scalar(select(func.count(IndexRun.id))) or 0,
     }
     return AdminOverviewSchema(totals=totals, source_statuses=source_statuses, document_types=document_types)
+
+
+def get_admin_queries_page(
+    *, q: str | None, user_id: int | None, limit: int, offset: int
+) -> tuple[list[AdminQuerySchema], int]:
+    """Return recent user prompts across accounts with their next assistant response."""
+    session = db.current_session()
+    statement = (
+        select(AgentMessage, AgentConversation, User, UserProfile.username)
+        .join(AgentConversation, AgentMessage.conversation_id == AgentConversation.id)
+        .join(User, AgentConversation.user_id == User.id)
+        .outerjoin(UserProfile, UserProfile.user_id == User.id)
+        .where(AgentMessage.role == AgentMessageRole.USER)
+        .order_by(AgentMessage.created_at.desc(), AgentMessage.id.desc())
+    )
+    if q:
+        pattern = f"%{q.strip()}%"
+        statement = statement.where(
+            AgentMessage.content.ilike(pattern)
+            | User.email.ilike(pattern)
+            | UserProfile.username.ilike(pattern)
+        )
+    if user_id is not None:
+        statement = statement.where(User.id == user_id)
+    total = count_statement(statement)
+    rows = session.execute(
+        statement.limit(clamped_limit(limit)).offset(max(offset, 0))
+    ).all()
+
+    conversation_ids = {conversation.id for _message, conversation, _user, _username in rows}
+    assistant_messages = (
+        session.execute(
+            select(AgentMessage)
+            .options(selectinload(AgentMessage.results))
+            .where(AgentMessage.conversation_id.in_(conversation_ids))
+            .where(AgentMessage.role == AgentMessageRole.ASSISTANT)
+            .order_by(AgentMessage.id)
+        )
+        .scalars()
+        .all()
+        if conversation_ids
+        else []
+    )
+    assistants_by_conversation: dict[int, list[AgentMessage]] = defaultdict(list)
+    for assistant in assistant_messages:
+        assistants_by_conversation[assistant.conversation_id].append(assistant)
+
+    items: list[AdminQuerySchema] = []
+    for message, conversation, user, username in rows:
+        assistant = next(
+            (candidate for candidate in assistants_by_conversation[conversation.id] if candidate.id > message.id),
+            None,
+        )
+        preview = " ".join(assistant.content.split()) if assistant else None
+        if preview and len(preview) > 240:
+            preview = f"{preview[:237]}..."
+        items.append(
+            AdminQuerySchema(
+                id=message.id,
+                conversation_uuid=conversation.uuid,
+                conversation_title=conversation.title,
+                user_id=user.id,
+                email=user.email,
+                username=username,
+                content=message.content,
+                created_at=message.created_at,
+                answer_preview=preview,
+                step_count=len(assistant.steps or []) if assistant else 0,
+                result_count=len(assistant.results) if assistant else 0,
+            )
+        )
+    return items, total
+
+
+def get_admin_users_page(
+    *, q: str | None, limit: int, offset: int
+) -> tuple[list[AdminUserSchema], int]:
+    """Return users with lightweight product-usage counts."""
+    session = db.current_session()
+    statement = (
+        select(User, UserProfile.username)
+        .outerjoin(UserProfile, UserProfile.user_id == User.id)
+        .order_by(User.created_at.desc(), User.id.desc())
+    )
+    if q:
+        pattern = f"%{q.strip()}%"
+        statement = statement.where(User.email.ilike(pattern) | UserProfile.username.ilike(pattern))
+    total = count_statement(statement)
+    rows = session.execute(
+        statement.limit(clamped_limit(limit)).offset(max(offset, 0))
+    ).all()
+    user_ids = [user.id for user, _username in rows]
+
+    def grouped_counts(statement):
+        return dict(session.execute(statement).all()) if user_ids else {}
+
+    conversation_counts = grouped_counts(
+        select(AgentConversation.user_id, func.count(AgentConversation.id))
+        .where(AgentConversation.user_id.in_(user_ids))
+        .group_by(AgentConversation.user_id)
+    )
+    query_counts = grouped_counts(
+        select(AgentConversation.user_id, func.count(AgentMessage.id))
+        .join(AgentMessage, AgentMessage.conversation_id == AgentConversation.id)
+        .where(AgentConversation.user_id.in_(user_ids))
+        .where(AgentMessage.role == AgentMessageRole.USER)
+        .group_by(AgentConversation.user_id)
+    )
+    saved_counts = grouped_counts(
+        select(UserDocumentMapping.user_id, func.count(UserDocumentMapping.id))
+        .where(UserDocumentMapping.user_id.in_(user_ids))
+        .where(
+            or_(
+                UserDocumentMapping.bookshelf_status.is_not(None),
+                UserDocumentMapping.favorited_at.is_not(None),
+                UserDocumentMapping.note.is_not(None),
+            )
+        )
+        .group_by(UserDocumentMapping.user_id)
+    )
+    return [
+        AdminUserSchema(
+            id=user.id,
+            email=user.email,
+            username=username,
+            created_at=user.created_at,
+            onboarding_completed_at=user.onboarding_completed_at,
+            conversation_count=int(conversation_counts.get(user.id, 0)),
+            query_count=int(query_counts.get(user.id, 0)),
+            saved_document_count=int(saved_counts.get(user.id, 0)),
+        )
+        for user, username in rows
+    ], total
+
+
+def get_admin_conversation(conversation_uuid: str) -> AgentConversation | None:
+    """Fetch any conversation for an administrator without changing user-scoped reads."""
+    return db.current_session().scalar(
+        select(AgentConversation)
+        .options(
+            joinedload(AgentConversation.user).joinedload(User.profile),
+            selectinload(AgentConversation.messages)
+            .selectinload(AgentMessage.results)
+            .joinedload(AgentSearchResult.document)
+            .joinedload(Document.source),
+        )
+        .where(AgentConversation.uuid == conversation_uuid)
+    )
 
 
 def get_embedding_map(*, limit: int, source_id: int | None = None) -> EmbeddingMapSchema:

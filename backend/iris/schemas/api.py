@@ -420,6 +420,62 @@ class AdminOverviewSchema(BaseModel):
     document_types: dict[str, int]
 
 
+class AdminQuerySchema(BaseModel):
+    id: int
+    conversation_uuid: str
+    conversation_title: str | None
+    user_id: int
+    email: str
+    username: str | None
+    content: str
+    created_at: datetime
+    answer_preview: str | None
+    step_count: int
+    result_count: int
+
+
+class AdminUserSchema(BaseModel):
+    id: int
+    email: str
+    username: str | None
+    created_at: datetime
+    onboarding_completed_at: datetime | None
+    conversation_count: int
+    query_count: int
+    saved_document_count: int
+
+
+class AdminQueryResultSchema(BaseModel):
+    rank: int
+    score: float
+    reason: str
+    document_uuid: str
+    title: str | None
+    url: str
+    source_domain: str
+
+
+class AdminConversationMessageSchema(BaseModel):
+    id: int
+    role: AgentMessageRole
+    content: str
+    created_at: datetime
+    steps: list[dict] = Field(default_factory=list)
+    results: list[AdminQueryResultSchema] = Field(default_factory=list)
+
+
+class AdminConversationSchema(BaseModel):
+    id: int
+    uuid: str
+    title: str | None
+    created_at: datetime
+    updated_at: datetime
+    user_id: int
+    email: str
+    username: str | None
+    messages: list[AdminConversationMessageSchema] = Field(default_factory=list)
+
+
 class AdminLatestJobSchema(BaseModel):
     id: int
     index_run_id: int | None

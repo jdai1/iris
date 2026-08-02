@@ -40,7 +40,12 @@ from iris.schemas.api import (
     AdminCrawlJobSchema,
     AdminIndexRunSchema,
     AdminOverviewSchema,
+    AdminConversationMessageSchema,
+    AdminConversationSchema,
+    AdminQueryResultSchema,
+    AdminQuerySchema,
     AdminSourceSchema,
+    AdminUserSchema,
     AgentChatRequestSchema,
     AgentChatSchema,
     AgentConversationSchema,
@@ -577,6 +582,77 @@ def admin_sources(
 ) -> PageSchema[AdminSourceSchema]:
     items, total = admin.get_admin_sources_page(status=status, q=q, limit=limit, offset=offset)
     return _page_response(items, total, limit, offset)
+
+
+@app.get("/api/admin/queries", response_model=PageSchema[AdminQuerySchema])
+def admin_queries(
+    q: str | None = None,
+    user_id: int | None = None,
+    limit: int = 50,
+    offset: int = 0,
+    _bound_session=Depends(get_session),
+    _admin_user: User = Depends(require_admin),
+) -> PageSchema[AdminQuerySchema]:
+    items, total = admin.get_admin_queries_page(
+        q=q, user_id=user_id, limit=limit, offset=offset
+    )
+    return _page_response(items, total, limit, offset)
+
+
+@app.get("/api/admin/users", response_model=PageSchema[AdminUserSchema])
+def admin_users(
+    q: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+    _bound_session=Depends(get_session),
+    _admin_user: User = Depends(require_admin),
+) -> PageSchema[AdminUserSchema]:
+    items, total = admin.get_admin_users_page(q=q, limit=limit, offset=offset)
+    return _page_response(items, total, limit, offset)
+
+
+@app.get("/api/admin/conversations/{conversation_uuid}", response_model=AdminConversationSchema)
+def admin_conversation(
+    conversation_uuid: str,
+    _bound_session=Depends(get_session),
+    _admin_user: User = Depends(require_admin),
+) -> AdminConversationSchema:
+    conversation = admin.get_admin_conversation(conversation_uuid)
+    if not conversation:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    profile = conversation.user.profile
+    return AdminConversationSchema(
+        id=conversation.id,
+        uuid=conversation.uuid,
+        title=conversation.title,
+        created_at=conversation.created_at,
+        updated_at=conversation.updated_at,
+        user_id=conversation.user.id,
+        email=conversation.user.email,
+        username=profile.username if profile else None,
+        messages=[
+            AdminConversationMessageSchema(
+                id=message.id,
+                role=message.role,
+                content=message.content,
+                created_at=message.created_at,
+                steps=message.steps or [],
+                results=[
+                    AdminQueryResultSchema(
+                        rank=result.rank,
+                        score=result.score,
+                        reason=result.reason,
+                        document_uuid=result.document.uuid,
+                        title=result.document.title,
+                        url=result.document.url,
+                        source_domain=result.document.source.canonical_domain,
+                    )
+                    for result in message.results
+                ],
+            )
+            for message in conversation.messages
+        ],
+    )
 
 
 @app.get("/api/directory/sources", response_model=PageSchema[DirectorySourceSchema])
