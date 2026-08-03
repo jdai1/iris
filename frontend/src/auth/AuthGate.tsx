@@ -100,7 +100,12 @@ export function AuthGate({ children }: AuthGateProps) {
     let cancelled = false;
     getMe()
       .then((user) => {
-        if (!cancelled) setCurrentUser(user);
+        if (!cancelled) {
+          if (user.onboarding_completed_at === null) {
+            window.history.replaceState(null, '', '/search');
+          }
+          setCurrentUser(user);
+        }
       })
       .catch((err) => {
         if (!cancelled) setAuthError(err instanceof Error ? err.message : 'Could not load user');
@@ -111,7 +116,7 @@ export function AuthGate({ children }: AuthGateProps) {
   }, [firebaseUser]);
 
   async function signIn() {
-    if (!auth) return;
+    if (!auth || signingIn) return;
     setAuthError(null);
     setSigningIn(true);
     try {
@@ -134,16 +139,20 @@ export function AuthGate({ children }: AuthGateProps) {
 
   const authPreview = import.meta.env.DEV && new URLSearchParams(window.location.search).has('auth_preview');
 
-  if (authPreview) return <AuthScreen error={null} signingIn={false} onSignIn={() => {}} />;
+  if (authPreview) return <AuthScreen error={null} onSignIn={() => {}} />;
   if (!firebaseEnabled) return <>{children(localUser, () => {})}</>;
   if (!authReady) return <div className="grid min-h-svh place-items-center text-sm text-muted-foreground">Loading...</div>;
-  if (!firebaseUser) return <AuthScreen error={authError} signingIn={signingIn} onSignIn={signIn} />;
+  if (!firebaseUser) return <AuthScreen error={authError} onSignIn={signIn} />;
   if (!currentUser && !authError) return <div className="grid min-h-svh place-items-center text-sm text-muted-foreground">Loading...</div>;
-  if (authError) return <AuthScreen error={authError} signingIn={signingIn} onSignIn={signIn} />;
-  if (currentUser?.onboarding_completed_at === null) {
-    return <OnboardingScreen user={currentUser} onComplete={setCurrentUser} />;
-  }
-  return <>{children(currentUser, handleSignOut)}</>;
+  if (authError) return <AuthScreen error={authError} onSignIn={signIn} />;
+  return (
+    <>
+      {children(currentUser, handleSignOut)}
+      {currentUser?.onboarding_completed_at === null && (
+        <OnboardingScreen user={currentUser} onComplete={setCurrentUser} />
+      )}
+    </>
+  );
 }
 
 function shouldUseRedirectSignIn(err: unknown): boolean {

@@ -149,7 +149,7 @@ class DirectorySourceSchema(BaseModel):
 
 
 class DocumentSchema(BaseModel):
-    id: int
+    id: int = Field(deprecated=True)
     uuid: str
     source_id: int
     source_domain: str
@@ -184,14 +184,12 @@ class FriendFeedItemSchema(BaseModel):
 class DocumentOutgoingLinkSchema(BaseModel):
     target_url: str
     target_domain: str | None
-    target_document_id: int | None
     target_document_uuid: str | None
     anchor_text: str | None
     context: str | None
 
 
 class DocumentIncomingLinkSchema(BaseModel):
-    source_document_id: int
     source_document_uuid: str
     target_url: str
     anchor_text: str | None
@@ -324,8 +322,8 @@ class HighlightUpdateSchema(BaseModel):
 
 
 class HighlightSchema(BaseModel):
-    id: int
-    document_id: int
+    uuid: str
+    document_uuid: str
     quote: str
     prefix: str | None
     suffix: str | None
@@ -360,8 +358,7 @@ class BookshelfCollectionUpdateSchema(BaseModel):
 
 
 class BookshelfCollectionItemCreateSchema(BaseModel):
-    document_uuid: str | None = None
-    document_id: int | None = None
+    document_uuid: str
     position: int | None = None
 
 

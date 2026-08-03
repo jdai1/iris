@@ -31,20 +31,19 @@ export function OnboardingScreen({ user, onComplete }: { user: User; onComplete:
   }
 
   return (
-    <main className="grid min-h-svh place-items-center bg-background px-6 py-12">
-      <section className="w-full max-w-xl">
-        <div className="mb-10 inline-flex items-center gap-2 text-sm font-semibold text-muted-foreground">
-          <IrisMark className="size-6" />
+    <div className="fixed inset-0 z-[100] grid place-items-center bg-black/20 px-5 py-8 backdrop-blur-[2px]">
+      <section className="w-full max-w-lg rounded-lg border bg-background p-6 shadow-2xl" role="dialog" aria-modal="true" aria-labelledby="onboarding-title">
+        <div className="inline-flex items-center gap-2 text-sm font-semibold text-muted-foreground">
+          <IrisMark className="size-5" />
           <span>iris</span>
         </div>
 
-        <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Welcome to Iris</span>
-        <h1 className="mt-2 text-3xl font-semibold tracking-tight">Choose how you’ll appear</h1>
-        <p className="mt-2 max-w-md text-sm leading-6 text-muted-foreground">
-          Your profile stays private to your connections. You can change these details later.
+        <h1 className="mt-6 text-xl font-semibold tracking-tight" id="onboarding-title">Set up your profile</h1>
+        <p className="mt-1.5 max-w-md text-sm leading-6 text-muted-foreground">
+          Only your connections can see it.
         </p>
 
-        <form className="mt-8 grid gap-6" onSubmit={submit}>
+        <form className="mt-6 grid gap-5" onSubmit={submit}>
           {error && <StateMessage tone="error">{error}</StateMessage>}
 
           <label className="grid gap-2">
@@ -63,30 +62,27 @@ export function OnboardingScreen({ user, onComplete }: { user: User; onComplete:
           </label>
 
           <label className="grid gap-2">
-            <span className="flex items-center justify-between gap-3 text-sm font-medium">
-              <span>Personal website</span>
-              <small className="font-normal text-muted-foreground">Optional</small>
-            </span>
+            <span className="text-sm font-medium">Personal website</span>
             <div className="flex h-11 items-center gap-2 rounded-md border bg-background px-3 focus-within:ring-2 focus-within:ring-ring/30">
               <Globe2 className="size-4 shrink-0 text-muted-foreground" />
               <input
                 className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
                 value={websiteUrl}
                 onChange={(event) => setWebsiteUrl(event.target.value)}
-                placeholder="https://yoursite.com"
+                placeholder="https://yoursite.com (optional)"
                 inputMode="url"
                 aria-label="Personal website URL"
               />
             </div>
           </label>
 
-          <Button className="w-fit" uiVariant="solid" type="submit" disabled={saving || !username.trim()}>
+          <Button className="ml-auto w-fit" uiVariant="solid" type="submit" disabled={saving || !username.trim()}>
             {saving ? 'Setting up…' : 'Continue'}
             {!saving && <ArrowRight size={15} />}
           </Button>
         </form>
       </section>
-    </main>
+    </div>
   );
 }
 

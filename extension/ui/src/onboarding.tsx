@@ -1,46 +1,52 @@
-import { StrictMode, useEffect, useState } from 'react';
+import { StrictMode, useCallback, useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { Box, Button, Flex, Heading, Text } from '@chakra-ui/react';
 import { ExternalLink } from 'lucide-react';
-import { getAuthToken, irisRequest, openIris } from './chrome';
-import { IrisProvider } from './system';
+import { Button } from './components/Button';
+import { hasSession, irisRequest, openIris } from './chrome';
+import { IrisBrand } from './IrisBrand';
+import './index.css';
 
 function App() {
   const [state, setState] = useState<'checking' | 'signed-out' | 'ready'>('checking');
   const [status, setStatus] = useState('');
-  const check = async () => {
-    if (!await getAuthToken()) { setState('signed-out'); return; }
+  const check = useCallback(async () => {
+    if (!await hasSession()) { setState('signed-out'); return; }
     try { await irisRequest('/api/me'); setState('ready'); setStatus(''); }
     catch { setState('signed-out'); setStatus('Your session expired. Sign in again.'); }
-  };
-  useEffect(() => {
-    check();
-    const listener = (changes: Record<string, chrome.storage.StorageChange>, area: string) => { if (area === 'local' && changes.authToken) check(); };
-    chrome.storage.onChanged.addListener(listener); return () => chrome.storage.onChanged.removeListener(listener);
   }, []);
 
-  return <Box minH="100vh" display="grid" alignItems="center" p="clamp(32px, 7vw, 112px)">
-    <Box width="min(900px, 100%)">
-      <Box className="iris-brand" mb="8">iris</Box>
-      {state === 'checking' && <Text color="iris.500">Checking your Iris account…</Text>}
-      {state === 'signed-out' && <>
-        <Heading maxW="760px" fontSize="clamp(38px, 5.8vw, 76px)" fontWeight="660" letterSpacing="-.055em" lineHeight=".98">Save anything worth returning to.</Heading>
-        <Text mt="5" maxW="520px" color="iris.500" fontSize="15px" lineHeight="1.6">One click saves the page. After that, select any passage to highlight it or add a comment.</Text>
-        <Button mt="8" borderRadius="0" bg="iris.900" color="white" size="lg" onClick={() => openIris(true)}>Sign in to Iris →</Button>
-        {status && <Text mt="3" color="#a12d24" fontSize="12px">{status}</Text>}
-      </>}
-      {state === 'ready' && <>
-        <Heading fontSize="clamp(38px, 5.4vw, 70px)" fontWeight="660" letterSpacing="-.05em" lineHeight="1">Save first.<br/>Organize later.</Heading>
-        <Flex mt="10" borderTop="1px solid" borderBottom="1px solid" borderColor="iris.200" direction={{ base: 'column', md: 'row' }}>
-          {[
-            ['01', 'Save', 'Click the Iris extension once. The current page is saved immediately.'],
-            ['02', 'Highlight', 'Select text on the saved page, then choose Highlight or add a comment.'],
-            ['03', 'Return', 'Find the page, note, and highlights together in your Iris bookshelf.'],
-          ].map(([number, title, copy], index) => <Box key={number} flex="1" minH="185px" p="5" borderRight={{ base: '0', md: index < 2 ? '1px solid' : '0' }} borderBottom={{ base: index < 2 ? '1px solid' : '0', md: '0' }} borderColor="iris.200"><Text color="iris.300" fontSize="10px">{number}</Text><Heading mt="8" fontSize="17px">{title}</Heading><Text mt="2" color="iris.500" fontSize="12px" lineHeight="1.55">{copy}</Text></Box>)}
-        </Flex>
-        <Flex mt="8" gap="3"><Button borderRadius="0" bg="iris.900" color="white" onClick={() => openIris()}>Open Iris <ExternalLink size={15}/></Button><Button borderRadius="0" variant="outline" onClick={async () => { const [tab] = await chrome.tabs.query({ active: true, currentWindow: true }); if (tab?.id) chrome.tabs.remove(tab.id); }}>Got it</Button></Flex>
-      </>}
-    </Box>
-  </Box>;
+  useEffect(() => {
+    void check();
+    const listener = (changes: Record<string, chrome.storage.StorageChange>, area: string) => { if (area === 'local' && (changes.authToken || changes.authRefreshToken)) void check(); };
+    chrome.storage.onChanged.addListener(listener);
+    return () => chrome.storage.onChanged.removeListener(listener);
+  }, [check]);
+
+  return (
+    <main className="grid min-h-svh items-center p-[clamp(32px,7vw,112px)]">
+      <section className="w-[min(900px,100%)]">
+        <IrisBrand className="mb-8" />
+        {state === 'checking' && <p className="text-sm text-muted-foreground">Checking your Iris account…</p>}
+        {state === 'signed-out' && <>
+          <h1 className="max-w-3xl text-[clamp(38px,5.8vw,76px)] font-semibold leading-[0.98] tracking-[-0.055em]">Save anything worth returning to.</h1>
+          <p className="mt-5 max-w-xl text-[15px] leading-6 text-muted-foreground">One click saves the current page. Iris stores the URL, title, and any passages or notes you explicitly add. It does not collect your general browsing history.</p>
+          <Button className="mt-8" variant="solid" onClick={() => void openIris(true)}>Sign in to Iris <span aria-hidden="true">→</span></Button>
+          {status && <p className="mt-3 text-xs text-destructive">{status}</p>}
+        </>}
+        {state === 'ready' && <>
+          <h1 className="text-[clamp(38px,5.4vw,70px)] font-semibold leading-none tracking-[-0.05em]">Save first.<br />Organize later.</h1>
+          <div className="mt-10 grid border-y md:grid-cols-3">
+            {[
+              ['01', 'Save', 'Click the Iris extension once. The current page is saved immediately.'],
+              ['02', 'Highlight', 'Select text on the saved page, then choose Highlight.'],
+              ['03', 'Return', 'Find the page, note, and highlights together in your bookshelf.'],
+            ].map(([number, title, copy], index) => <div className={`min-h-48 p-5 ${index < 2 ? 'border-b md:border-b-0 md:border-r' : ''}`} key={number}><p className="text-[10px] text-muted-foreground">{number}</p><h2 className="mt-8 text-lg font-semibold">{title}</h2><p className="mt-2 text-xs leading-5 text-muted-foreground">{copy}</p></div>)}
+          </div>
+          <div className="mt-8 flex gap-3"><Button variant="solid" onClick={() => void openIris()}>Open Iris <ExternalLink size={15} /></Button><Button onClick={async () => { const [tab] = await chrome.tabs.query({ active: true, currentWindow: true }); if (tab?.id) await chrome.tabs.remove(tab.id); }}>Got it</Button></div>
+        </>}
+      </section>
+    </main>
+  );
 }
-createRoot(document.getElementById('root')!).render(<StrictMode><IrisProvider><App/></IrisProvider></StrictMode>);
+
+createRoot(document.getElementById('root')!).render(<StrictMode><App /></StrictMode>);

@@ -830,16 +830,8 @@ def _dump_search_results(results, user: User | None = None) -> list[SearchResult
 
 
 def _resolve_document_uuid(document_uuid: str) -> Document | None:
-    """Resolve a public UUID, while accepting a positive integer legacy ID."""
-    session = db.current_session()
-    document = session.scalar(select(Document).where(Document.uuid == document_uuid))
-    if document is not None:
-        return document
-    if len(document_uuid) <= 10 and document_uuid.isascii() and document_uuid.isdigit():
-        legacy_id = int(document_uuid)
-        if 0 < legacy_id <= 2_147_483_647:
-            return session.get(Document, legacy_id)
-    return None
+    """Resolve a document by its stable public identifier."""
+    return db.current_session().scalar(select(Document).where(Document.uuid == document_uuid))
 
 
 @app.get("/api/admin/index-runs", response_model=PageSchema[AdminIndexRunSchema])
@@ -871,7 +863,6 @@ def get_document(document_uuid: str, _bound_session=Depends(get_session)) -> Doc
             DocumentOutgoingLinkSchema(
                 target_url=link.target_url,
                 target_domain=link.target_domain,
-                target_document_id=link.target_document_id,
                 target_document_uuid=linked_uuids.get(link.target_document_id),
                 anchor_text=link.anchor_text,
                 context=link.context,
@@ -880,7 +871,6 @@ def get_document(document_uuid: str, _bound_session=Depends(get_session)) -> Doc
         ],
         incoming_links=[
             DocumentIncomingLinkSchema(
-                source_document_id=link.source_document_id,
                 source_document_uuid=linked_uuids[link.source_document_id],
                 target_url=link.target_url,
                 anchor_text=link.anchor_text,
@@ -1300,12 +1290,15 @@ def resolve_browser_page(url: str, _bound_session=Depends(get_session), user: Us
     return _browser_page(user, mapping)
 
 
-@app.get("/api/documents/{document_id}/highlights", response_model=list[HighlightSchema])
-def list_highlights(document_id: int, _bound_session=Depends(get_session), user: User = Depends(get_current_user)) -> list[HighlightSchema]:
+@app.get("/api/documents/{document_uuid}/highlights", response_model=list[HighlightSchema])
+def list_highlights(document_uuid: str, _bound_session=Depends(get_session), user: User = Depends(get_current_user)) -> list[HighlightSchema]:
+    document = _resolve_document_uuid(document_uuid)
+    if not document:
+        return []
     mapping = db.current_session().scalar(
         select(UserDocumentMapping).where(
             UserDocumentMapping.user_id == user.id,
-            UserDocumentMapping.document_id == document_id,
+            UserDocumentMapping.document_id == document.id,
         )
     )
     if not mapping:
@@ -1313,12 +1306,15 @@ def list_highlights(document_id: int, _bound_session=Depends(get_session), user:
     return [dump_highlight(item) for item in highlights_dao.list_for_mapping(mapping)]
 
 
-@app.post("/api/documents/{document_id}/highlights", response_model=HighlightSchema)
-def create_highlight(document_id: int, payload: HighlightCreateSchema, _bound_session=Depends(get_session), user: User = Depends(get_current_user)) -> HighlightSchema:
+@app.post("/api/documents/{document_uuid}/highlights", response_model=HighlightSchema)
+def create_highlight(document_uuid: str, payload: HighlightCreateSchema, _bound_session=Depends(get_session), user: User = Depends(get_current_user)) -> HighlightSchema:
+    document = _resolve_document_uuid(document_uuid)
+    if not document:
+        raise HTTPException(status_code=404, detail="Document not found")
     mapping = db.current_session().scalar(
         select(UserDocumentMapping).where(
             UserDocumentMapping.user_id == user.id,
-            UserDocumentMapping.document_id == document_id,
+            UserDocumentMapping.document_id == document.id,
         )
     )
     if not mapping:
@@ -1330,17 +1326,17 @@ def create_highlight(document_id: int, payload: HighlightCreateSchema, _bound_se
     return dump_highlight(highlight)
 
 
-@app.patch("/api/highlights/{highlight_id}", response_model=HighlightSchema)
-def update_highlight(highlight_id: int, payload: HighlightUpdateSchema, _bound_session=Depends(get_session), user: User = Depends(get_current_user)) -> HighlightSchema:
-    highlight = highlights_dao.get_owned(user, highlight_id)
+@app.patch("/api/highlights/{highlight_uuid}", response_model=HighlightSchema)
+def update_highlight(highlight_uuid: str, payload: HighlightUpdateSchema, _bound_session=Depends(get_session), user: User = Depends(get_current_user)) -> HighlightSchema:
+    highlight = highlights_dao.get_owned(user, highlight_uuid)
     if not highlight:
         raise HTTPException(status_code=404, detail="Highlight not found")
     return dump_highlight(highlights_dao.update(highlight, fields=payload.model_fields_set, comment=payload.comment, color=payload.color))
 
 
-@app.delete("/api/highlights/{highlight_id}", status_code=204)
-def delete_highlight(highlight_id: int, _bound_session=Depends(get_session), user: User = Depends(get_current_user)) -> Response:
-    highlight = highlights_dao.get_owned(user, highlight_id)
+@app.delete("/api/highlights/{highlight_uuid}", status_code=204)
+def delete_highlight(highlight_uuid: str, _bound_session=Depends(get_session), user: User = Depends(get_current_user)) -> Response:
+    highlight = highlights_dao.get_owned(user, highlight_uuid)
     if not highlight:
         raise HTTPException(status_code=404, detail="Highlight not found")
     highlights_dao.soft_delete(highlight)
@@ -1417,9 +1413,7 @@ def add_bookshelf_collection_item(
     _bound_session=Depends(get_session),
     user: User = Depends(get_current_user),
 ) -> BookshelfCollectionSchema:
-    document = _resolve_document_uuid(payload.document_uuid) if payload.document_uuid else (
-        db.current_session().get(Document, payload.document_id) if payload.document_id else None
-    )
+    document = _resolve_document_uuid(payload.document_uuid)
     if not document:
         raise HTTPException(status_code=404, detail="Document not found")
     item = bookshelf_dao.add_collection_item(user, collection_id, document, position=payload.position)
@@ -1471,7 +1465,6 @@ def embedding_map(
 @app.get("/api/graph", response_model=GraphSchema)
 def graph(
     mode: str = "documents",
-    document_id: int | None = None,
     document_uuid: str | None = None,
     source_id: int | None = None,
     domain: str | None = None,
@@ -1509,7 +1502,7 @@ def graph(
     focused_document = _resolve_document_uuid(document_uuid) if document_uuid else None
     if document_uuid and focused_document is None:
         raise HTTPException(status_code=404, detail="Document not found")
-    documents, links = admin.get_graph_rows(focused_document.id if focused_document else document_id, limit=limit)
+    documents, links = admin.get_graph_rows(focused_document.id if focused_document else None, limit=limit)
     document_uuids = {document.id: document.uuid for document in documents}
     nodes = [
         GraphNodeSchema(

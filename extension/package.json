@@ -1,0 +1,13 @@
+{
+  "name": "iris-browser-extension",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "npm run build:local",
+    "build:local": "npm --prefix ui run build && node scripts/prepare.mjs local",
+    "build:production": "npm --prefix ui run build && node scripts/prepare.mjs production",
+    "package": "npm run build:production && node scripts/package.mjs",
+    "test": "node anchoring.test.js"
+  }
+}

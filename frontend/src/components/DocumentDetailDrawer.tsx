@@ -1,10 +1,11 @@
 import { FormEvent, MouseEvent, RefObject, useEffect, useRef, useState } from 'react';
-import { ArrowUpRight, Orbit, Plus, Users } from 'lucide-react';
-import { updateDocumentBookshelf } from '../api';
+import { ArrowUpRight, Check, Folder, Loader2, Orbit, Plus, Users } from 'lucide-react';
+import { addBookshelfCollectionItem, updateDocumentBookshelf } from '../api';
 import { documentPath, navigateTo } from '../app/navigation';
 import type { BookshelfCollection, BookshelfEntry, Document, DocumentDetail } from '../types';
 import { DocumentBookshelfActions } from './DocumentBookshelfActions';
 import { StateMessage } from './ui';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from './ui/dropdown-menu';
 
 export function entryFromDocument(document: Document): BookshelfEntry {
   return {
@@ -35,6 +36,7 @@ export function DocumentDetailDrawer({
   reason,
   friendHighlights,
   onEntryChange,
+  onCollectionsChange,
   onClose,
 }: {
   entry: BookshelfEntry;
@@ -50,6 +52,7 @@ export function DocumentDetailDrawer({
   reason?: string | null;
   friendHighlights?: { username: string; quotes: string[] } | null;
   onEntryChange: (entry: BookshelfEntry) => void;
+  onCollectionsChange: (collections: BookshelfCollection[]) => void;
   onClose: () => void;
 }) {
   const document = detail ?? entry.document;
@@ -61,6 +64,8 @@ export function DocumentDetailDrawer({
   const [tagDraft, setTagDraft] = useState('');
   const [savingNote, setSavingNote] = useState(false);
   const [savingTags, setSavingTags] = useState(false);
+  const [collectionSavingId, setCollectionSavingId] = useState<number | null>(null);
+  const [collectionError, setCollectionError] = useState<string | null>(null);
   const [referenceLimit, setReferenceLimit] = useState(5);
   const [referencedByLimit, setReferencedByLimit] = useState(5);
   const tagFormRef = useRef<HTMLFormElement | null>(null);
@@ -128,6 +133,20 @@ export function DocumentDetailDrawer({
     }
   }
 
+  async function addToCollection(collectionId: number) {
+    if (collectionSavingId !== null) return;
+    setCollectionSavingId(collectionId);
+    setCollectionError(null);
+    try {
+      const updated = await addBookshelfCollectionItem(collectionId, document.uuid);
+      onCollectionsChange(collections.map((collection) => collection.id === updated.id ? updated : collection));
+    } catch {
+      setCollectionError('Could not add to collection');
+    } finally {
+      setCollectionSavingId(null);
+    }
+  }
+
   function followInternalLink(event: MouseEvent<HTMLAnchorElement>, path: string) {
     if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
     event.preventDefault();
@@ -146,35 +165,43 @@ export function DocumentDetailDrawer({
     >
       <div className="sticky top-0 z-10 flex items-start justify-between gap-4 border-b bg-background/95 px-5 py-4 backdrop-blur">
         <div className="min-w-0">
+          <span className="text-xs text-muted-foreground">{document.source_domain}</span>
+          <h3 className="mt-1 text-lg font-semibold leading-snug">{document.title ?? document.url}</h3>
+        </div>
+        <div className="flex shrink-0 items-center gap-1">
           <a
-            className="text-xs text-muted-foreground hover:text-foreground hover:underline"
+            className="grid size-8 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
             href={`/directory/${encodeURIComponent(document.source_domain)}`}
             onClick={(event) => followInternalLink(event, `/directory/${encodeURIComponent(document.source_domain)}`)}
+            aria-label="Open source directory"
+            title="Open source directory"
           >
-            {document.source_domain}
+            <Users size={15} />
           </a>
-          <h3 className="mt-1 flex items-start gap-2 text-lg font-semibold leading-snug">
-            {document.title ?? document.url}
-            <a className="mt-1 shrink-0 text-muted-foreground hover:text-foreground" href={document.url} target="_blank" rel="noreferrer" aria-label="Open document">
-              <ArrowUpRight size={15} />
-            </a>
-          </h3>
+          <a
+            className="grid size-8 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
+            href={`/explore?document=${document.uuid}`}
+            onClick={(event) => followInternalLink(event, `/explore?document=${document.uuid}`)}
+            aria-label="Explore from this document"
+            title="Explore from this document"
+          >
+            <Orbit size={15} />
+          </a>
+          <a
+            className="grid size-8 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
+            href={document.url}
+            target="_blank"
+            rel="noreferrer"
+            aria-label="Open original document"
+            title="Open original document"
+          >
+            <ArrowUpRight size={15} />
+          </a>
+          <button className="grid size-8 place-items-center rounded-md text-xl text-muted-foreground hover:bg-accent hover:text-foreground" type="button" onClick={onClose} aria-label="Close details" title="Close details">×</button>
         </div>
-        <button className="grid size-9 shrink-0 place-items-center rounded-md text-xl text-muted-foreground hover:bg-accent hover:text-foreground" type="button" onClick={onClose} aria-label="Close details">×</button>
       </div>
 
-      <div className="flex flex-wrap gap-2 border-b px-5 py-3 text-xs [&_a]:inline-flex [&_a]:h-7 [&_a]:items-center [&_a]:gap-1.5 [&_a]:rounded-md [&_a]:border [&_a]:px-2 [&_a]:hover:bg-accent [&>span]:inline-flex [&>span]:h-7 [&>span]:items-center [&>span]:rounded-md [&>span]:bg-muted [&>span]:px-2">
-        <a href={`/directory/${encodeURIComponent(document.source_domain)}`} onClick={(event) => followInternalLink(event, `/directory/${encodeURIComponent(document.source_domain)}`)}>
-          <Users size={12} />
-          Directory
-        </a>
-        <a
-          href={`/explore?document=${document.uuid}`}
-          onClick={(event) => followInternalLink(event, `/explore?document=${document.uuid}`)}
-        >
-          <Orbit size={12} />
-          Explore
-        </a>
+      <div className="flex flex-wrap items-center gap-3 border-b px-5 py-3 text-xs">
         <DocumentBookshelfActions
           documentUuid={document.uuid}
           status={entry.status}
@@ -182,10 +209,59 @@ export function DocumentDetailDrawer({
           labeled
           onChange={onEntryChange}
         />
-        {containingCollections.map((collection) => (
-          <a href={`/bookshelf?collection=${collection.id}`} onClick={(event) => followInternalLink(event, `/bookshelf?collection=${collection.id}`)} key={collection.id}>{collection.name}</a>
-        ))}
-        {entry.favorited && <span>favorite</span>}
+        <div className="flex min-w-0 items-center gap-1.5 text-muted-foreground">
+          <span className="mx-1 h-4 w-px bg-border" aria-hidden="true" />
+          <DropdownMenu onOpenChange={(open) => {
+            if (open) setCollectionError(null);
+          }}>
+            <DropdownMenuTrigger asChild>
+              <button
+                className="grid size-7 place-items-center rounded-md transition-colors hover:bg-accent hover:text-foreground"
+                type="button"
+                aria-label="Add to collection"
+                title="Add to collection"
+              >
+                <Folder size={12} />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent className="w-56" align="start">
+              {collections.length === 0 && <DropdownMenuItem disabled>No collections yet</DropdownMenuItem>}
+              {collections.map((collection) => {
+                const added = collection.items.some((item) => item.document.uuid === document.uuid);
+                const saving = collectionSavingId === collection.id;
+                return (
+                  <DropdownMenuItem
+                    key={collection.id}
+                    disabled={collectionSavingId !== null || added}
+                    onSelect={() => void addToCollection(collection.id)}
+                  >
+                    <span className="min-w-0 flex-1 truncate">{collection.name}</span>
+                    {saving ? <Loader2 className="animate-spin" /> : added ? <Check className="text-primary" /> : null}
+                  </DropdownMenuItem>
+                );
+              })}
+              {collectionError && <DropdownMenuItem className="text-destructive" disabled>{collectionError}</DropdownMenuItem>}
+            </DropdownMenuContent>
+          </DropdownMenu>
+          {containingCollections.length > 0 && (
+            <>
+            <span>In</span>
+            {containingCollections.map((collection, index) => (
+              <span className="contents" key={collection.id}>
+                {index > 0 && <span aria-hidden="true">·</span>}
+                <a
+                  className="max-w-40 truncate font-medium text-foreground hover:underline"
+                  href={`/bookshelf?collection=${collection.id}`}
+                  onClick={(event) => followInternalLink(event, `/bookshelf?collection=${collection.id}`)}
+                  title={collection.name}
+                >
+                  {collection.name}
+                </a>
+              </span>
+            ))}
+            </>
+          )}
+        </div>
       </div>
 
       {loading && <div className="grid gap-2 p-5" aria-label="Loading document details"><span className="h-4 animate-pulse rounded bg-muted" /><span className="h-4 animate-pulse rounded bg-muted" /><span className="h-24 animate-pulse rounded bg-muted" /></div>}

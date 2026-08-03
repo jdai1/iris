@@ -33,11 +33,11 @@ def create(mapping: UserDocumentMapping, **values) -> DocumentHighlight:
     return highlight
 
 
-def get_owned(user: User, highlight_id: int) -> DocumentHighlight | None:
+def get_owned(user: User, highlight_uuid: str) -> DocumentHighlight | None:
     return db.current_session().scalar(
         select(DocumentHighlight)
         .join(DocumentHighlight.user_document_mapping)
-        .where(DocumentHighlight.id == highlight_id)
+        .where(DocumentHighlight.uuid == highlight_uuid)
         .where(UserDocumentMapping.user_id == user.id)
         .where(DocumentHighlight.deleted_at.is_(None))
     )

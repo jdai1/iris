@@ -1,5 +1,7 @@
-const assert = require('node:assert/strict');
-require('./anchoring.js');
+import assert from 'node:assert/strict';
+import './anchoring.js';
+
+const { IrisAnchoring } = globalThis;
 
 const text = 'First repeated phrase. Middle. Second repeated phrase. End.';
 assert.deepEqual(IrisAnchoring.locateOffsets(text, {

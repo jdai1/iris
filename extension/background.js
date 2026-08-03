@@ -1,8 +1,8 @@
-const API_BASE = 'http://127.0.0.1:8010';
+import { IRIS_CONFIG } from './config.js';
+
 const AUTH_KEYS = ['authToken', 'authRefreshToken', 'authExpiresAt', 'firebaseApiKey'];
 
 chrome.runtime.onInstalled.addListener(({ reason }) => {
-  chrome.storage.sync.set({ apiBase: API_BASE });
   if (reason === 'install') {
     chrome.storage.sync.set({ onboardingComplete: false });
     chrome.storage.local.remove(AUTH_KEYS);
@@ -40,14 +40,36 @@ async function validAuthToken(forceRefresh = false) {
 }
 
 async function irisFetch(message, forceRefresh = false) {
-  const settings = await chrome.storage.sync.get({ apiBase: API_BASE });
+  if (typeof message.path !== 'string' || !message.path.startsWith('/api/')) {
+    throw new Error('Invalid Iris API path');
+  }
   const token = await validAuthToken(forceRefresh);
   const headers = { 'Content-Type': 'application/json', ...(message.options?.headers || {}) };
   if (token) headers.Authorization = `Bearer ${token}`;
-  return fetch(`${settings.apiBase.replace(/\/+$/, '')}${message.path}`, { ...message.options, headers });
+  return fetch(`${IRIS_CONFIG.apiBase.replace(/\/+$/, '')}${message.path}`, { ...message.options, headers });
+}
+
+async function apiError(response) {
+  const payload = await response.json().catch(() => null);
+  if (response.status === 401) return new Error('Iris could not verify this login. Please sign in again.');
+  if (response.status === 503) return new Error(payload?.detail || 'Iris authentication is temporarily unavailable. Please try again.');
+  return new Error(payload?.detail || `Iris returned HTTP ${response.status}`);
 }
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (message?.type === 'iris-config') {
+    sendResponse(IRIS_CONFIG);
+    return false;
+  }
+  if (message?.type === 'iris-session-status') {
+    chrome.storage.local.get({ authToken: '', authRefreshToken: '' })
+      .then(({ authToken, authRefreshToken }) => sendResponse({ connected: Boolean(authToken || authRefreshToken) }));
+    return true;
+  }
+  if (message?.type === 'iris-disconnect') {
+    clearAuth().then(() => sendResponse({ ok: true })).catch((error) => sendResponse({ ok: false, error: error.message }));
+    return true;
+  }
   if (message?.type !== 'iris-request') return false;
   (async () => {
     try {
@@ -66,10 +88,10 @@ chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => 
   try { origin = new URL(sender.url).origin; } catch { return false; }
   const validMessage = message?.type === 'iris-auth' && typeof message.token === 'string' && message.token
     && typeof message.refreshToken === 'string' && message.refreshToken && typeof message.apiKey === 'string' && message.apiKey;
-  if (origin !== 'http://localhost:5180' || !validMessage) return false;
-  fetch(`${API_BASE}/api/me`, { headers: { Authorization: `Bearer ${message.token}` } })
-    .then((response) => { if (!response.ok) throw new Error(`Iris rejected this session (${response.status})`); return Promise.all([
-      chrome.storage.sync.set({ apiBase: API_BASE, onboardingComplete: true }),
+  if (origin !== new URL(IRIS_CONFIG.appBase).origin || !validMessage) return false;
+  fetch(`${IRIS_CONFIG.apiBase}/api/me`, { headers: { Authorization: `Bearer ${message.token}` } })
+    .then(async (response) => { if (!response.ok) throw await apiError(response); return Promise.all([
+      chrome.storage.sync.set({ onboardingComplete: true }),
       chrome.storage.local.set({ authToken: message.token, authRefreshToken: message.refreshToken, authExpiresAt: Number(message.expiresAt) || Date.now() + 55 * 60 * 1000, firebaseApiKey: message.apiKey }),
     ]); })
     .then(() => sendResponse({ ok: true })).catch((error) => sendResponse({ ok: false, error: error.message }));

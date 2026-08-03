@@ -26,6 +26,9 @@ admin/*.tsbuildinfo
 # Browser extension UI
 extension/ui/node_modules/
 extension/ui/*.tsbuildinfo
+extension/build/
+extension/dist/
+extension/release/
 
 # Editor
 .vscode/

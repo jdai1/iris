@@ -422,7 +422,8 @@ export function SearchView({
         </div>
       )}
 
-      <div className="flex min-h-svh min-w-0 flex-1 flex-col">
+      {messages.length > 0 && (
+        <div className="flex min-h-svh min-w-0 flex-1 flex-col">
         <div className="min-h-0 flex-1">
           <div className="relative h-[calc(100svh-6rem)] w-full">
             <div className="pointer-events-none absolute inset-y-0 left-0 z-30">
@@ -490,7 +491,8 @@ export function SearchView({
             />
           </div>
         )}
-      </div>
+        </div>
+      )}
         </div>
       </ResizableSidebarLayout>
     </section>

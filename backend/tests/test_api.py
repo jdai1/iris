@@ -126,8 +126,7 @@ def test_document_detail_uses_uuid_and_exposes_reference_uuids(session):
     assert incoming.json()["incoming_links"][0]["source_document_uuid"] == referring.uuid
 
     legacy = client.get(f"/api/documents/{target.id}")
-    assert legacy.status_code == 200
-    assert legacy.json()["uuid"] == target.uuid
+    assert legacy.status_code == 404
     assert client.get("/api/documents/not-a-document").status_code == 404
 
     graph = client.get("/api/graph", params={"mode": "documents", "document_uuid": target.uuid})
@@ -892,14 +891,15 @@ def test_browser_capture_resolve_and_highlight_lifecycle(session, monkeypatch):
     page = capture.json()
     assert page["saved"] is True
     assert page["highlights"] == []
-    document_id = page["entry"]["document"]["id"]
+    document_uuid = page["entry"]["document"]["uuid"]
 
-    created = client.post(f"/api/documents/{document_id}/highlights", json={
+    created = client.post(f"/api/documents/{document_uuid}/highlights", json={
         "quote": "important sentence", "prefix": "before ", "suffix": " after",
         "start_offset": 10, "end_offset": 28, "comment": "Remember this.",
     }, headers=headers)
     assert created.status_code == 200
-    highlight_id = created.json()["id"]
+    highlight_uuid = created.json()["uuid"]
+    assert created.json()["document_uuid"] == document_uuid
 
     resolved = client.get(
         "/api/browser/pages/resolve",
@@ -910,15 +910,15 @@ def test_browser_capture_resolve_and_highlight_lifecycle(session, monkeypatch):
     assert resolved.json()["highlights"][0]["quote"] == "important sentence"
 
     updated = client.patch(
-        f"/api/highlights/{highlight_id}",
+        f"/api/highlights/{highlight_uuid}",
         json={"comment": "Updated thought."},
         headers=headers,
     )
     assert updated.status_code == 200
     assert updated.json()["comment"] == "Updated thought."
-    deleted = client.delete(f"/api/highlights/{highlight_id}", headers=headers)
+    deleted = client.delete(f"/api/highlights/{highlight_uuid}", headers=headers)
     assert deleted.status_code == 204
-    assert client.get(f"/api/documents/{document_id}/highlights", headers=headers).json() == []
+    assert client.get(f"/api/documents/{document_uuid}/highlights", headers=headers).json() == []
 
 
 def test_highlights_are_user_owned(session, monkeypatch):
@@ -929,19 +929,42 @@ def test_highlights_are_user_owned(session, monkeypatch):
         json={"url": "https://example.com/private"},
         headers=first_user_headers,
     ).json()
-    document_id = first["entry"]["document"]["id"]
-    highlight_id = client.post(
-        f"/api/documents/{document_id}/highlights",
+    document_uuid = first["entry"]["document"]["uuid"]
+    highlight_uuid = client.post(
+        f"/api/documents/{document_uuid}/highlights",
         json={"quote": "private"},
         headers=first_user_headers,
-    ).json()["id"]
+    ).json()["uuid"]
 
     from iris.services.auth import FirebaseIdentity
     monkeypatch.setattr("iris.routes.api.verify_firebase_token", lambda _token: FirebaseIdentity(uid="other", email="other@example.com"))
     monkeypatch.setattr("iris.routes.api.firebase_auth_enabled", lambda: True)
     headers = {"Authorization": "Bearer other-token"}
-    assert client.get(f"/api/documents/{document_id}/highlights", headers=headers).json() == []
-    assert client.patch(f"/api/highlights/{highlight_id}", json={"comment": "steal"}, headers=headers).status_code == 404
+    assert client.get(f"/api/documents/{document_uuid}/highlights", headers=headers).json() == []
+    assert client.patch(f"/api/highlights/{highlight_uuid}", json={"comment": "steal"}, headers=headers).status_code == 404
+
+
+def test_public_document_routes_reject_legacy_integer_ids(session, monkeypatch):
+    client = TestClient(app)
+    headers = _bookshelf_auth(monkeypatch)
+    page = client.post(
+        "/api/browser/pages/capture",
+        json={"url": "https://example.com/uuid-only", "title": "UUID only"},
+        headers=headers,
+    ).json()
+    document_id = page["entry"]["document"]["id"]
+
+    assert client.get(f"/api/documents/{document_id}", headers=headers).status_code == 404
+    assert client.patch(
+        f"/api/documents/{document_id}/bookshelf",
+        json={"favorited": True},
+        headers=headers,
+    ).status_code == 404
+    assert client.post(
+        f"/api/documents/{document_id}/highlights",
+        json={"quote": "legacy"},
+        headers=headers,
+    ).status_code == 404
 
 
 def test_bookshelf_collection_share_includes_notes_and_tags(session, monkeypatch):
