@@ -133,8 +133,8 @@ Use `backend/.venv/bin/alembic heads` to confirm a single migration head. Do not
 - Railway builds each service from its subdirectory Dockerfile. The backend container runs `alembic upgrade head` before starting Uvicorn, so every migration must be safe to run during deploy and against existing production rows.
 - Backend health is `/health`. The hosted API is `https://iris-production-73ec.up.railway.app`.
 - The production frontend is `https://www.iriis.net`; its build receives `VITE_API_BASE` and `VITE_FIREBASE_*` as Railway build variables.
-- GitHub `main` is the integration branch. Use a reviewed PR for normal changes and confirm required checks before merging.
-- Railway deploys the branch configured on each service, which is independent of GitHub's default branch. After changing branch strategy, verify the Railway service source branch explicitly; a merge to `main` alone does not retarget Railway.
+- GitHub `main` is the integration and production branch. Use a reviewed PR for normal changes and confirm required checks before merging.
+- Railway services `iris-be` and `iris-fe` both watch `jdai1/iris:main`. A push or merged PR on `main` automatically starts both production deployments. If this branch strategy changes, verify each service source explicitly because Railway's watched branch is independent of GitHub's default branch.
 - A green GitHub merge and a green Railway deployment are separate facts. Verify the Railway deployment/health after changes to backend startup, migrations, environment variables, authentication, or frontend build configuration.
 - Firebase Authorized domains, Railway CORS origins, the production frontend URL, and extension `externally_connectable` origin must stay aligned.
 
