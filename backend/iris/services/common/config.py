@@ -68,6 +68,8 @@ DEEPSEEK_API_BASE = os.getenv("DEEPSEEK_API_BASE", "https://api.deepseek.com")
 FIREBASE_PROJECT_ID = os.getenv("FIREBASE_PROJECT_ID") or os.getenv("GOOGLE_CLOUD_PROJECT")
 FIREBASE_SERVICE_ACCOUNT_FILE = os.getenv("FIREBASE_SERVICE_ACCOUNT_FILE") or os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
 FIREBASE_SERVICE_ACCOUNT_JSON = os.getenv("FIREBASE_SERVICE_ACCOUNT_JSON")
+FIREBASE_HTTP_TIMEOUT_SECONDS = max(1.0, float(os.getenv("FIREBASE_HTTP_TIMEOUT_SECONDS", "10")))
+RAILWAY_SERVICE_ID = os.getenv("RAILWAY_SERVICE_ID")
 ADMIN_EMAILS = {
     email.strip().lower()
     for email in os.getenv("IRIS_ADMIN_EMAILS", "julian.dai@gmail.com").split(",")

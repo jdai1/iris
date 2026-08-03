@@ -92,8 +92,8 @@ def dump_bookshelf_collection(collection: BookshelfCollection, entries: list[Boo
 
 def dump_highlight(highlight: DocumentHighlight) -> HighlightSchema:
     return HighlightSchema(
-        id=highlight.id,
-        document_id=highlight.user_document_mapping.document_id,
+        uuid=highlight.uuid,
+        document_uuid=highlight.user_document_mapping.document.uuid,
         quote=highlight.quote,
         prefix=highlight.prefix, suffix=highlight.suffix,
         start_offset=highlight.start_offset, end_offset=highlight.end_offset,

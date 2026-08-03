@@ -126,6 +126,7 @@ function DocumentRouteDetail({
       reason={reason}
       friendHighlights={friendHighlights}
       onEntryChange={updateEntry}
+      onCollectionsChange={setCollections}
       onClose={closeDetail}
     />
   );

@@ -1,6 +1,6 @@
 # Iris browser extension architecture
 
-Status: implemented locally in extension v0.5.0  
+Status: v1 production rewrite in progress
 Targets: Chrome, Arc, and other Chromium browsers using Manifest V3
 
 ## Executive summary
@@ -9,10 +9,10 @@ The Iris extension is a browser client for the existing Iris frontend and backen
 
 The extension has four browser-side parts:
 
-1. A React + Chakra popup that saves the active page immediately and edits bookshelf metadata.
-2. React + Chakra onboarding and settings pages.
+1. A React + Tailwind popup that saves the active page immediately and edits bookshelf metadata.
+2. React + Tailwind onboarding and settings pages using the current Iris design tokens.
 3. A Manifest V3 background service worker that owns authentication and proxies every Iris API request.
-4. A lightweight content script that adds highlighting UI to saved web pages and restores persisted highlights.
+4. A lightweight content script that exposes selection actions on normal web pages, captures on first highlight, and restores persisted highlights.
 
 The normal Iris frontend performs Firebase login. After login, it passes a renewable Firebase session to the installed extension. The background worker stores that session locally, refreshes it automatically, and attaches a valid Firebase ID token to API requests. The FastAPI backend remains the source of truth for users, documents, bookshelf state, tags, and highlights.
 
@@ -24,12 +24,12 @@ flowchart LR
     Page["Any HTTP(S) page"]
 
     subgraph Browser["Chrome / Arc"]
-        Popup["Extension popup<br/>React + Chakra"]
-        Pages["Onboarding + settings<br/>React + Chakra"]
+        Popup["Extension popup<br/>React + Tailwind"]
+        Pages["Onboarding + settings<br/>React + Tailwind"]
         Worker["MV3 background worker<br/>auth + API proxy"]
         Content["Content script<br/>selection + highlighting"]
         Storage["chrome.storage<br/>local + sync"]
-        IrisFE["Iris web frontend<br/>React + Chakra + Firebase SDK"]
+        IrisFE["Iris web frontend<br/>React + Tailwind + Firebase SDK"]
     end
 
     Firebase["Firebase Authentication"]
@@ -56,17 +56,17 @@ flowchart LR
 
 | Component | Location | Responsibility | Deliberately does not do |
 | --- | --- | --- | --- |
-| Manifest | `extension/manifest.json` | Permissions, entry points, icons, content-script registration | Application logic |
+| Manifest | `extension/dist/manifest.json` | Generated environment-specific permissions, entry points, icons, and content-script registration | Application logic |
 | Popup | `extension/ui/src/popup.tsx` | Immediate capture, favorite/read/note/topic UI, sign-in and retry states | Store or refresh tokens; call FastAPI directly |
 | Onboarding | `extension/ui/src/onboarding.tsx` | Explain save → highlight → return and initiate login | Authenticate directly |
 | Settings | `extension/ui/src/settings.tsx` | Show account connection, open Iris, disconnect, open guide | Configure arbitrary API URLs or expose tokens |
 | UI client | `extension/ui/src/chrome.ts` | Send typed request messages to the worker and open Iris tabs | Perform authenticated `fetch` itself |
 | Background worker | `extension/background.js` | Own renewable auth, proxy requests, retry after 401, receive frontend auth handoff | Render UI or inspect page DOM |
-| Content script | `extension/content.js` | Activate saved pages, show one-button highlight toolbar, render/edit/delete highlights | Own authentication or run Chakra inside host pages |
+| Content script | `extension/content.js` | Show highlight/note actions, capture on first highlight, and render/edit/delete highlights | Own authentication or run React inside host pages |
 | Anchoring library | `extension/anchoring.js` | Locate saved quotations by offsets and contextual quote matching | Network or DOM mutation |
 | FastAPI browser routes | `backend/iris/routes/api.py` | Capture/resolve pages and manage highlights/bookshelf state | Browser UI |
 
-The popup/onboarding/settings use the same React, Chakra, typography, and Iris color tokens as the core frontend. They are separate extension components rather than imports from the frontend application bundle. The content script intentionally remains framework-free so Iris styles do not leak into host websites and host styles do not alter the extension UI.
+The popup/onboarding/settings use the same Tailwind v4 theme values, typography, radii, and purple accent as the core frontend. They are separate extension bundles because extension pages have a separate origin and CSP. The content script intentionally remains framework-free so Iris styles do not leak into host websites and host styles do not alter the extension UI.
 
 ## One-click page save
 
@@ -181,7 +181,6 @@ All extension surfaces use this path. The popup and content script do not attach
 
 `chrome.storage.sync` contains non-secret extension state:
 
-- `apiBase`: local API origin for the prototype.
 - `onboardingComplete`: onboarding connection state.
 
 Tokens are intentionally stored in `local`, not `sync`, so they do not sync through the reader's browser account. Disconnecting clears all auth keys. A packaged production version should also consider explicit server-side session revocation and a more formal extension-session exchange if stronger centralized revocation is required.
@@ -211,18 +210,18 @@ This centralization is important because Manifest V3 workers are ephemeral. Dura
 | `/api/me` | GET | Validate the Firebase token and resolve the Iris user |
 | `/api/browser/pages/capture` | POST | Idempotently save the active URL and return entry + highlights |
 | `/api/browser/pages/resolve?url=...` | GET | Resolve saved state when revisiting a locally known URL |
-| `/api/documents/{id}/bookshelf` | PATCH | Update favorite, read state, note, intent note, or topics |
-| `/api/documents/{id}/highlights` | GET/POST | List or create user-owned highlights |
-| `/api/highlights/{id}` | PATCH/DELETE | Update the highlight note/color or soft-delete it |
+| `/api/documents/{document_uuid}/bookshelf` | PATCH | Update favorite, read state, note, intent note, or topics |
+| `/api/documents/{document_uuid}/highlights` | GET/POST | List or create user-owned highlights |
+| `/api/highlights/{highlight_uuid}` | PATCH/DELETE | Update the highlight note/color or soft-delete it |
 
 ## Highlight lifecycle
 
-Highlighting activates only after a page has been explicitly saved.
+Highlighting does not require opening the popup. The content script prepares the selection locally, then captures the page only after the reader clicks an Iris action.
 
 ```mermaid
 sequenceDiagram
     actor Reader
-    participant Page as Saved web page
+    participant Page as Any HTTP(S) page
     participant Content as Content script
     participant Worker as Background worker
     participant API as Iris FastAPI
@@ -230,23 +229,29 @@ sequenceDiagram
 
     Reader->>Page: Select text
     Content->>Content: Capture range, quote, context, offsets
-    Content-->>Reader: Show one Highlight button
+    Content-->>Reader: Show Highlight + note actions
     Reader->>Content: Click Highlight
-    Content->>Worker: POST /api/documents/{id}/highlights
+    alt Page is not yet saved in this tab
+        Content->>Worker: POST /api/browser/pages/capture
+        Worker->>API: Authenticated idempotent capture
+        API->>DB: Normalize URL + create bookshelf mapping
+        API-->>Content: Document UUID + existing highlights
+    end
+    Content->>Worker: POST /api/documents/{document_uuid}/highlights
     Worker->>API: Authenticated request
     API->>DB: Insert user-owned DocumentHighlight
     DB-->>API: Highlight row
     API-->>Content: Highlight schema
     Content->>Page: Wrap located text in an Iris mark
-    Content-->>Reader: Highlight saved toast
+    Content-->>Reader: Highlighted in Iris toast
     Reader->>Page: Click saved highlight
     Content-->>Reader: Note/delete popover
     Reader->>Content: Save note
-    Content->>Worker: PATCH /api/highlights/{id}
+    Content->>Worker: PATCH /api/highlights/{highlight_uuid}
     Worker->>API: Authenticated update
 ```
 
-The selection is converted into a payload before the toolbar is clicked. This matters because clicking browser UI normally collapses the page selection. The toolbar has one action; notes are added afterward by clicking the persisted highlight.
+The selection is converted into a payload before the toolbar is clicked. This matters because clicking browser UI normally collapses the page selection. The primary action saves the highlight directly; the adjacent note action saves it and opens the note editor. Notes can also be edited later by clicking the persisted highlight.
 
 ### Anchoring and restoration
 
@@ -268,14 +273,14 @@ Scripts, styles, form controls, contenteditable regions, and Iris-owned floating
 
 ## Privacy and permission model
 
-The manifest registers the content script on HTTP(S) pages because selection UI must be available immediately after a save. That broad injection permission does not mean every visited URL is sent to Iris.
+The manifest registers the content script on HTTP(S) pages because selection UI must be available without opening the popup. That broad injection permission does not mean every visited URL is sent to Iris.
 
 The privacy gate is:
 
 ```mermaid
 flowchart LR
     Load["Page loads"] --> Local{"Exact or tracking-normalized URL<br/>exists in local savedUrls?"}
-    Local -->|No| Stop["Do nothing; no Iris request"]
+    Local -->|No| Ready["Selection UI ready locally;<br/>no Iris request"]
     Local -->|Yes| Resolve["Resolve URL with Iris API"]
     Resolve --> Saved{"Saved for authenticated user?"}
     Saved -->|No| Stop
@@ -285,9 +290,8 @@ flowchart LR
 Relevant permissions:
 
 - `activeTab`: read the active tab only after the user invokes the extension.
-- `scripting`: inspect the active page when necessary.
 - `storage`: persist auth state and saved-URL activation hints.
-- HTTP(S) content-script matches: provide in-page highlighting.
+- HTTP(S) content-script matches: provide local selection controls and highlight restoration.
 - `securetoken.googleapis.com`: refresh Firebase tokens.
 - `externally_connectable` for the Iris frontend: receive the authenticated handoff.
 
@@ -338,15 +342,15 @@ Source UI lives under `extension/ui/`. Vite has three HTML entry points:
 - `onboarding.html`
 - `settings.html`
 
-The build writes compiled HTML and assets into the unpacked `extension/` root because Chrome loads that directory directly. The background worker, content script, anchoring library, content CSS, icons, and manifest remain hand-authored extension assets.
+The build writes a clean unpacked artifact into `extension/dist/`. A preparation step copies the background worker, content script, anchoring library, content CSS, and icons, then generates an environment-specific manifest and config module from `config/environments.json`.
 
 ```mermaid
 flowchart LR
     ReactSource["extension/ui/src/*.tsx"] --> TS["TypeScript"]
     TS --> Vite["Vite multi-entry build"]
-    Chakra["Chakra + Iris tokens"] --> Vite
-    Vite --> Built["extension/*.html<br/>extension/assets/*"]
-    Static["manifest + worker + content scripts + icons"] --> Root["extension/"]
+    Tailwind["Tailwind + Iris tokens"] --> Vite
+    Vite --> Built["extension/dist/*.html<br/>extension/dist/assets/*"]
+    Static["worker + content scripts + icons"] --> Root["extension/dist/"]
     Built --> Root
     Root --> Browser["Load unpacked in Chrome / Arc"]
 ```
@@ -355,8 +359,8 @@ Build and validate:
 
 ```bash
 npm --prefix extension/ui install
-npm --prefix extension/ui run build
-python3 -m json.tool extension/manifest.json >/dev/null
+npm --prefix extension run build:local
+python3 -m json.tool extension/dist/manifest.json >/dev/null
 node --check extension/background.js
 node --check extension/content.js
 node extension/anchoring.test.js
@@ -368,7 +372,7 @@ After changing the manifest, background worker, or content script, reload the ex
 
 ## Local development topology
 
-Current development origins are compiled into the prototype:
+Development and production origins are defined in `config/environments.json` and compiled into the selected artifact:
 
 | Service | Origin |
 | --- | --- |
@@ -396,11 +400,10 @@ The frontend and backend must come from the same worktree as the loaded extensio
 
 ## Architectural tradeoffs and next steps
 
-Current choices optimize for a simple local vertical slice:
+Current choices preserve a narrow, explicit-save product boundary:
 
 - Firebase refresh credentials live in extension-local storage. A production hardening option is a backend-issued, revocable extension session exchanged through a short-lived one-time code.
-- Frontend and extension duplicate the Iris Chakra system configuration. A shared package should eventually export tokens and reusable primitives to prevent drift.
-- Local origins are hardcoded. Production builds should use environment-specific configuration generated at build time.
+- Frontend and extension use matching Tailwind theme values. The repo-wide environment registry prevents origin drift between release artifacts and deployment documentation.
 - `savedUrls` is bounded local state, not a complete offline index. A production sync design may need a compact server-derived activation index or explicit per-page resolution rules.
 - Content scripts run in the page's DOM environment. Shadow DOM encapsulation for Iris floating UI would further reduce host-style collisions.
 - Refresh-token and API behavior should gain unit tests around proactive refresh, refresh rotation, retry-once behavior, and terminal logout.
@@ -409,27 +412,26 @@ Current choices optimize for a simple local vertical slice:
 
 ```text
 extension/
-├── manifest.json                  Browser capabilities and entry points
+├── package.json                   Build and Web Store packaging commands
 ├── background.js                  Renewable auth and central API proxy
 ├── content.js                     Saved-page activation and annotation UI
 ├── content.css                    Host-page highlight/toolbar styles
 ├── anchoring.js                   Pure highlight-location strategies
 ├── anchoring.test.js              Anchoring unit checks
 ├── icons/                         Browser action icons
-├── popup.html                     Generated popup entry
-├── onboarding.html                Generated onboarding entry
-├── settings.html                  Generated settings entry
-├── assets/                        Generated React/Chakra bundles
+├── scripts/                       Artifact preparation and ZIP packaging
+├── dist/                          Generated unpacked extension
+├── release/                       Generated Web Store ZIP
 └── ui/
-    ├── vite.config.ts             Multi-entry build into extension root
-    ├── package.json               React/Chakra build dependencies
+    ├── vite.config.ts             Multi-entry build into extension/dist
+    ├── package.json               React/Tailwind build dependencies
     └── src/
         ├── popup.tsx
         ├── onboarding.tsx
         ├── settings.tsx
         ├── chrome.ts              Runtime-message client
-        ├── system.tsx             Iris Chakra system
-        └── ui.css
+        ├── index.css              Iris Tailwind theme
+        └── components/            Extension UI primitives
 
 frontend/src/
 ├── App.tsx                        Firebase login and extension handoff

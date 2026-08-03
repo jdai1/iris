@@ -178,6 +178,9 @@ class DocumentHighlight(Base):
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    uuid: Mapped[str] = mapped_column(
+        String(36), default=lambda: str(uuid4()), nullable=False, unique=True, index=True
+    )
     user_document_mapping_id: Mapped[int] = mapped_column(
         ForeignKey("user_document_mappings.id")
     )

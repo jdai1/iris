@@ -415,7 +415,7 @@ export function BookshelfView({ onDiscover }: { onDiscover: () => void }) {
   }
 
   return (
-    <section className="min-h-svh px-2 py-4 sm:px-3 sm:py-6">
+    <section className="min-h-svh pr-2 pl-0 py-4 sm:pr-3 sm:pl-0 sm:py-6">
       <ResizableSidebarLayout
         className="min-h-[calc(100svh-3rem)]"
         storageKey="iris.bookshelfSidebarWidth"

@@ -1,0 +1,10 @@
+{
+  "local": {
+    "appBase": "http://localhost:5175",
+    "apiBase": "http://127.0.0.1:8000"
+  },
+  "production": {
+    "appBase": "https://www.iriis.net",
+    "apiBase": "https://iris-production-73ec.up.railway.app"
+  }
+}

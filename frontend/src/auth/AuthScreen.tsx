@@ -2,7 +2,7 @@ import { ArrowRight } from 'lucide-react';
 import { Button, StateMessage } from '../components/ui';
 import { IrisMark } from '../components/IrisMark';
 
-export function AuthScreen({ error, signingIn, onSignIn }: { error: string | null; signingIn: boolean; onSignIn: () => void }) {
+export function AuthScreen({ error, onSignIn }: { error: string | null; onSignIn: () => void }) {
   return (
     <main className="grid min-h-svh items-start overflow-auto bg-background px-[clamp(2rem,7vw,7rem)] py-16 sm:items-center sm:py-0">
       <section className="grid w-full max-w-[57.5rem] sm:-translate-y-[2vh]">
@@ -17,11 +17,10 @@ export function AuthScreen({ error, signingIn, onSignIn }: { error: string | nul
             uiVariant="plainIcon"
             type="button"
             onClick={onSignIn}
-            disabled={signingIn}
-            aria-label={signingIn ? 'Signing in with Google' : 'Continue with Google'}
+            aria-label="Continue with Google"
           >
             <span className="decoration-2 underline-offset-[0.18em] group-hover:underline">
-              {signingIn ? 'Opening Google sign-in…' : 'The good web is still out there'}
+              The good web is still out there
             </span>
             <ArrowRight className="size-[0.72em] transition-transform group-hover:translate-x-1" aria-hidden="true" />
           </Button>

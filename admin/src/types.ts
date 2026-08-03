@@ -6,3 +6,6 @@ export interface QueryResult { rank: number; score: number; reason: string; docu
 export interface ConversationMessage { id: number; role: 'user' | 'assistant'; content: string; created_at: string; steps: Array<Record<string, unknown>>; results: QueryResult[] }
 export interface AdminConversation { id: number; uuid: string; title: string | null; created_at: string; updated_at: string; user_id: number; email: string; username: string | null; messages: ConversationMessage[] }
 export interface AdminOverview { totals: Record<string, number>; source_statuses: Record<string, number>; document_types: Record<string, number> }
+export interface AdminLibraryEntry { document: { uuid: string; title: string | null; url: string; source_domain: string }; status: 'saved' | 'read' | 'archived'; favorited: boolean; note: string | null; intent_note: string | null; tags: string[]; first_seen_at: string | null; read_at: string | null; archived_at: string | null; favorited_at: string | null }
+export interface AdminLibraryCollection { id: number; name: string; description: string | null; visibility: 'private' | 'share_link'; created_at: string; updated_at: string; items: AdminLibraryEntry[] }
+export interface AdminUserLibrary { collections: AdminLibraryCollection[]; entries: Page<AdminLibraryEntry> }

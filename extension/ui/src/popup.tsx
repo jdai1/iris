@@ -1,9 +1,10 @@
 import { StrictMode, useCallback, useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { Box, Button, Flex, Heading, IconButton, Input, Spinner, Text, Textarea } from '@chakra-ui/react';
 import { Check, Clock3, ExternalLink, Heart, MessageSquarePlus, Plus, RotateCw, Settings, X } from 'lucide-react';
-import { Entry, getAuthToken, irisRequest, openIris } from './chrome';
-import { IrisProvider } from './system';
+import { Button } from './components/Button';
+import { Entry, hasSession, irisRequest, openIris } from './chrome';
+import { IrisBrand } from './IrisBrand';
+import './index.css';
 
 type Capture = { entry: Entry };
 type Phase = 'checking' | 'signed-out' | 'saving' | 'saved' | 'error';
@@ -20,96 +21,173 @@ function App() {
   const [updating, setUpdating] = useState(false);
 
   const capture = useCallback(async () => {
-    setMessage(''); setMessageError(false); setEntry(null);
-    if (!await getAuthToken()) { setPhase('signed-out'); return; }
+    setMessage('');
+    setMessageError(false);
+    setEntry(null);
+    if (!await hasSession()) {
+      setPhase('signed-out');
+      return;
+    }
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (!tab?.id || !tab.url || !/^https?:\/\//i.test(tab.url)) {
-      setPhase('error'); setMessage('Iris can only save regular web pages.'); return;
+      setPhase('error');
+      setMessage('Iris can only save regular web pages.');
+      return;
     }
     setDomain(new URL(tab.url).hostname.replace(/^www\./, ''));
     setPhase('saving');
     try {
       const page = await irisRequest<Capture>('/api/browser/pages/capture', {
-        method: 'POST', body: JSON.stringify({ url: tab.url, title: tab.title || null, crawl_now: false }),
+        method: 'POST',
+        body: JSON.stringify({ url: tab.url, title: tab.title || null, crawl_now: false }),
       });
-      setEntry(page.entry); setNote(page.entry.note || page.entry.intent_note || ''); setPhase('saved');
+      setEntry(page.entry);
+      setNote(page.entry.note || page.entry.intent_note || '');
+      setPhase('saved');
       const stored = await chrome.storage.local.get({ savedUrls: [] });
       const savedUrls = [...new Set([...(stored.savedUrls as string[]), tab.url, page.entry.document.url])].slice(-2000);
       await chrome.storage.local.set({ savedUrls });
       chrome.tabs.sendMessage(tab.id, { type: 'iris-page-saved', page }).catch(() => undefined);
     } catch (error) {
-      if (!await getAuthToken()) { setPhase('signed-out'); return; }
-      setPhase('error'); setMessage(error instanceof Error ? error.message : 'Iris could not save this page.');
+      if (!await hasSession()) {
+        setPhase('signed-out');
+        return;
+      }
+      setPhase('error');
+      setMessage(error instanceof Error ? error.message : 'Iris could not save this page.');
     }
   }, []);
 
-  useEffect(() => {
-    capture();
-  }, [capture]);
+  useEffect(() => { void capture(); }, [capture]);
 
   async function update(payload: Record<string, unknown>, success = 'Saved') {
-    if (!entry || updating) return;
-    setUpdating(true); setMessage(''); setMessageError(false);
+    if (!entry || updating) return false;
+    setUpdating(true);
+    setMessage('');
+    setMessageError(false);
     try {
-      const updated = await irisRequest<Entry>(`/api/documents/${entry.document.id}/bookshelf`, { method: 'PATCH', body: JSON.stringify(payload) });
-      setEntry(updated); setNote(updated.note || updated.intent_note || ''); setMessage(success);
+      const updated = await irisRequest<Entry>(`/api/documents/${entry.document.uuid}/bookshelf`, {
+        method: 'PATCH',
+        body: JSON.stringify(payload),
+      });
+      setEntry(updated);
+      setNote(updated.note || updated.intent_note || '');
+      setMessage(success);
       window.setTimeout(() => setMessage((current) => current === success ? '' : current), 1400);
       return true;
-    } catch (error) { setMessage(error instanceof Error ? error.message : 'Could not update this page.'); setMessageError(true); return false; }
-    finally { setUpdating(false); }
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Could not update this page.');
+      setMessageError(true);
+      return false;
+    } finally {
+      setUpdating(false);
+    }
   }
 
-  const actionStyle = { borderRadius: '0', borderColor: 'iris.200', bg: 'white', color: 'iris.700', _hover: { bg: 'iris.100' } };
-  return <Box minH="270px" p="20px 22px 16px">
-    <Flex justify="space-between" align="center">
-      <Box className="iris-brand">iris</Box>
-      <Flex gap="1">
-        <Button h="30px" px="2" variant="ghost" color="iris.500" fontSize="11px" borderRadius="0" onClick={() => openIris()}>Open Iris <ExternalLink size={13}/></Button>
-        <IconButton aria-label="Extension settings" title="Extension settings" variant="ghost" size="xs" borderRadius="0" color="iris.500" onClick={() => chrome.runtime.openOptionsPage()}><Settings size={15}/></IconButton>
-      </Flex>
-    </Flex>
+  return (
+    <main className="min-h-[280px] bg-background px-5 pb-4 pt-5 text-foreground">
+      <header className="flex items-center justify-between">
+        <IrisBrand />
+        <div className="flex items-center gap-1">
+          <Button className="h-8 px-2 text-[11px]" variant="ghost" onClick={() => void openIris()}>
+            Open Iris <ExternalLink size={13} />
+          </Button>
+          <Button aria-label="Extension settings" title="Extension settings" size="icon" variant="ghost" onClick={() => chrome.runtime.openOptionsPage()}>
+            <Settings size={15} />
+          </Button>
+        </div>
+      </header>
 
-    {(phase === 'checking' || phase === 'saving') && <Flex minH="185px" direction="column" justify="center" align="center" gap="3">
-      <Spinner size="sm" borderWidth="1.5px" color="iris.900"/><Text color="iris.500" fontSize="12px">{phase === 'saving' ? 'Saving this page…' : 'Checking your session…'}</Text>
-    </Flex>}
+      {(phase === 'checking' || phase === 'saving') && (
+        <section className="grid min-h-48 place-items-center">
+          <div className="flex flex-col items-center gap-3 text-xs text-muted-foreground">
+            <span className="size-4 animate-spin rounded-full border-2 border-muted border-t-primary" />
+            {phase === 'saving' ? 'Saving this page…' : 'Checking your session…'}
+          </div>
+        </section>
+      )}
 
-    {phase === 'signed-out' && <Box pt="10" pb="5">
-      <Heading fontSize="24px" fontWeight="620" letterSpacing="-.035em">Save the good web.</Heading>
-      <Text mt="2" mb="6" color="iris.500" fontSize="13px" lineHeight="1.55">Sign in once to sync saved pages, highlights, and notes with Iris.</Text>
-      <Button bg="iris.900" color="white" borderRadius="0" size="sm" onClick={() => openIris(true)}>Sign in to Iris →</Button>
-    </Box>}
+      {phase === 'signed-out' && (
+        <section className="pb-5 pt-10">
+          <h1 className="text-2xl font-semibold tracking-[-0.035em]">Save the good web.</h1>
+          <p className="mb-6 mt-2 max-w-sm text-[13px] leading-5 text-muted-foreground">
+            Sign in once to sync saved pages, highlights, and notes with Iris.
+          </p>
+          <Button variant="solid" onClick={() => void openIris(true)}>Sign in to Iris <span aria-hidden="true">→</span></Button>
+        </section>
+      )}
 
-    {phase === 'error' && <Box pt="10" pb="4">
-      <Heading fontSize="20px" fontWeight="620">Couldn’t save this page</Heading>
-      <Text mt="2" color="#a12d24" fontSize="12px" lineHeight="1.5">{message}</Text>
-      <Flex mt="5" gap="2"><Button size="sm" borderRadius="0" bg="iris.900" color="white" onClick={capture}><RotateCw size={14}/>Try again</Button><Button size="sm" variant="outline" borderRadius="0" onClick={() => openIris()}>Open Iris</Button></Flex>
-    </Box>}
+      {phase === 'error' && (
+        <section className="pb-4 pt-10">
+          <h1 className="text-xl font-semibold tracking-tight">Couldn’t save this page</h1>
+          <p className="mt-2 text-xs leading-5 text-destructive">{message}</p>
+          <div className="mt-5 flex gap-2">
+            <Button variant="solid" onClick={() => void capture()}><RotateCw size={14} /> Try again</Button>
+            <Button onClick={() => void openIris()}>Open Iris</Button>
+          </div>
+        </section>
+      )}
 
-    {phase === 'saved' && entry && <Box>
-      <Flex mt="6" align="center" gap="2"><Box w="7px" h="7px" bg="#2e6b3f"/><Text color="#2e6b3f" fontSize="11px" fontWeight="650">Saved</Text><Text color="iris.300">·</Text><Text color="iris.500" fontSize="11px">{domain}</Text></Flex>
-      <Heading mt="2" mb="5" fontSize="20px" lineHeight="1.25" fontWeight="590" letterSpacing="-.025em" maxH="50px" overflow="hidden">{entry.document.title || entry.document.url}</Heading>
-      <Flex gap="2" pb="5" borderBottom="1px solid" borderColor="iris.200">
-        <Button size="xs" variant="outline" {...actionStyle} bg={entry.favorited ? 'iris.100' : 'white'} color={entry.favorited ? 'iris.900' : 'iris.700'} disabled={updating} onClick={() => update({ favorited: !entry.favorited }, entry.favorited ? 'Removed from favorites' : 'Added to favorites')}><Heart size={14} fill={entry.favorited ? 'currentColor' : 'none'}/>{entry.favorited ? 'Favorited' : 'Favorite'}</Button>
-        <Button size="xs" variant="outline" {...actionStyle} bg={entry.status === 'read' ? 'iris.100' : 'white'} disabled={updating} onClick={() => update({ status: entry.status === 'saved' ? 'read' : 'saved' }, entry.status === 'saved' ? 'Marked read' : 'Moved to Read next')}>{entry.status === 'saved' ? <Clock3 size={14}/> : <Check size={14}/>} {entry.status === 'saved' ? 'Read next' : 'Read'}</Button>
-        <Button size="xs" variant="outline" {...actionStyle} disabled={updating} onClick={() => setNoteOpen((value) => !value)}><MessageSquarePlus size={14}/>{note ? 'Edit note' : 'Add note'}</Button>
-      </Flex>
+      {phase === 'saved' && entry && (
+        <section>
+          <div className="mt-6 flex items-center gap-2 text-[11px]">
+            <span className="size-2 rounded-full bg-emerald-700" />
+            <span className="font-semibold text-emerald-700">Saved</span>
+            <span className="text-border">·</span>
+            <span className="text-muted-foreground">{domain}</span>
+          </div>
+          <h1 className="mb-5 mt-2 line-clamp-2 text-xl font-semibold leading-6 tracking-[-0.025em]">
+            {entry.document.title || entry.document.url}
+          </h1>
 
-      {noteOpen && <Box py="4" borderBottom="1px solid" borderColor="iris.200">
-        <Flex mb="2" justify="space-between"><Text color="iris.700" fontSize="11px" fontWeight="650">Note</Text><IconButton aria-label="Close note" variant="ghost" size="2xs" onClick={() => setNoteOpen(false)}><X size={13}/></IconButton></Flex>
-        <Textarea value={note} onChange={(event) => setNote(event.target.value)} borderRadius="0" fontSize="13px" minH="84px" placeholder="Why is this worth keeping?"/>
-        <Button mt="2" size="xs" borderRadius="0" bg="iris.900" color="white" disabled={updating} onClick={async () => { if (await update({ note: note.trim() || null }, 'Note saved')) setNoteOpen(false); }}>Save note</Button>
-      </Box>}
+          <div className="flex gap-2 border-b pb-5">
+            <Button className={entry.favorited ? 'bg-accent text-accent-foreground' : ''} disabled={updating} size="sm" onClick={() => void update({ favorited: !entry.favorited }, entry.favorited ? 'Removed from favorites' : 'Added to favorites')}>
+              <Heart size={14} fill={entry.favorited ? 'currentColor' : 'none'} /> {entry.favorited ? 'Favorited' : 'Favorite'}
+            </Button>
+            <Button className={entry.status === 'read' ? 'bg-accent text-accent-foreground' : ''} disabled={updating} size="sm" onClick={() => void update({ status: entry.status === 'saved' ? 'read' : 'saved' }, entry.status === 'saved' ? 'Marked read' : 'Moved to Read next')}>
+              {entry.status === 'saved' ? <Clock3 size={14} /> : <Check size={14} />} {entry.status === 'saved' ? 'Read next' : 'Read'}
+            </Button>
+            <Button disabled={updating} size="sm" onClick={() => setNoteOpen((value) => !value)}>
+              <MessageSquarePlus size={14} /> {note ? 'Edit note' : 'Add note'}
+            </Button>
+          </div>
 
-      <Box pt="4">
-        <Text mb="2" color="iris.700" fontSize="11px" fontWeight="650">Topics</Text>
-        <Flex wrap="wrap" gap="2">{entry.tags.map((tag) => <Button key={tag} size="xs" borderRadius="0" bg="iris.100" color="iris.700" disabled={updating} onClick={() => update({ tags: entry.tags.filter((item) => item !== tag) }, `Removed ${tag}`)}>{tag}<X size={11}/></Button>)}</Flex>
-        <form onSubmit={(event) => { event.preventDefault(); const value = topic.trim(); if (value && !entry.tags.includes(value)) { setTopic(''); update({ tags: [...entry.tags, value] }, `Added ${value}`); } }}>
-          <Flex mt="2" align="center" borderBottom="1px solid" borderColor="iris.300"><Plus size={14} color="#767676"/><Input value={topic} onChange={(event) => setTopic(event.target.value)} px="2" border="0" outline="none" fontSize="13px" placeholder="Add a topic and press Enter"/></Flex>
-        </form>
-      </Box>
-      <Flex mt="4" pt="3" borderTop="1px solid" borderColor="iris.100" justify="space-between" align="center"><Text color="iris.500" fontSize="11px">Select text on the page to highlight it.</Text><Text color={messageError ? '#a12d24' : '#2e6b3f'} fontSize="11px">{message}</Text></Flex>
-    </Box>}
-  </Box>;
+          {noteOpen && (
+            <div className="border-b py-4">
+              <div className="mb-2 flex items-center justify-between">
+                <span className="text-[11px] font-semibold">Note</span>
+                <Button aria-label="Close note" size="icon" variant="ghost" onClick={() => setNoteOpen(false)}><X size={13} /></Button>
+              </div>
+              <textarea className="min-h-24 w-full resize-y rounded-md border bg-background p-2 text-[13px] outline-none focus:ring-2 focus:ring-ring/50" value={note} onChange={(event) => setNote(event.target.value)} placeholder="Why is this worth keeping?" />
+              <Button className="mt-2" disabled={updating} size="sm" variant="solid" onClick={async () => { if (await update({ note: note.trim() || null }, 'Note saved')) setNoteOpen(false); }}>Save note</Button>
+            </div>
+          )}
+
+          <div className="pt-4">
+            <p className="mb-2 text-[11px] font-semibold">Topics</p>
+            <div className="flex flex-wrap gap-2">
+              {entry.tags.map((tag) => (
+                <Button className="bg-accent text-accent-foreground" key={tag} disabled={updating} size="sm" onClick={() => void update({ tags: entry.tags.filter((item) => item !== tag) }, `Removed ${tag}`)}>
+                  {tag} <X size={11} />
+                </Button>
+              ))}
+            </div>
+            <form onSubmit={(event) => { event.preventDefault(); const value = topic.trim(); if (value && !entry.tags.includes(value)) { setTopic(''); void update({ tags: [...entry.tags, value] }, `Added ${value}`); } }}>
+              <div className="mt-2 flex items-center border-b focus-within:border-ring">
+                <Plus size={14} className="text-muted-foreground" />
+                <input className="h-9 min-w-0 flex-1 border-0 bg-transparent px-2 text-[13px] outline-none" value={topic} onChange={(event) => setTopic(event.target.value)} placeholder="Add a topic and press Enter" />
+              </div>
+            </form>
+          </div>
+
+          <footer className="mt-4 flex items-center justify-between border-t pt-3 text-[11px]">
+            <span className="text-muted-foreground">Select text on the page to highlight it.</span>
+            <span className={messageError ? 'text-destructive' : 'text-emerald-700'}>{message}</span>
+          </footer>
+        </section>
+      )}
+    </main>
+  );
 }
 
-createRoot(document.getElementById('root')!).render(<StrictMode><IrisProvider><App/></IrisProvider></StrictMode>);
+createRoot(document.getElementById('root')!).render(<StrictMode><App /></StrictMode>);

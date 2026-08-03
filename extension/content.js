@@ -8,7 +8,7 @@
 
   const request = async (path, options = {}) => {
     const response = await chrome.runtime.sendMessage({ type: 'iris-request', path, options });
-    if (!response?.ok) throw new Error(response?.status === 401 ? 'Sign in to Iris again' : response?.payload?.detail || response?.error || `Iris returned HTTP ${response?.status}`);
+    if (!response?.ok) throw new Error(response?.status === 401 ? 'Sign in to Iris from the extension once' : response?.payload?.detail || response?.error || (response?.status ? `Iris returned HTTP ${response.status}` : 'Iris could not reach the server'));
     return response.payload;
   };
 
@@ -53,33 +53,56 @@
   };
 
   const renderHighlight = (highlight) => {
-    if (document.querySelector(`[data-iris-highlight-id="${highlight.id}"]`)) return true;
+    const existing = document.querySelector(`[data-iris-highlight-id="${highlight.uuid}"]`);
+    if (existing) return existing;
     const range = locate(highlight); if (!range || range.collapsed) return false;
-    const mark = document.createElement('mark'); mark.className = 'iris-highlight'; mark.dataset.irisHighlightId = highlight.id; mark.dataset.irisComment = String(Boolean(highlight.comment));
+    const mark = document.createElement('mark'); mark.className = 'iris-highlight'; mark.dataset.irisHighlightId = highlight.uuid; mark.dataset.irisComment = String(Boolean(highlight.comment));
     try { range.surroundContents(mark); }
     catch {
       try { const contents = range.extractContents(); mark.append(contents); range.insertNode(mark); }
       catch { return false; }
     }
     mark.addEventListener('click', (event) => { event.stopPropagation(); openComment(highlight, mark.getBoundingClientRect()); });
-    return true;
+    return mark;
   };
 
   const toast = (message) => { const el = document.createElement('div'); el.className = 'iris-toast'; el.textContent = message; document.body.append(el); setTimeout(() => el.remove(), 2200); };
   const closeToolbar = () => { toolbar?.remove(); toolbar = null; pendingHighlight = null; };
   const closeFloating = () => { closeToolbar(); document.querySelector('.iris-comment-popover')?.remove(); };
+  const placeFloating = (element, rect, preference = 'above') => {
+    const margin = 8, gap = 8, bounds = element.getBoundingClientRect();
+    const left = Math.min(innerWidth - bounds.width - margin, Math.max(margin, rect.left + (rect.width / 2) - (bounds.width / 2)));
+    let top = preference === 'below' ? rect.bottom + gap : rect.top - bounds.height - gap;
+    if (top < margin) top = rect.bottom + gap;
+    if (top + bounds.height > innerHeight - margin) top = Math.max(margin, rect.top - bounds.height - gap);
+    element.style.left = `${left}px`; element.style.top = `${top}px`;
+  };
   const openComment = (highlight, rect) => {
     closeFloating(); const pop = document.createElement('div'); pop.className = 'iris-comment-popover';
-    pop.innerHTML = `<strong></strong><textarea placeholder="Add a note to this highlight…"></textarea><div class="iris-comment-actions"><button class="iris-delete">Delete highlight</button><button class="iris-save">Save note</button></div>`;
+    pop.setAttribute('role', 'dialog'); pop.setAttribute('aria-label', 'Iris highlight note');
+    pop.innerHTML = `<strong></strong><textarea aria-label="Highlight note" placeholder="Add a note…"></textarea><div class="iris-comment-actions"><button class="iris-delete">Delete</button><button class="iris-save">Save note</button></div>`;
     pop.querySelector('strong').textContent = highlight.quote; pop.querySelector('textarea').value = highlight.comment || '';
-    pop.style.left = `${Math.min(innerWidth - 296, Math.max(8, rect.left))}px`; pop.style.top = `${Math.min(innerHeight - 180, rect.bottom + 8)}px`; document.body.append(pop);
-    pop.querySelector('.iris-save').onclick = async () => { highlight = await request(`/api/highlights/${highlight.id}`, { method: 'PATCH', body: JSON.stringify({ comment: pop.querySelector('textarea').value.trim() || null }) }); document.querySelector(`[data-iris-highlight-id="${highlight.id}"]`)?.setAttribute('data-iris-comment', String(Boolean(highlight.comment))); pop.remove(); toast('Highlight note saved'); };
-    pop.querySelector('.iris-delete').onclick = async () => { await request(`/api/highlights/${highlight.id}`, { method: 'DELETE' }); document.querySelector(`[data-iris-highlight-id="${highlight.id}"]`)?.replaceWith(...document.querySelector(`[data-iris-highlight-id="${highlight.id}"]`).childNodes); pop.remove(); toast('Highlight deleted'); };
+    document.body.append(pop); placeFloating(pop, rect, 'below'); pop.querySelector('textarea').focus();
+    pop.querySelector('.iris-save').onclick = async () => {
+      try {
+        highlight = await request(`/api/highlights/${highlight.uuid}`, { method: 'PATCH', body: JSON.stringify({ comment: pop.querySelector('textarea').value.trim() || null }) });
+        document.querySelector(`[data-iris-highlight-id="${highlight.uuid}"]`)?.setAttribute('data-iris-comment', String(Boolean(highlight.comment)));
+        pop.remove(); toast('Highlight note saved');
+      } catch (error) { toast(error.message || 'Could not save highlight note'); }
+    };
+    pop.querySelector('.iris-delete').onclick = async () => {
+      try {
+        await request(`/api/highlights/${highlight.uuid}`, { method: 'DELETE' });
+        const rendered = document.querySelector(`[data-iris-highlight-id="${highlight.uuid}"]`);
+        if (rendered) rendered.replaceWith(...rendered.childNodes);
+        pop.remove(); toast('Highlight deleted');
+      } catch (error) { toast(error.message || 'Could not delete highlight'); }
+    };
   };
 
   const captureSelection = () => {
     const selection = getSelection(); if (!selection || selection.rangeCount !== 1 || selection.isCollapsed) return null;
-    const range = selection.getRangeAt(0).cloneRange(); const rawQuote = selection.toString(); const quote = rawQuote.trim(); if (!quote || !pageState?.entry) return null;
+    const range = selection.getRangeAt(0).cloneRange(); const rawQuote = selection.toString(); const quote = rawQuote.trim(); if (!quote) return null;
     const nodes = textNodes(), offsets = offsetsForRange(range, nodes), text = pageText(nodes);
     if (offsets.start == null || offsets.end == null) return null;
     const leading = rawQuote.length - rawQuote.trimStart().length, trailing = rawQuote.length - rawQuote.trimEnd().length;
@@ -90,28 +113,54 @@
     };
   };
 
-  const createHighlight = async () => {
+  const rememberPage = async (page) => {
+    if (!page?.entry) return;
+    const stored = await chrome.storage.local.get({ savedUrls: [] });
+    const existingUrls = Array.isArray(stored.savedUrls) ? stored.savedUrls : [];
+    const savedUrls = [...new Set([...existingUrls, location.href, page.entry.document.url])].slice(-2000);
+    await chrome.storage.local.set({ savedUrls });
+  };
+
+  const ensurePage = async () => {
+    if (pageState?.entry) return pageState;
+    const page = await request('/api/browser/pages/capture', {
+      method: 'POST',
+      body: JSON.stringify({ url: location.href, title: document.title || null, crawl_now: false }),
+    });
+    if (!page?.entry) throw new Error('Iris could not save this page');
+    activate(page); rememberPage(page).catch(() => {}); return page;
+  };
+
+  const createHighlight = async (withNote = false) => {
     const captured = pendingHighlight;
-    if (!captured || !pageState?.entry) return;
-    closeToolbar();
+    if (!captured || toolbar?.dataset.busy === 'true') return;
+    toolbar.dataset.busy = 'true';
+    const buttons = [...toolbar.querySelectorAll('button')];
+    buttons.forEach((button) => { button.disabled = true; });
+    const highlightButton = toolbar.querySelector('[data-action="highlight"]');
+    if (highlightButton) highlightButton.textContent = 'Saving…';
     try {
-      const created = await request(`/api/documents/${pageState.entry.document.id}/highlights`, { method: 'POST', body: JSON.stringify(captured.payload) });
-      getSelection()?.removeAllRanges(); renderHighlight(created); toast('Highlight saved to Iris');
-    } catch (error) { toast(error.message || 'Could not save highlight'); }
+      const page = await ensurePage();
+      const created = await request(`/api/documents/${page.entry.document.uuid}/highlights`, { method: 'POST', body: JSON.stringify(captured.payload) });
+      getSelection()?.removeAllRanges();
+      const rendered = renderHighlight(created); closeToolbar();
+      if (withNote && rendered) openComment(created, rendered.getBoundingClientRect());
+      else toast('Highlighted in Iris');
+    } catch (error) { closeToolbar(); toast(error.message || 'Could not save highlight'); }
   };
 
   document.addEventListener('mouseup', (event) => {
     if (event.target instanceof Element && event.target.closest('.iris-selection-toolbar,.iris-comment-popover')) return;
     setTimeout(() => {
-      if (!pageState?.saved) return;
       const captured = captureSelection();
       if (!captured) { closeToolbar(); return; }
       closeFloating(); pendingHighlight = captured;
-      toolbar = document.createElement('div'); toolbar.className = 'iris-selection-toolbar'; toolbar.setAttribute('role', 'toolbar'); toolbar.setAttribute('aria-label', 'Save selection to Iris'); toolbar.innerHTML = '<span class="iris-toolbar-brand">iris</span><button>Highlight</button>';
-      toolbar.style.left = `${Math.min(innerWidth - 176, Math.max(8, captured.rect.left + (captured.rect.width / 2) - 88))}px`; toolbar.style.top = `${Math.max(8, captured.rect.top - 44)}px`; document.body.append(toolbar);
-      const button = toolbar.querySelector('button');
-      button.addEventListener('pointerdown', (buttonEvent) => buttonEvent.preventDefault());
-      button.addEventListener('click', createHighlight);
+      toolbar = document.createElement('div'); toolbar.className = 'iris-selection-toolbar'; toolbar.setAttribute('role', 'toolbar'); toolbar.setAttribute('aria-label', 'Save selection to Iris');
+      toolbar.innerHTML = `<span class="iris-toolbar-brand"><img src="${chrome.runtime.getURL('icons/iris-mark.svg')}" alt="" aria-hidden="true"><span>iris</span></span><button data-action="highlight">Highlight</button><button class="iris-note-action" data-action="note" aria-label="Highlight with note" title="Highlight with note"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z"></path><path d="M12 8v6M9 11h6"></path></svg></button>`;
+      document.body.append(toolbar); placeFloating(toolbar, captured.rect);
+      toolbar.querySelectorAll('button').forEach((button) => button.addEventListener('pointerdown', (buttonEvent) => buttonEvent.preventDefault()));
+      toolbar.querySelector('[data-action="highlight"]').addEventListener('click', () => createHighlight(false));
+      toolbar.querySelector('[data-action="note"]').addEventListener('click', () => createHighlight(true));
     }, 0);
   });
 
