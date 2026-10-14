@@ -42,6 +42,7 @@ iris/
 - Document and highlight UUIDs are public. Do not reintroduce integer-ID fallbacks at public document, graph, bookshelf, or highlight endpoints.
 - Search conversations persist the user prompts, search steps, inspected documents, responses, and results. Admin inspection uses separate `/api/admin/...` endpoints; never weaken normal user scoping to support admin views.
 - Agent retrieval must rank/limit in the DAO before loading document bodies and vectors; never preload the searchable corpus into an agent closure. SQLite semantic fallback streams ID/vector rows with bounded top-k retention. Source metadata must query recent documents with a SQL limit rather than loading `source.documents`.
+- Normalize bare Postgres URLs to `postgresql+psycopg2://`: requirements install psycopg2, while SQLAlchemy 2.1 defaults bare PostgreSQL URLs to psycopg 3. Otherwise a fresh Railway build can fail in Alembic before the server starts.
 
 ### Main frontend
 

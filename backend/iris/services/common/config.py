@@ -16,8 +16,10 @@ load_dotenv(BACKEND_DIR / ".env")
 
 def database_url() -> str:
     value = os.getenv("DATABASE_URL") or os.getenv("DEV_DATABASE_URL") or f"sqlite:///{BACKEND_DIR / 'iris.db'}"
-    if value.startswith("postgres://"):
-        return value.replace("postgres://", "postgresql://", 1)
+    # Use the installed driver explicitly; SQLAlchemy 2.1 defaults to psycopg 3.
+    for scheme in ("postgres://", "postgresql://"):
+        if value.startswith(scheme):
+            return value.replace(scheme, "postgresql+psycopg2://", 1)
     return value
 
 
