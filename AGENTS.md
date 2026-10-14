@@ -41,6 +41,7 @@ iris/
 - `DATABASE_URL` wins over `DEV_DATABASE_URL`; the fallback is the repository-local SQLite database. Production uses Railway Postgres with pgvector.
 - Document and highlight UUIDs are public. Do not reintroduce integer-ID fallbacks at public document, graph, bookshelf, or highlight endpoints.
 - Search conversations persist the user prompts, search steps, inspected documents, responses, and results. Admin inspection uses separate `/api/admin/...` endpoints; never weaken normal user scoping to support admin views.
+- Agent retrieval must rank/limit in the DAO before loading document bodies and vectors; never preload the searchable corpus into an agent closure. SQLite semantic fallback streams ID/vector rows with bounded top-k retention. Source metadata must query recent documents with a SQL limit rather than loading `source.documents`.
 
 ### Main frontend
 

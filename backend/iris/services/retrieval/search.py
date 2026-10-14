@@ -266,8 +266,6 @@ async def stream_openai_agentic_chat(
     if key:
         os.environ.setdefault("OPENAI_API_KEY", key)
 
-    documents = search_dao.get_searchable_documents()
-    documents_by_id = {document.id: document for document in documents}
     tool_runs: list[AgentToolRun] = []
     steps: list[AgentStep] = []
 
@@ -287,14 +285,14 @@ async def stream_openai_agentic_chat(
     @function_tool
     def keyword_search(query: str, max_results: int = 12) -> str:
         """Search Iris documents by lexical overlap using a standalone resolved query that preserves the user's specific subject and constraints."""
-        rows = _keyword_search(_terms(query), documents, limit=max(1, min(max_results, 30)))
+        rows = search_dao.keyword_search_documents(_terms(query), limit=max_results)
         tool_runs.append(AgentToolRun(tool=AgentToolName.KEYWORD, query=query, rows=rows))
         return serialize_rows(rows)
 
     @function_tool
     def semantic_search(query: str, max_results: int = 12) -> str:
         """Search Iris documents by semantic similarity using a standalone resolved query that preserves the user's specific subject and constraints."""
-        rows = _semantic_search(query, documents, limit=max(1, min(max_results, 30)))
+        rows = search_dao.semantic_search_documents(embed_text(query), limit=max_results)
         tool_runs.append(AgentToolRun(tool=AgentToolName.SEMANTIC, query=query, rows=rows))
         return serialize_rows(rows)
 
@@ -302,7 +300,7 @@ async def stream_openai_agentic_chat(
     def tag_search(terms: str, max_results: int = 12) -> str:
         """Search Iris documents by comma-separated topic or tag terms."""
         normalized = {term.strip().lower() for term in terms.split(",") if term.strip()}
-        rows = _tag_search(normalized, documents, limit=max(1, min(max_results, 30)))
+        rows = search_dao.tag_search_documents(normalized, limit=max_results)
         tool_runs.append(AgentToolRun(tool=AgentToolName.TAGS, query=terms, rows=rows))
         return serialize_rows(rows)
 
@@ -310,14 +308,14 @@ async def stream_openai_agentic_chat(
     def category_search(categories: str, max_results: int = 12) -> str:
         """Search Iris documents by comma-separated high-level categories like startups, software, culture, or personal."""
         normalized = {term.strip().lower() for term in categories.split(",") if term.strip()}
-        rows = _category_search(normalized, documents, limit=max(1, min(max_results, 30)))
+        rows = search_dao.category_search_documents(normalized, limit=max_results)
         tool_runs.append(AgentToolRun(tool=AgentToolName.CATEGORIES, query=categories, rows=rows))
         return serialize_rows(rows)
 
     @function_tool
     def get_document_metadata(document_id: int) -> str:
         """Fetch metadata and a short excerpt for one Iris document by document_id."""
-        document = documents_by_id.get(document_id)
+        document = search_dao.get_searchable_document(document_id)
         if document is None:
             tool_runs.append(AgentToolRun(tool=AgentToolName.DOCUMENT_METADATA, query=str(document_id), rows=[]))
             return json.dumps({"error": "document not found", "document_id": document_id})
@@ -424,8 +422,6 @@ def _openai_agentic_chat(
     if key:
         os.environ.setdefault("OPENAI_API_KEY", key)
 
-    documents = search_dao.get_searchable_documents()
-    documents_by_id = {document.id: document for document in documents}
     tool_runs: list[AgentToolRun] = []
 
     def serialize_rows(rows: list[RankedDocument]) -> str:
@@ -444,14 +440,14 @@ def _openai_agentic_chat(
     @function_tool
     def keyword_search(query: str, max_results: int = 12) -> str:
         """Search Iris documents by lexical overlap using a standalone resolved query that preserves the user's specific subject and constraints."""
-        rows = _keyword_search(_terms(query), documents, limit=max(1, min(max_results, 30)))
+        rows = search_dao.keyword_search_documents(_terms(query), limit=max_results)
         tool_runs.append(AgentToolRun(tool=AgentToolName.KEYWORD, query=query, rows=rows))
         return serialize_rows(rows)
 
     @function_tool
     def semantic_search(query: str, max_results: int = 12) -> str:
         """Search Iris documents by semantic similarity using a standalone resolved query that preserves the user's specific subject and constraints."""
-        rows = _semantic_search(query, documents, limit=max(1, min(max_results, 30)))
+        rows = search_dao.semantic_search_documents(embed_text(query), limit=max_results)
         tool_runs.append(AgentToolRun(tool=AgentToolName.SEMANTIC, query=query, rows=rows))
         return serialize_rows(rows)
 
@@ -459,7 +455,7 @@ def _openai_agentic_chat(
     def tag_search(terms: str, max_results: int = 12) -> str:
         """Search Iris documents by comma-separated topic or tag terms."""
         normalized = {term.strip().lower() for term in terms.split(",") if term.strip()}
-        rows = _tag_search(normalized, documents, limit=max(1, min(max_results, 30)))
+        rows = search_dao.tag_search_documents(normalized, limit=max_results)
         tool_runs.append(AgentToolRun(tool=AgentToolName.TAGS, query=terms, rows=rows))
         return serialize_rows(rows)
 
@@ -467,14 +463,14 @@ def _openai_agentic_chat(
     def category_search(categories: str, max_results: int = 12) -> str:
         """Search Iris documents by comma-separated high-level categories like startups, software, culture, or personal."""
         normalized = {term.strip().lower() for term in categories.split(",") if term.strip()}
-        rows = _category_search(normalized, documents, limit=max(1, min(max_results, 30)))
+        rows = search_dao.category_search_documents(normalized, limit=max_results)
         tool_runs.append(AgentToolRun(tool=AgentToolName.CATEGORIES, query=categories, rows=rows))
         return serialize_rows(rows)
 
     @function_tool
     def get_document_metadata(document_id: int) -> str:
         """Fetch metadata and a short excerpt for one Iris document by document_id."""
-        document = documents_by_id.get(document_id)
+        document = search_dao.get_searchable_document(document_id)
         if document is None:
             tool_runs.append(AgentToolRun(tool=AgentToolName.DOCUMENT_METADATA, query=str(document_id), rows=[]))
             return json.dumps({"error": "document not found", "document_id": document_id})
@@ -587,7 +583,7 @@ def _serialize_document_metadata(document: Document) -> str:
 
 def _serialize_source_metadata(source: Source) -> str:
     profile = source.profile_analysis
-    recent_documents = sorted(source.documents, key=lambda document: document.published_at or document.first_seen_at, reverse=True)[:10]
+    recent_documents = search_dao.recent_source_documents(source.id)
     return json.dumps(
         {
             "source_id": source.id,
